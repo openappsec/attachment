@@ -1,0 +1,67 @@
+ngx_addon_name="ngx_ckp_module"
+
+CHK_CORE_MODULES="		\
+	"
+
+CHK_HTTP_MODULES="		\
+	ngx_ckp_module		\
+	"
+
+CHK_DEPS="													\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_compression.h					\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_initializer.h					\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_custom_response.h					\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_io.h							\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_failing_state.h					\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_metric.h						\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_hook_threads.h					\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_static_content.h					\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_hooks.h						\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_thread.h						\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_http_parser.h					\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_utils.h						\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_http_usercheck.h					\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_http_cp_attachment_module.h				\
+	$ngx_addon_dir/core/include/attachments/nginx_attachment_common.h					\
+	$ngx_addon_dir/core/include/attachments/nginx_attachment_util.h						\
+	$ngx_addon_dir/core/include/attachments/shmem_ipc.h							\
+	$ngx_addon_dir/core/include/attachments/compression_utils.h						\
+	$ngx_addon_dir/core/include/attachments/attachment_types.h						\
+	$ngx_addon_dir/core/include/attachments/c_common/ip_common.h						\
+	"
+
+CHK_CORE_SRCS="			\
+	"
+
+CHK_HTTP_SRCS="													\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_compression.c					\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_io.c							\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_custom_response.c					\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_metric.c						\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_failing_state.c					\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_static_content.c					\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_hook_threads.c					\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_thread.c						\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_hooks.c						\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_utils.c						\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_http_parser.c					\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_http_cp_attachment_module.c				\
+	$ngx_addon_dir/attachments/nginx/ngx_module/ngx_cp_initializer.c					\
+	"
+
+if [ $ngx_module_link = DYNAMIC ] ; then
+    ngx_module_name="$CHK_CORE_MODULES $CHK_HTTP_MODULES"
+    ngx_module_srcs="$CHK_CORE_SRCS $CHK_HTTP_SRCS"
+    . auto/module
+elif [ $ngx_module_link = ADDON ] ; then
+    ngx_module_type=CORE
+    ngx_module_name=$CHK_CORE_MODULES
+    ngx_module_srcs=$CHK_CORE_SRCS
+    . auto/module
+    ngx_module_type=HTTP
+    ngx_module_name=$CHK_HTTP_MODULES
+    ngx_module_srcs=$CHK_HTTP_SRCS
+    . auto/module
+fi
+
+USE_OPENSSL=YES
