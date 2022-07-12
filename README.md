@@ -9,12 +9,11 @@ open-appsec is a machine learning security engine that preemptively and automati
 
 <strong>open-appsec Attachments</strong> connect between processes that provide HTTP data and the <strong>open-appsec Agent</strong> security logic.
 
-An attachment gets HTTP data (URL, Header, Body, Response) from a hosting process and delivers it to an open-appsec process known as HTTP Transaction handler. The attachment does not keep any state and has no security logic.
+An attachment gets HTTP data (URL, Header, Body, Response) from a hosting process and delivers it to an open-appsec process known as HTTP Transaction handler.
 
-To deal with potential issues where the HTTP Transaction handler process is not responding, the Attachment implements a retry mechanism and
-configurable fail-open/fail-close mechanism.
+To deal with potential issues where the HTTP Transaction handler process is not responding, the Attachment implements a retry mechanism and configurable fail-open/fail-close mechanism.
 
-This repository will host Attachment for different platforms. The first one is the open-appsec attachment for NGINX, implemented as  a standard NGINX dynamically loadable module (plugin).
+This repository will host Attachment for different platforms. The first one is the open-appsec attachment for NGINX, implemented as a standard NGINX dynamically loadable module (plugin).
 
 
 ## open-appsec NGINX attachment compilation instructions
@@ -40,7 +39,10 @@ NGINX Plugins are built per specific version.
 ```bash
  $ module_path=/<absolute-path>/attachment
 
- $ wget 'http://nginx.org/download/nginx-1.23.0.tar.gz'
+ $ wget 'https://nginx.org/download/nginx-1.23.0.tar.gz'
+ $ sha256sum nginx-1.23.0.tar.gz
+ 820acaa35b9272be9e9e72f6defa4a5f2921824709f8aa4772c78ab31ed94cd1  nginx-1.23.0.tar.gz
+
  $ tar -xzvf nginx-1.23.0.tar.gz
  $ cd nginx-1.23.0/
 
@@ -53,10 +55,6 @@ NGINX Plugins are built per specific version.
 The NGINX plugin uses these libraries: shmem_ipc, compression_utils, and nginx_attachment_util.
 
 They can be found under the `lib` directory in the `<output path>` given to the CMake.
-
-## Join the open-appssec Community!
-
-The open-appssec community (https://openappsec.io/community) is committed to fostering an open and welcoming environment, allowing engagement with other users and developers.
 
 ## License    
 
