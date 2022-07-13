@@ -1,6 +1,6 @@
 <div align=center>
 <img src="https://i2-s3-ui-static-content-prod-10.s3.eu-west-1.amazonaws.com/elpis/tree-no-bg-256.png" width="100" height="100"> 
-<h1>openappsec/attachement</h1>
+<h1>openappsec/attachment</h1>
 </div>
 
 ## About
