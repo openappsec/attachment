@@ -5,7 +5,7 @@
 
 ## About
 
-open-appsec is a machine learning security engine that preemptively and automatically prevent threats against Web Application & APIs.
+open-appsec (https://openappsec.io) is a machine learning security engine that preemptively and automatically prevent threats against Web Application & APIs.
 
 <strong>open-appsec Attachments</strong> connect between processes that provide HTTP data and the <strong>open-appsec Agent</strong> security logic.
 
