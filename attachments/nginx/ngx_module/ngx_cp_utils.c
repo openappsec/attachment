@@ -81,9 +81,11 @@ ngx_http_cp_sessions_per_minute_limit sessions_per_minute_limit_info = {
 ngx_uint_t  current_config_version = 0;
 
 ngx_int_t fail_mode_verdict = NGX_OK; ///< Fail open verdict incase of a timeout.
+ngx_int_t fail_mode_hold_verdict = NGX_OK; ///< Fail open verdict incase of a timeout when waiting for wait verdict.
 ngx_int_t dbg_is_needed = 0; ///< Debug flag.
 ngx_int_t num_of_connection_attempts = 0; ///< Maximum number of attempted connections.
 ngx_uint_t fail_open_timeout = 50; ///< Fail open timeout in milliseconds.
+ngx_uint_t fail_open_hold_timeout = 150; ///< Fail open wait timeout in milliseconds.
 ngx_http_cp_verdict_e sessions_per_minute_limit_verdict = TRAFFIC_VERDICT_ACCEPT;
 ngx_uint_t max_sessions_per_minute = 0; ///< Masimum session per minute.
 ngx_uint_t req_max_proccessing_ms_time = 3000; ///< Total Request processing timeout in milliseconds.
@@ -93,6 +95,7 @@ ngx_uint_t req_header_thread_timeout_msec = 100; ///< Request header processing 
 ngx_uint_t req_body_thread_timeout_msec = 150; ///< Request body processing timeout in milliseconds.
 ngx_uint_t res_header_thread_timeout_msec = 100; ///< Response header processing timeout in milliseconds.
 ngx_uint_t res_body_thread_timeout_msec = 150; ///< Response body processing timeout in milliseconds.
+ngx_uint_t waiting_for_verdict_thread_timeout_msec = 150; ///< Wait thread processing timeout in milliseconds.
 ngx_http_inspection_mode_e inspection_mode = NON_BLOCKING_THREAD; ///< Default inspection mode.
 ngx_uint_t num_of_nginx_ipc_elements = 200; ///< Number of NGINX IPC elements.
 ngx_msec_t keep_alive_interval_msec = DEFAULT_KEEP_ALIVE_INTERVAL_MSEC;
@@ -892,6 +895,10 @@ init_general_config(const char *conf_path)
     fail_mode_verdict = isFailOpenMode() == 1 ? NGX_OK : NGX_ERROR;
     fail_open_timeout = getFailOpenTimeout();
 
+    // Setting fail wait open/close
+    fail_mode_hold_verdict = isFailOpenHoldMode() == 1 ? NGX_OK : NGX_ERROR;
+    fail_open_hold_timeout = getFailOpenHoldTimeout();
+
     // Setting attachment's variables.
     sessions_per_minute_limit_verdict = isFailOpenOnSessionLimit() ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
     max_sessions_per_minute = getMaxSessionsPerMinute();
@@ -903,6 +910,7 @@ init_general_config(const char *conf_path)
     req_body_thread_timeout_msec = getReqBodyThreadTimeout();
     res_header_thread_timeout_msec = getResHeaderThreadTimeout();
     res_body_thread_timeout_msec = getResBodyThreadTimeout();
+    waiting_for_verdict_thread_timeout_msec = getWaitingForVerdictThreadTimeout();
 
     num_of_nginx_ipc_elements = getNumOfNginxIpcElements();
     keep_alive_interval_msec = (ngx_msec_t) getKeepAliveIntervalMsec();
@@ -917,6 +925,8 @@ init_general_config(const char *conf_path)
         "debug level: %d, "
         "failure mode: %s, "
         "fail mode timeout: %u msec, "
+        "failure wait mode: %s, "
+        "fail mode wait timeout: %u msec, "
         "sessions per minute limit verdict: %s, "
         "max sessions per minute: %u, "
         "req max processing time: %u msec, "
@@ -926,6 +936,7 @@ init_general_config(const char *conf_path)
         "req body thread timeout: %u msec, "
         "res header thread timeout: %u msec, "
         "res body thread timeout: %u msec, "
+        "wait thread timeout: %u msec, "
         "static resources path: %s, "
         "num of nginx ipc elements: %u, "
         "keep alive interval msec: %u msec",
@@ -933,6 +944,8 @@ init_general_config(const char *conf_path)
         new_dbg_level,
         (fail_mode_verdict == NGX_OK ? "fail-open" : "fail-close"),
         fail_open_timeout,
+        (fail_mode_hold_verdict == NGX_OK ? "fail-open" : "fail-close"),
+        fail_open_hold_timeout,
         sessions_per_minute_limit_verdict == TRAFFIC_VERDICT_ACCEPT ? "Accpet" : "Drop",
         max_sessions_per_minute,
         req_max_proccessing_ms_time,
@@ -942,6 +955,7 @@ init_general_config(const char *conf_path)
         req_body_thread_timeout_msec,
         res_header_thread_timeout_msec,
         res_body_thread_timeout_msec,
+        waiting_for_verdict_thread_timeout_msec,
         getStaticResourcesPath(),
         num_of_nginx_ipc_elements,
         keep_alive_interval_msec

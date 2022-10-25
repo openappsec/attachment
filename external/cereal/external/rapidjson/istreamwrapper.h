@@ -1,35 +1,33 @@
 // Tencent is pleased to support the open source community by making RapidJSON available.
-//
-// Copyright (C) 2015 THL A29 Limited, a Tencent company, and Milo Yip. All rights reserved.
+// 
+// Copyright (C) 2015 THL A29 Limited, a Tencent company, and Milo Yip.
 //
 // Licensed under the MIT License (the "License"); you may not use this file except
 // in compliance with the License. You may obtain a copy of the License at
 //
 // http://opensource.org/licenses/MIT
 //
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
+// Unless required by applicable law or agreed to in writing, software distributed 
+// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
+// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
 // specific language governing permissions and limitations under the License.
 
-#ifndef CEREAL_RAPIDJSON_ISTREAMWRAPPER_H_
-#define CEREAL_RAPIDJSON_ISTREAMWRAPPER_H_
+#ifndef RAPIDJSON_ISTREAMWRAPPER_H_
+#define RAPIDJSON_ISTREAMWRAPPER_H_
 
 #include "stream.h"
 #include <iosfwd>
+#include <ios>
 
 #ifdef __clang__
-CEREAL_RAPIDJSON_DIAG_PUSH
-CEREAL_RAPIDJSON_DIAG_OFF(padded)
+RAPIDJSON_DIAG_PUSH
+RAPIDJSON_DIAG_OFF(padded)
+#elif defined(_MSC_VER)
+RAPIDJSON_DIAG_PUSH
+RAPIDJSON_DIAG_OFF(4351) // new behavior: elements of array 'array' will be default initialized
 #endif
 
-#ifdef _MSC_VER
-CEREAL_RAPIDJSON_DIAG_PUSH
-CEREAL_RAPIDJSON_DIAG_OFF(4351) // new behavior: elements of array 'array' will be default initialized
-CEREAL_RAPIDJSON_DIAG_OFF(4127) // ignore assert(false) for triggering exception
-#endif
-
-CEREAL_RAPIDJSON_NAMESPACE_BEGIN
+RAPIDJSON_NAMESPACE_BEGIN
 
 //! Wrapper of \c std::basic_istream into RapidJSON's Stream concept.
 /*!
@@ -46,71 +44,85 @@ CEREAL_RAPIDJSON_NAMESPACE_BEGIN
 
     \tparam StreamType Class derived from \c std::basic_istream.
 */
-
+   
 template <typename StreamType>
 class BasicIStreamWrapper {
 public:
     typedef typename StreamType::char_type Ch;
-    BasicIStreamWrapper(StreamType& stream) : stream_(stream), count_(), peekBuffer_() {}
 
-    Ch Peek() const {
-        typename StreamType::int_type c = stream_.peek();
-        return CEREAL_RAPIDJSON_LIKELY(c != StreamType::traits_type::eof()) ? static_cast<Ch>(c) : '\0';
+    //! Constructor.
+    /*!
+        \param stream stream opened for read.
+    */
+    BasicIStreamWrapper(StreamType &stream) : stream_(stream), buffer_(peekBuffer_), bufferSize_(4), bufferLast_(0), current_(buffer_), readCount_(0), count_(0), eof_(false) { 
+        Read();
     }
 
-    Ch Take() {
-        typename StreamType::int_type c = stream_.get();
-        if (CEREAL_RAPIDJSON_LIKELY(c != StreamType::traits_type::eof())) {
-            count_++;
-            return static_cast<Ch>(c);
-        }
-        else
-            return '\0';
+    //! Constructor.
+    /*!
+        \param stream stream opened for read.
+        \param buffer user-supplied buffer.
+        \param bufferSize size of buffer in bytes. Must >=4 bytes.
+    */
+    BasicIStreamWrapper(StreamType &stream, char* buffer, size_t bufferSize) : stream_(stream), buffer_(buffer), bufferSize_(bufferSize), bufferLast_(0), current_(buffer_), readCount_(0), count_(0), eof_(false) { 
+        RAPIDJSON_ASSERT(bufferSize >= 4);
+        Read();
     }
 
-    // tellg() may return -1 when failed. So we count by ourself.
-    size_t Tell() const { return count_; }
+    Ch Peek() const { return *current_; }
+    Ch Take() { Ch c = *current_; Read(); return c; }
+    size_t Tell() const { return count_ + static_cast<size_t>(current_ - buffer_); }
 
-    Ch* PutBegin() { CEREAL_RAPIDJSON_ASSERT(false); return 0; }
-    void Put(Ch) { CEREAL_RAPIDJSON_ASSERT(false); }
-    void Flush() { CEREAL_RAPIDJSON_ASSERT(false); }
-    size_t PutEnd(Ch*) { CEREAL_RAPIDJSON_ASSERT(false); return 0; }
+    // Not implemented
+    void Put(Ch) { RAPIDJSON_ASSERT(false); }
+    void Flush() { RAPIDJSON_ASSERT(false); } 
+    Ch* PutBegin() { RAPIDJSON_ASSERT(false); return 0; }
+    size_t PutEnd(Ch*) { RAPIDJSON_ASSERT(false); return 0; }
 
     // For encoding detection only.
     const Ch* Peek4() const {
-        CEREAL_RAPIDJSON_ASSERT(sizeof(Ch) == 1); // Only usable for byte stream.
-        int i;
-        bool hasError = false;
-        for (i = 0; i < 4; ++i) {
-            typename StreamType::int_type c = stream_.get();
-            if (c == StreamType::traits_type::eof()) {
-                hasError = true;
-                stream_.clear();
-                break;
-            }
-            peekBuffer_[i] = static_cast<Ch>(c);
-        }
-        for (--i; i >= 0; --i)
-            stream_.putback(peekBuffer_[i]);
-        return !hasError ? peekBuffer_ : 0;
+        return (current_ + 4 - !eof_ <= bufferLast_) ? current_ : 0;
     }
 
 private:
+    BasicIStreamWrapper();
     BasicIStreamWrapper(const BasicIStreamWrapper&);
     BasicIStreamWrapper& operator=(const BasicIStreamWrapper&);
 
-    StreamType& stream_;
-    size_t count_;  //!< Number of characters read. Note:
-    mutable Ch peekBuffer_[4];
+    void Read() {
+        if (current_ < bufferLast_)
+            ++current_;
+        else if (!eof_) {
+            count_ += readCount_;
+            readCount_ = bufferSize_;
+            bufferLast_ = buffer_ + readCount_ - 1;
+            current_ = buffer_;
+
+            if (!stream_.read(buffer_, static_cast<std::streamsize>(bufferSize_))) {
+                readCount_ = static_cast<size_t>(stream_.gcount());
+                *(bufferLast_ = buffer_ + readCount_) = '\0';
+                eof_ = true;
+            }
+        }
+    }
+
+    StreamType &stream_;
+    Ch peekBuffer_[4], *buffer_;
+    size_t bufferSize_;
+    Ch *bufferLast_;
+    Ch *current_;
+    size_t readCount_;
+    size_t count_;  //!< Number of characters read
+    bool eof_;
 };
 
 typedef BasicIStreamWrapper<std::istream> IStreamWrapper;
 typedef BasicIStreamWrapper<std::wistream> WIStreamWrapper;
 
 #if defined(__clang__) || defined(_MSC_VER)
-CEREAL_RAPIDJSON_DIAG_POP
+RAPIDJSON_DIAG_POP
 #endif
 
-CEREAL_RAPIDJSON_NAMESPACE_END
+RAPIDJSON_NAMESPACE_END
 
-#endif // CEREAL_RAPIDJSON_ISTREAMWRAPPER_H_
+#endif // RAPIDJSON_ISTREAMWRAPPER_H_

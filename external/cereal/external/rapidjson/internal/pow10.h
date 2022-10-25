@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making RapidJSON available.
 // 
-// Copyright (C) 2015 THL A29 Limited, a Tencent company, and Milo Yip. All rights reserved.
+// Copyright (C) 2015 THL A29 Limited, a Tencent company, and Milo Yip.
 //
 // Licensed under the MIT License (the "License"); you may not use this file except
 // in compliance with the License. You may obtain a copy of the License at
@@ -12,12 +12,12 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the 
 // specific language governing permissions and limitations under the License.
 
-#ifndef CEREAL_RAPIDJSON_POW10_
-#define CEREAL_RAPIDJSON_POW10_
+#ifndef RAPIDJSON_POW10_
+#define RAPIDJSON_POW10_
 
 #include "../rapidjson.h"
 
-CEREAL_RAPIDJSON_NAMESPACE_BEGIN
+RAPIDJSON_NAMESPACE_BEGIN
 namespace internal {
 
 //! Computes integer powers of 10 in double (10.0^n).
@@ -45,11 +45,11 @@ inline double Pow10(int n) {
         1e+281,1e+282,1e+283,1e+284,1e+285,1e+286,1e+287,1e+288,1e+289,1e+290,1e+291,1e+292,1e+293,1e+294,1e+295,1e+296,1e+297,1e+298,1e+299,1e+300,
         1e+301,1e+302,1e+303,1e+304,1e+305,1e+306,1e+307,1e+308
     };
-    CEREAL_RAPIDJSON_ASSERT(n >= 0 && n <= 308);
+    RAPIDJSON_ASSERT(n >= 0 && n <= 308);
     return e[n];
 }
 
 } // namespace internal
-CEREAL_RAPIDJSON_NAMESPACE_END
+RAPIDJSON_NAMESPACE_END
 
-#endif // CEREAL_RAPIDJSON_POW10_
+#endif // RAPIDJSON_POW10_

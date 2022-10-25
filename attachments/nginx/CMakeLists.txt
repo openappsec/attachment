@@ -1,1 +1,2 @@
 add_subdirectory(nginx_attachment_util)
+add_subdirectory(ngx_module)

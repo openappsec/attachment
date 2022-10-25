@@ -47,6 +47,7 @@ extern int comm_socket; ///< Communication socket.
 /// @param[in] cur_session_id Session's Id.
 /// @param[in, out] request NGINX request.
 /// @param[in] modification_list
+/// @param[in] chunk_type Chunk type that the attachment is waiting for a response from nano service.
 /// @returns ngx_int_t
 ///         - #NGX_OK
 ///         - #NGX_HTTP_FORBIDDEN
@@ -58,7 +59,8 @@ ngx_http_cp_reply_receiver(
     ngx_http_cp_verdict_e *verdict,
     uint32_t cur_session_id,
     ngx_http_request_t *request,
-    ngx_http_cp_modification_list **modification_list
+    ngx_http_cp_modification_list **modification_list,
+    ngx_http_chunk_type_e chunk_type
 );
 
 ///
@@ -169,6 +171,17 @@ ngx_http_cp_body_sender(
     ngx_uint_t *num_messages_sent,
     ngx_chain_t **next_elem_to_inspect
 );
+
+///
+/// @brief Sends HOLD_DATA request to the nano service.
+/// @details HOLD_DATA request is a request that asks the nano service to provide with an updated verdict.
+/// @param[in] cur_request_id Request session's Id.
+/// @param[in, out] num_messages_sent Number of messages sent will be saved onto this parameter.
+///         - #NGX_OK
+///         - #NGX_ERROR
+///
+ngx_int_t
+ngx_http_cp_wait_sender(uint32_t cur_request_id, ngx_uint_t *num_messages_sent);
 
 ///
 /// @brief Checks if reconf is needed and reconfigs if necessary.

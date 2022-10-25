@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making RapidJSON available.
 // 
-// Copyright (C) 2015 THL A29 Limited, a Tencent company, and Milo Yip. All rights reserved.
+// Copyright (C) 2015 THL A29 Limited, a Tencent company, and Milo Yip.
 //
 // Licensed under the MIT License (the "License"); you may not use this file except
 // in compliance with the License. You may obtain a copy of the License at
@@ -12,12 +12,12 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the 
 // specific language governing permissions and limitations under the License.
 
-#ifndef CEREAL_RAPIDJSON_IEEE754_
-#define CEREAL_RAPIDJSON_IEEE754_
+#ifndef RAPIDJSON_IEEE754_
+#define RAPIDJSON_IEEE754_
 
 #include "../rapidjson.h"
 
-CEREAL_RAPIDJSON_NAMESPACE_BEGIN
+RAPIDJSON_NAMESPACE_BEGIN
 namespace internal {
 
 class Double {
@@ -30,7 +30,7 @@ public:
     uint64_t Uint64Value() const { return u_; }
 
     double NextPositiveDouble() const {
-        CEREAL_RAPIDJSON_ASSERT(!Sign());
+        RAPIDJSON_ASSERT(!Sign());
         return Double(u_ + 1).Value();
     }
 
@@ -48,23 +48,23 @@ public:
     int IntegerExponent() const { return (IsNormal() ? Exponent() : kDenormalExponent) - kSignificandSize; }
     uint64_t ToBias() const { return (u_ & kSignMask) ? ~u_ + 1 : u_ | kSignMask; }
 
-    static unsigned EffectiveSignificandSize(int order) {
+    static int EffectiveSignificandSize(int order) {
         if (order >= -1021)
             return 53;
         else if (order <= -1074)
             return 0;
         else
-            return static_cast<unsigned>(order) + 1074;
+            return order + 1074;
     }
 
 private:
     static const int kSignificandSize = 52;
     static const int kExponentBias = 0x3FF;
     static const int kDenormalExponent = 1 - kExponentBias;
-    static const uint64_t kSignMask = CEREAL_RAPIDJSON_UINT64_C2(0x80000000, 0x00000000);
-    static const uint64_t kExponentMask = CEREAL_RAPIDJSON_UINT64_C2(0x7FF00000, 0x00000000);
-    static const uint64_t kSignificandMask = CEREAL_RAPIDJSON_UINT64_C2(0x000FFFFF, 0xFFFFFFFF);
-    static const uint64_t kHiddenBit = CEREAL_RAPIDJSON_UINT64_C2(0x00100000, 0x00000000);
+    static const uint64_t kSignMask = RAPIDJSON_UINT64_C2(0x80000000, 0x00000000);
+    static const uint64_t kExponentMask = RAPIDJSON_UINT64_C2(0x7FF00000, 0x00000000);
+    static const uint64_t kSignificandMask = RAPIDJSON_UINT64_C2(0x000FFFFF, 0xFFFFFFFF);
+    static const uint64_t kHiddenBit = RAPIDJSON_UINT64_C2(0x00100000, 0x00000000);
 
     union {
         double d_;
@@ -73,6 +73,6 @@ private:
 };
 
 } // namespace internal
-CEREAL_RAPIDJSON_NAMESPACE_END
+RAPIDJSON_NAMESPACE_END
 
-#endif // CEREAL_RAPIDJSON_IEEE754_
+#endif // RAPIDJSON_IEEE754_

@@ -333,7 +333,7 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request)
         }
         out_chain[0].buf->last_buf = 1;
         out_chain[0].next = NULL;
-        return ngx_http_output_filter(request, &out_chain[0]);
+        ngx_http_output_filter(request, &out_chain[0]);
     }
 
 CUSTOM_RES_OUT:

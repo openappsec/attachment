@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making RapidJSON available.
 // 
-// Copyright (C) 2015 THL A29 Limited, a Tencent company, and Milo Yip. All rights reserved.
+// Copyright (C) 2015 THL A29 Limited, a Tencent company, and Milo Yip.
 //
 // Licensed under the MIT License (the "License"); you may not use this file except
 // in compliance with the License. You may obtain a copy of the License at
@@ -12,12 +12,12 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the 
 // specific language governing permissions and limitations under the License.
 
-#ifndef CEREAL_RAPIDJSON_FWD_H_
-#define CEREAL_RAPIDJSON_FWD_H_
+#ifndef RAPIDJSON_FWD_H_
+#define RAPIDJSON_FWD_H_
 
 #include "rapidjson.h"
 
-CEREAL_RAPIDJSON_NAMESPACE_BEGIN
+RAPIDJSON_NAMESPACE_BEGIN
 
 // encodings.h
 
@@ -102,7 +102,7 @@ class PrettyWriter;
 // document.h
 
 template <typename Encoding, typename Allocator> 
-struct GenericMember;
+class GenericMember;
 
 template <bool Const, typename Encoding, typename Allocator>
 class GenericMemberIterator;
@@ -146,6 +146,6 @@ class GenericSchemaValidator;
 
 typedef GenericSchemaValidator<SchemaDocument, BaseReaderHandler<UTF8<char>, void>, CrtAllocator> SchemaValidator;
 
-CEREAL_RAPIDJSON_NAMESPACE_END
+RAPIDJSON_NAMESPACE_END
 
-#endif // CEREAL_RAPIDJSON_RAPIDJSONFWD_H_
+#endif // RAPIDJSON_RAPIDJSONFWD_H_

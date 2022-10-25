@@ -380,7 +380,11 @@ compression_chain_filter(
         }
 
         ngx_memcpy(curr_input_link->buf, output_buffer, sizeof(ngx_buf_t));
-        curr_input_link->buf->memory = 1;
+
+        // Empty buffer should not be marked as "in-memory"
+        if (curr_input_link->buf->last - curr_input_link->buf->pos != 0) {
+            curr_input_link->buf->memory = 1;
+        }
     }
 
     write_dbg(DBG_LEVEL_TRACE, "Successfully %s chain", should_compress ? "compressed" : "decompressed");

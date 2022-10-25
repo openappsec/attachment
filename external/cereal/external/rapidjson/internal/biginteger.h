@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making RapidJSON available.
 // 
-// Copyright (C) 2015 THL A29 Limited, a Tencent company, and Milo Yip. All rights reserved.
+// Copyright (C) 2015 THL A29 Limited, a Tencent company, and Milo Yip.
 //
 // Licensed under the MIT License (the "License"); you may not use this file except
 // in compliance with the License. You may obtain a copy of the License at
@@ -12,17 +12,21 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the 
 // specific language governing permissions and limitations under the License.
 
-#ifndef CEREAL_RAPIDJSON_BIGINTEGER_H_
-#define CEREAL_RAPIDJSON_BIGINTEGER_H_
+#ifndef RAPIDJSON_BIGINTEGER_H_
+#define RAPIDJSON_BIGINTEGER_H_
 
 #include "../rapidjson.h"
 
-#if defined(_MSC_VER) && defined(_M_AMD64)
+#if defined(_MSC_VER) && !defined(__INTEL_COMPILER) && defined(_M_AMD64)
 #include <intrin.h> // for _umul128
+#if !defined(_ARM64EC_)
 #pragma intrinsic(_umul128)
+#else
+#pragma comment(lib,"softintrin")
+#endif
 #endif
 
-CEREAL_RAPIDJSON_NAMESPACE_BEGIN
+RAPIDJSON_NAMESPACE_BEGIN
 namespace internal {
 
 class BigInteger {
@@ -37,8 +41,9 @@ public:
         digits_[0] = u;
     }
 
-    BigInteger(const char* decimals, size_t length) : count_(1) {
-        CEREAL_RAPIDJSON_ASSERT(length > 0);
+    template<typename Ch>
+    BigInteger(const Ch* decimals, size_t length) : count_(1) {
+        RAPIDJSON_ASSERT(length > 0);
         digits_[0] = 0;
         size_t i = 0;
         const size_t kMaxDigitPerIteration = 19;  // 2^64 = 18446744073709551616 > 10^19
@@ -130,10 +135,10 @@ public:
 
         size_t offset = shift / kTypeBit;
         size_t interShift = shift % kTypeBit;
-        CEREAL_RAPIDJSON_ASSERT(count_ + offset <= kCapacity);
+        RAPIDJSON_ASSERT(count_ + offset <= kCapacity);
 
         if (interShift == 0) {
-            std::memmove(&digits_[count_ - 1 + offset], &digits_[count_ - 1], count_ * sizeof(Type));
+            std::memmove(digits_ + offset, digits_, count_ * sizeof(Type));
             count_ += offset;
         }
         else {
@@ -175,7 +180,7 @@ public:
             5 * 5 * 5 * 5 * 5 * 5 * 5 * 5 * 5 * 5 * 5 * 5
         };
         if (exp == 0) return *this;
-        for (; exp >= 27; exp -= 27) *this *= CEREAL_RAPIDJSON_UINT64_C2(0X6765C793, 0XFA10079D); // 5^27
+        for (; exp >= 27; exp -= 27) *this *= RAPIDJSON_UINT64_C2(0X6765C793, 0XFA10079D); // 5^27
         for (; exp >= 13; exp -= 13) *this *= static_cast<uint32_t>(1220703125u); // 5^13
         if (exp > 0)                 *this *= kPow5[exp - 1];
         return *this;
@@ -185,7 +190,7 @@ public:
     // Assume this != rhs
     bool Difference(const BigInteger& rhs, BigInteger* out) const {
         int cmp = Compare(rhs);
-        CEREAL_RAPIDJSON_ASSERT(cmp != 0);
+        RAPIDJSON_ASSERT(cmp != 0);
         const BigInteger *a, *b;  // Makes a > b
         bool ret;
         if (cmp < 0) { a = &rhs; b = this; ret = true; }
@@ -217,11 +222,12 @@ public:
     }
 
     size_t GetCount() const { return count_; }
-    Type GetDigit(size_t index) const { CEREAL_RAPIDJSON_ASSERT(index < count_); return digits_[index]; }
+    Type GetDigit(size_t index) const { RAPIDJSON_ASSERT(index < count_); return digits_[index]; }
     bool IsZero() const { return count_ == 1 && digits_[0] == 0; }
 
 private:
-    void AppendDecimal64(const char* begin, const char* end) {
+    template<typename Ch>
+    void AppendDecimal64(const Ch* begin, const Ch* end) {
         uint64_t u = ParseUint64(begin, end);
         if (IsZero())
             *this = u;
@@ -232,15 +238,16 @@ private:
     }
 
     void PushBack(Type digit) {
-        CEREAL_RAPIDJSON_ASSERT(count_ < kCapacity);
+        RAPIDJSON_ASSERT(count_ < kCapacity);
         digits_[count_++] = digit;
     }
 
-    static uint64_t ParseUint64(const char* begin, const char* end) {
+    template<typename Ch>
+    static uint64_t ParseUint64(const Ch* begin, const Ch* end) {
         uint64_t r = 0;
-        for (const char* p = begin; p != end; ++p) {
-            CEREAL_RAPIDJSON_ASSERT(*p >= '0' && *p <= '9');
-            r = r * 10u + static_cast<unsigned>(*p - '0');
+        for (const Ch* p = begin; p != end; ++p) {
+            RAPIDJSON_ASSERT(*p >= Ch('0') && *p <= Ch('9'));
+            r = r * 10u + static_cast<unsigned>(*p - Ch('0'));
         }
         return r;
     }
@@ -285,6 +292,6 @@ private:
 };
 
 } // namespace internal
-CEREAL_RAPIDJSON_NAMESPACE_END
+RAPIDJSON_NAMESPACE_END
 
-#endif // CEREAL_RAPIDJSON_BIGINTEGER_H_
+#endif // RAPIDJSON_BIGINTEGER_H_

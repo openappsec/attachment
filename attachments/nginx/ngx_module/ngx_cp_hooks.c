@@ -144,6 +144,44 @@ was_transaction_timedout(ngx_http_cp_session_data *ctx)
     return 1;
 }
 
+ngx_int_t
+ngx_http_cp_hold_verdict(struct ngx_http_cp_event_thread_ctx_t *ctx)
+{
+    ngx_http_cp_session_data *session_data_p = ctx->session_data_p;
+    for (uint i = 0; i < 3; i++) {
+        sleep(1);
+        int res = ngx_cp_run_in_thread_timeout(
+            ngx_http_cp_hold_verdict_thread, 
+            (void *)ctx,
+            waiting_for_verdict_thread_timeout_msec,
+            "ngx_http_cp_hold_verdict_thread"
+        );
+
+        if (!res) {
+            write_dbg(
+                DBG_LEVEL_DEBUG,
+                "ngx_http_cp_hold_verdict_thread failed at attempt number=%d",
+                i
+            );
+            continue;
+        }
+        
+        if (session_data_p->verdict != TRAFFIC_VERDICT_WAIT) {
+            // Verdict was updated.
+            write_dbg(
+                DBG_LEVEL_DEBUG,
+                "finished ngx_http_cp_hold_verdict successfully. new verdict=%d",
+                session_data_p->verdict
+            );
+            return 1;
+        }
+    }
+    write_dbg(DBG_LEVEL_TRACE, "Handling Failure with fail %s mode", fail_mode_hold_verdict == NGX_OK ? "open" : "close");
+    handle_inspection_failure(inspection_failure_weight, fail_mode_hold_verdict, session_data_p);
+    session_data_p->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+    return 0;
+}
+
 ngx_http_cp_verdict_e
 enforce_sessions_rate()
 {
@@ -498,6 +536,12 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
     write_dbg(DBG_LEVEL_DEBUG, "spawn ngx_http_cp_req_body_filter_thread");
     // Open threads while unprocessed chain elements still exist, up to num of elements in the chain iterations
     for (chain_elem = ctx.chain; chain_elem != NULL && ctx.chain; chain_elem = chain_elem->next) {
+        // Notify if zero-size buf is marked as "memory". This should never happen but if it does we want to know.
+        if (chain_elem->buf && chain_elem->buf->pos &&
+            (chain_elem->buf->last - chain_elem->buf->pos == 0) && chain_elem->buf->memory == 1) {
+            write_dbg(DBG_LEVEL_WARNING,
+                "Warning: encountered request body chain element of size 0 with memory flag enabled");
+        }
         clock_gettime(CLOCK_REALTIME, &hook_time_begin);
         res = ngx_cp_run_in_thread_timeout(
             ngx_http_cp_req_body_filter_thread,
@@ -529,8 +573,45 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
             ctx.res
         );
 
-        calcProcessingTime(session_data_p, &hook_time_begin, 1);
+        if (session_data_p->verdict == TRAFFIC_VERDICT_WAIT) {
+            res = ngx_http_cp_hold_verdict(&ctx);
+            if (!res) {
+                session_data_p->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+                updateMetricField(HOLD_THREAD_TIMEOUT, 1);
+                return fail_mode_verdict == NGX_OK ? ngx_http_next_request_body_filter(request, request_body_chain) : NGX_ERROR;
+            }
+        }
 
+        if (session_data_p->was_request_fully_inspected) {
+            res = ngx_cp_run_in_thread_timeout(
+                ngx_http_cp_req_end_transaction_thread,
+                (void *)&ctx,
+                req_body_thread_timeout_msec,
+                "ngx_http_cp_req_end_transaction_thread"
+            );
+            if (!res) {
+                // failed to execute thread task, or it timed out
+                session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+                write_dbg(
+                    DBG_LEVEL_DEBUG,
+                    "req_end_transaction thread failed, returning default fail mode verdict. Session id: %d, verdict: %s",
+                    session_data_p->session_id,
+                    session_data_p->verdict == TRAFFIC_VERDICT_ACCEPT ? "accept" : "drop"
+                );
+                updateMetricField(REQ_BODY_THREAD_TIMEOUT, 1);
+                return fail_mode_verdict == NGX_OK ? ngx_http_next_request_body_filter(request, request_body_chain) : NGX_ERROR;
+            }
+
+            write_dbg(
+                DBG_LEVEL_DEBUG,
+                "finished ngx_http_cp_req_end_transaction_thread successfully. return=%d next_filter=%d res=%d",
+                ctx.should_return,
+                ctx.should_return_next_filter,
+                ctx.res
+            );
+        }
+
+        calcProcessingTime(session_data_p, &hook_time_begin, 1);
         if (ctx.should_return_next_filter) {
             return ngx_http_next_request_body_filter(request, request_body_chain);
         }
@@ -787,7 +868,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
         if (session_data_p->verdict == TRAFFIC_VERDICT_DROP) request->keepalive = 0;
         return ngx_http_next_response_body_filter(request, body_chain);
     }
-    
+
     session_data_p->response_data.num_body_chunk++;
 
     if (body_chain == NULL) {
@@ -890,6 +971,12 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
     write_dbg(DBG_LEVEL_DEBUG, "spawn ngx_http_cp_res_body_filter_thread");
     // Open threads while unprocessed chain elements still exist, up to num of elements in the chain iterations
     for (chain_elem = ctx.chain; chain_elem != NULL && ctx.chain; chain_elem = chain_elem->next) {
+        // Notify if zero-size buf is marked as "memory". This should never happen but if it does we want to know.
+        if (chain_elem->buf && chain_elem->buf->pos &&
+            (chain_elem->buf->last - chain_elem->buf->pos == 0) && chain_elem->buf->memory == 1) {
+            write_dbg(DBG_LEVEL_WARNING,
+                "Warning: encountered response body chain element of size 0 with memory flag enabled");
+        }
         clock_gettime(CLOCK_REALTIME, &hook_time_begin);
         if (!ngx_cp_run_in_thread_timeout(
             ngx_http_cp_res_body_filter_thread,

@@ -29,7 +29,7 @@ struct DebugConfig
 
     std::string client;
     std::string server;
-    uint port = 0;
+    unsigned int port = 0;
     std::string method;
     std::string host;
     std::string uri;
@@ -45,21 +45,21 @@ public:
 
     bool operator==(const HttpAttachmentConfiguration &other) const;
 
-    uint getNumericalValue(const std::string &key) const;
+    unsigned int getNumericalValue(const std::string &key) const;
     const std::string & getStringValue(const std::string &key) const;
     const std::vector<std::string> & getExcludeSources() const { return exclude_sources; }
     const DebugConfig & getDebugContext() const { return dbg; }
 
-    void setNumericalValue(const std::string &key, uint value) { numerical_values[key] = value; }
+    void setNumericalValue(const std::string &key, unsigned int value) { numerical_values[key] = value; }
     void setStringValue(const std::string &key, const std::string &value) { string_values[key] = value; }
     void setExcludeSources(const std::vector<std::string> &new_sources) { exclude_sources = new_sources; }
     void setDebugContext(const DebugConfig &_dbg) { dbg = _dbg; }
 
 private:
-    void loadNumericalValue(cereal::JSONInputArchive &archive, const std::string &name, uint default_value);
+    void loadNumericalValue(cereal::JSONInputArchive &archive, const std::string &name, unsigned int default_value);
 
     DebugConfig dbg;
-    std::map<std::string, uint> numerical_values;
+    std::map<std::string, unsigned int> numerical_values;
     std::map<std::string, std::string> string_values;
     std::vector<std::string> exclude_sources;
     std::string empty;

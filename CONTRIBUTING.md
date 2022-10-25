@@ -1,7 +1,8 @@
 # Welcome to open-appsec's Open Sources Contributing Guide
-We welcome everyone that wishes to share their expetise in improving open-appsec.
+Thank you for investing your time to consider a contribution to our project!
+Various open source repositories were released as part of Check Point's platform for distributing and deploying security applications for a variety of environments. We welcome everyone that wishes to share their knowledge and expertise to enhance and expand both our platform, and our ability to secure more environments. 
 
-Please ead our [Code of Conduct](./CODE_OF_CONDUCT.md) to keep our community approachable and respectable.
+Read our [Code of Conduct](./CODE_OF_CONDUCT.md) to keep our community approachable and respectable.
 
 In this guide we will provide an overview of the various contribution options' guidelines - from reporting or fixing a bug, to suggesting an enhancement.
 
@@ -15,7 +16,7 @@ An internal process will be activated upon determining the validity of a reporte
 
 **Important - If the bug you wish to report regards a suspicion of a security vulnerability, please refer to the "Reporting security vulnerability" section**
 
-To report a bug, you can either open a new issue using a relevant [issue form](https://github.com/github/docs/issues/new/choose), or, alternatively, contact us using [this email](mailto:opensource@openappsec.io).
+To report a bug, you can either open a new issue using a relevant [issue form](https://github.com/github/docs/issues/new/choose), or, alternatively, [contact us via our open-appsec open source distribution list](mailto:opensource@openappsec.io).
 
 Be sure to include a **title and clear description**, as much relevant information as possible, and a **code sample** or an **executable test case** demonstrating the expected behavior that is not occurring.
 
@@ -30,3 +31,10 @@ Please [suggest your change via our open-appsec open source distribution list](m
 ## Open Source documentation issues
 
 For reporting or suggesting a change, of any issue detected in the documentation files of our open source repositories, please use the same guidelines as bug reports/fixes.
+
+# Final Thanks
+We value all users that use our open source files.
+We value all efforts to read, suggest changes and/or contribute to our open source files.
+Thank you for it.
+
+The open-appsec Team

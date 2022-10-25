@@ -32,7 +32,7 @@ typedef enum ngx_cp_comm_direction {
 ///         - #NGX_ERROR
 ///         - #NGX_ABORT
 ///
-ngx_int_t ngx_cp_attachment_init_process();
+ngx_int_t ngx_cp_attachment_init_process(ngx_http_request_t *);
 
 ///
 /// @brief Preforms send\receive information to\from the service via a socket.

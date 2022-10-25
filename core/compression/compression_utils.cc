@@ -105,6 +105,7 @@ static const int zlib_no_flush = Z_NO_FLUSH;
 struct CompressionStream
 {
     CompressionStream() { bzero(&stream, sizeof(z_stream)); }
+    ~CompressionStream() { fini(); }
 
     tuple<basic_string<unsigned char>, bool>
     decompress(const unsigned char *data, uint32_t size)

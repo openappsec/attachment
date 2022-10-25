@@ -46,10 +46,12 @@
     }
 
 extern ngx_int_t fail_mode_verdict;
+extern ngx_int_t fail_mode_hold_verdict;
 extern ngx_int_t dbg_is_needed;
 extern ngx_int_t num_of_connection_attempts;
 extern ngx_uint_t content_length_would_change;
 extern ngx_uint_t fail_open_timeout;
+extern ngx_uint_t fail_open_hold_timeout;
 extern ngx_uint_t req_max_proccessing_ms_time;
 extern ngx_uint_t res_max_proccessing_ms_time;
 extern ngx_uint_t registration_thread_timeout_msec;
@@ -57,6 +59,7 @@ extern ngx_uint_t req_header_thread_timeout_msec;
 extern ngx_uint_t req_body_thread_timeout_msec;
 extern ngx_uint_t res_header_thread_timeout_msec;
 extern ngx_uint_t res_body_thread_timeout_msec;
+extern ngx_uint_t waiting_for_verdict_thread_timeout_msec;
 extern ngx_http_inspection_mode_e inspection_mode;
 extern ngx_uint_t num_of_nginx_ipc_elements;
 

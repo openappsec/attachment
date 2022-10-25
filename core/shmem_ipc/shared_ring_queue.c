@@ -26,8 +26,9 @@
 
 #include "shared_ipc_debug.h"
 
-static const uint16_t empty_buff_mgmt_magic = 0xcafe;
-static const uint16_t skip_buff_mgmt_magic = 0xbeef;
+static const uint16_t empty_buff_mgmt_magic = 0xfffe;
+static const uint16_t skip_buff_mgmt_magic = 0xfffd;
+static const uint32_t max_write_size = 0xfffc;
 const uint16_t max_num_of_data_segments = sizeof(DataSegment)/sizeof(uint16_t);
 
 char g_rx_location_name[MAX_ONE_WAY_QUEUE_NAME_LENGTH] = "";
@@ -52,11 +53,8 @@ getNumOfDataSegmentsNeeded(uint16_t data_size)
 }
 
 static int
-isThereEnoughMemoryInQueue(SharedRingQueue *queue, uint8_t num_of_elem_to_push)
+isThereEnoughMemoryInQueue(uint16_t write_pos, uint16_t read_pos, uint8_t num_of_elem_to_push)
 {
-    uint16_t write_pos = queue->write_pos;
-    uint16_t read_pos = queue->read_pos;
-    uint16_t num_of_data_segments = queue->num_of_data_segments;
     int res;
 
     writeDebug(
@@ -65,26 +63,42 @@ isThereEnoughMemoryInQueue(SharedRingQueue *queue, uint8_t num_of_elem_to_push)
         num_of_elem_to_push,
         write_pos,
         read_pos,
-        num_of_data_segments
+        g_num_of_data_segments
     );
-    if (num_of_elem_to_push >= num_of_data_segments) {
+    if (num_of_elem_to_push >= g_num_of_data_segments) {
         writeDebug(TraceLevel, "Amount of elements to push is larger then amount of available elements in the queue");
         return 0;
     }
 
     // add skipped elements during write that does not fit from cur write position till end of queue
-    if (write_pos + num_of_elem_to_push > num_of_data_segments) {
-        num_of_elem_to_push += num_of_data_segments - write_pos;
+    if (write_pos + num_of_elem_to_push > g_num_of_data_segments) {
+        num_of_elem_to_push += g_num_of_data_segments - write_pos;
     }
 
     // removing the aspect of circularity in queue and simulating as if the queue continued at its end
-    if (write_pos + num_of_elem_to_push >= num_of_data_segments) {
-        read_pos += num_of_data_segments;
+    if (write_pos + num_of_elem_to_push >= g_num_of_data_segments) {
+        read_pos += g_num_of_data_segments;
     }
 
     res = write_pos + num_of_elem_to_push < read_pos || write_pos >= read_pos;
     writeDebug(TraceLevel, "Finished checking if there is enough place in shared memory. Res: %d", res);
     return res;
+}
+
+static int
+isGetPossitionSucceccful(SharedRingQueue *queue, uint16_t *read_pos, uint16_t *write_pos)
+{
+    if (g_num_of_data_segments == 0) return 0;
+
+    *read_pos = queue->read_pos;
+    *write_pos = queue->write_pos;
+
+    if (queue->num_of_data_segments != g_num_of_data_segments) return 0;
+    if (queue->size_of_memory != g_memory_size) return 0;
+    if (*read_pos > g_num_of_data_segments) return 0;
+    if (*write_pos > g_num_of_data_segments) return 0;
+
+    return 1;
 }
 
 void
@@ -126,13 +140,14 @@ createSharedRingQueue(const char *shared_location_name, uint16_t num_of_data_seg
 
     g_num_of_data_segments = num_of_data_segments;
 
-    fd = shm_open(shared_location_name, shmem_fd_flags, S_IRWXU | S_IRWXG | S_IRWXO);
+    fd = shm_open(shared_location_name, shmem_fd_flags, S_IRUSR | S_IWUSR);
     if (fd == -1) {
         writeDebug(
             WarningLevel,
-            "createSharedRingQueue: Failed to open shared memory for '%s'. Errno: %d\n",
+            "createSharedRingQueue: Failed to open shared memory for '%s'. Errno: %d (%s)\n",
             shared_location_name,
-            errno
+            errno,
+            strerror(errno)
         );
         return NULL;
     }
@@ -257,7 +272,7 @@ dumpRingQueueShmem(SharedRingQueue *queue)
 
     writeDebug(WarningLevel, "mgmt_segment:");
     buffer_mgmt = (uint16_t *)queue->mgmt_segment.data;
-    for (segment_idx = 0; segment_idx < max_num_of_data_segments; segment_idx++) {
+    for (segment_idx = 0; segment_idx < queue->num_of_data_segments; segment_idx++) {
         writeDebug(WarningLevel, "%s%u", (segment_idx == 0 ? " " : ", "), buffer_mgmt[segment_idx]);
     }
 
@@ -275,39 +290,44 @@ dumpRingQueueShmem(SharedRingQueue *queue)
 int
 peekToQueue(SharedRingQueue *queue, const char **output_buffer, uint16_t *output_buffer_size)
 {
-    uint16_t read_pos = queue->read_pos;
-    const uint16_t num_of_data_segments = queue->num_of_data_segments;
+    uint16_t read_pos;
+    uint16_t write_pos;
     uint16_t *buffer_mgmt = (uint16_t *)queue->mgmt_segment.data;
+
+    if (!isGetPossitionSucceccful(queue, &read_pos, &write_pos)) {
+        writeDebug(WarningLevel, "Corrupted shared memory - cannot peek");
+        return -1;
+    }
 
     writeDebug(
         TraceLevel,
         "Reading data from queue. Read index: %u, number of queue elements: %u",
         read_pos,
-        num_of_data_segments
+        g_num_of_data_segments
     );
 
-    if (isQueueEmpty(queue)) {
+    if (read_pos == write_pos) {
         writeDebug(WarningLevel, "peekToQueue: Failed to read from an empty queue\n");
         return -1;
     }
 
-    if (read_pos >= num_of_data_segments) {
+    if (read_pos >= g_num_of_data_segments) {
         writeDebug(
             WarningLevel,
             "peekToQueue: Failed to read from a corrupted queue! (read_pos= %d > num_of_data_segments=%d)\n",
             read_pos,
-            num_of_data_segments
+            g_num_of_data_segments
         );
         return CORRUPTED_SHMEM_ERROR;
     }
 
     if (buffer_mgmt[read_pos] == skip_buff_mgmt_magic) {
-        for ( ; read_pos < num_of_data_segments && buffer_mgmt[read_pos] == skip_buff_mgmt_magic; ++read_pos) {
+        for ( ; read_pos < g_num_of_data_segments && buffer_mgmt[read_pos] == skip_buff_mgmt_magic; ++read_pos) {
             buffer_mgmt[read_pos] = empty_buff_mgmt_magic;
         }
     }
 
-    if (read_pos == num_of_data_segments) read_pos = 0;
+    if (read_pos == g_num_of_data_segments) read_pos = 0;
 
     *output_buffer_size = buffer_mgmt[read_pos];
     *output_buffer = queue->data_segment[read_pos].data;
@@ -332,25 +352,42 @@ pushBuffersToQueue(
 )
 {
     int idx;
-    const uint16_t num_of_queue_elem = queue->num_of_data_segments;
-    uint16_t write_pos = queue->write_pos;
-    uint16_t total_elem_size = 0;
+    uint32_t large_total_elem_size = 0;
+    uint16_t read_pos;
+    uint16_t write_pos;
+    uint16_t total_elem_size;
     uint16_t *buffer_mgmt = (uint16_t *)queue->mgmt_segment.data;
     uint16_t end_pos;
     uint16_t num_of_segments_to_write;
     char *current_copy_pos;
 
+    if (!isGetPossitionSucceccful(queue, &read_pos, &write_pos)) {
+        writeDebug(WarningLevel, "Corrupted shared memory - cannot push new buffers");
+        return -1;
+    }
+
     writeDebug(
         TraceLevel,
         "Writing new data to queue. write index: %u, number of queue elements: %u, number of elements to push: %u",
         write_pos,
-        num_of_queue_elem,
+        g_num_of_data_segments,
         num_of_input_buffers
     );
 
     for (idx = 0; idx < num_of_input_buffers; idx++) {
-        total_elem_size += input_buffers_sizes[idx];
+        large_total_elem_size += input_buffers_sizes[idx];
+
+        if (large_total_elem_size > max_write_size) {
+            writeDebug(
+                WarningLevel,
+                "Requested write size %u exceeds the %u write limit",
+                large_total_elem_size,
+                max_write_size
+            );
+            return -1;
+        }
     }
+    total_elem_size = (uint16_t)large_total_elem_size;
 
     num_of_segments_to_write = getNumOfDataSegmentsNeeded(total_elem_size);
 
@@ -362,23 +399,23 @@ pushBuffersToQueue(
     );
 
 
-    if (!isThereEnoughMemoryInQueue(queue, num_of_segments_to_write)) {
+    if (!isThereEnoughMemoryInQueue(write_pos, read_pos, num_of_segments_to_write)) {
         writeDebug(WarningLevel, "Cannot write to a full queue\n");
         return -1;
     }
 
-    if (write_pos >= num_of_queue_elem) {
+    if (write_pos >= g_num_of_data_segments) {
         writeDebug(
             WarningLevel,
             "Cannot write to a location outside the queue. Write index: %u, number of queue elements: %u",
             write_pos,
-            num_of_queue_elem
+            g_num_of_data_segments
         );
         return -1;
     }
 
-    if (write_pos + num_of_segments_to_write > num_of_queue_elem) {
-        for ( ; write_pos < num_of_queue_elem; ++write_pos) {
+    if (write_pos + num_of_segments_to_write > g_num_of_data_segments) {
+        for ( ; write_pos < g_num_of_data_segments; ++write_pos) {
             buffer_mgmt[write_pos] = skip_buff_mgmt_magic;
         }
         write_pos = 0;
@@ -411,8 +448,9 @@ pushBuffersToQueue(
         buffer_mgmt[write_pos] = skip_buff_mgmt_magic;
     }
 
-    queue->write_pos = write_pos < num_of_queue_elem ? write_pos : 0;
-    writeDebug(TraceLevel, "Successfully pushed data to queue. New write index: %u", queue->write_pos);
+    if (write_pos >= g_num_of_data_segments) write_pos = 0;
+    queue->write_pos = write_pos;
+    writeDebug(TraceLevel, "Successfully pushed data to queue. New write index: %u", write_pos);
 
     return 0;
 }
@@ -427,19 +465,24 @@ int
 popFromQueue(SharedRingQueue *queue)
 {
     uint16_t num_of_read_segments;
-    uint16_t read_pos = queue->read_pos;
+    uint16_t read_pos;
+    uint16_t write_pos;
     uint16_t end_pos;
-    uint16_t num_of_data_segments = queue->num_of_data_segments;
     uint16_t *buffer_mgmt = (uint16_t *)queue->mgmt_segment.data;
+
+    if (!isGetPossitionSucceccful(queue, &read_pos, &write_pos)) {
+        writeDebug(WarningLevel, "Corrupted shared memory - cannot pop data");
+        return -1;
+    }
 
     writeDebug(
         TraceLevel,
         "Removing data from queue. new data to queue. Read index: %u, number of queue elements: %u",
         read_pos,
-        num_of_data_segments
+        g_num_of_data_segments
     );
 
-    if (isQueueEmpty(queue)) {
+    if (read_pos == write_pos) {
         writeDebug(TraceLevel, "Cannot pop data from empty queue");
         return -1;
     }
@@ -460,16 +503,16 @@ popFromQueue(SharedRingQueue *queue)
         buffer_mgmt[read_pos] = empty_buff_mgmt_magic;
     }
 
-    if (read_pos < num_of_data_segments && buffer_mgmt[read_pos] == skip_buff_mgmt_magic) {
-        for ( ; read_pos < num_of_data_segments; ++read_pos ) {
+    if (read_pos < g_num_of_data_segments && buffer_mgmt[read_pos] == skip_buff_mgmt_magic) {
+        for ( ; read_pos < g_num_of_data_segments; ++read_pos ) {
             buffer_mgmt[read_pos] = empty_buff_mgmt_magic;
         }
     }
 
-    if (read_pos == num_of_data_segments) read_pos = 0;
+    if (read_pos == g_num_of_data_segments) read_pos = 0;
 
     queue->read_pos = read_pos;
-    writeDebug(TraceLevel, "Successfully popped data from queue. New read index: %u", queue->read_pos);
+    writeDebug(TraceLevel, "Successfully popped data from queue. New read index: %u", read_pos);
 
     return 0;
 }

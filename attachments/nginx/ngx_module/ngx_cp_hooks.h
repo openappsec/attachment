@@ -25,6 +25,7 @@
 
 #include "ngx_cp_http_parser.h"
 #include "nginx_attachment_common.h"
+#include "ngx_cp_hook_threads.h"
 
 static const int registration_failure_weight = 2; ///< Registration failure weight.
 static const int inspection_failure_weight = 1; ///< Inspection failure weight.
@@ -95,6 +96,16 @@ ngx_int_t ngx_http_cp_res_header_filter(ngx_http_request_t *request);
 ///         - #NGX_ERROR
 ///
 ngx_int_t ngx_http_cp_req_header_handler(ngx_http_request_t *request);
+
+///
+/// @brief Sends a request to the nano service to update the verdict.
+/// @note Should be called after the nano service provided the verdict TRAFFIC_VERDICT_WAIT to get the updated verdict. 
+/// @param[in, out] request Event thread context to be updated.
+/// @returns ngx_int_t
+///         - #1 if request was properly communicated with the nano service and provided an updated response.
+///         - #0 otherwise.
+///
+ngx_int_t ngx_http_cp_hold_verdict(struct ngx_http_cp_event_thread_ctx_t *ctx);
 
 ///
 /// @brief Checks if transaction was timed out.

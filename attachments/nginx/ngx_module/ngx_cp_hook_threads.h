@@ -122,6 +122,19 @@ void * ngx_http_cp_req_header_handler_thread(void *_ctx);
 void * ngx_http_cp_req_body_filter_thread(void *_ctx);
 
 /// 
+/// @brief Sends end request transmission to the attachment's service.
+/// @details Communicates with the attachment service by sending request body to the attachment's service
+/// and modifies _ctx by the received response.
+/// @note _ctx needs to be properly initialized by init_thread_ctx() and ngx_chain_t needs of not NULL.
+/// @param[in, out] _ctx is of type ngx_http_cp_event_thread_ctx_t.
+/// Modifies _ctx res to the following values: 
+///      - #NGX_OK
+///      - #NGX_ERROR
+/// @return NULL.
+/// 
+void * ngx_http_cp_req_end_transaction_thread(void *_ctx);
+
+/// 
 /// @brief Sends response headers to the attachment's service.
 /// @details Communicates with the attachment service by sending response headers to the attachment's service
 /// and modifies _ctx by the received response.
@@ -146,6 +159,21 @@ void * ngx_http_cp_res_header_filter_thread(void *_ctx);
 /// @return NULL.
 /// 
 void * ngx_http_cp_res_body_filter_thread(void *_ctx);
+
+/// 
+/// @brief Sends a request to the attachment's service to update the earlier provided "WAIT" verdict.
+/// @details Communicates with the attachment service by sending a HOLD_DATA request to the attachment's service
+/// and modifies _ctx by the received response.
+/// @note _ctx needs to be properly initialized by init_thread_ctx() and 
+/// be called after another call returned wait verdict.
+/// @param[in, out] _ctx is of type ngx_http_cp_event_thread_ctx_t.
+/// Modifies _ctx res to the following values: 
+///      - #NGX_OK
+///      - #NGX_ERROR
+/// Modifies _ctx session data with an updated verdict.
+/// @return NULL.
+/// 
+void * ngx_http_cp_hold_verdict_thread(void *_ctx);
 
 /// 
 /// @brief Check if transaction contains headers.

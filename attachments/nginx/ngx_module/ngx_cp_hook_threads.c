@@ -86,8 +86,8 @@ init_thread_ctx(
 void *
 ngx_http_cp_registration_thread(void *_ctx)
 {
-    struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t*)_ctx;
-    ngx_int_t res = ngx_cp_attachment_init_process();
+    struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t *)_ctx;
+    ngx_int_t res = ngx_cp_attachment_init_process(ctx->request);
     if (res == NGX_ABORT && already_registered) {
         already_registered = 0;
         disconnect_communication();
@@ -141,7 +141,8 @@ end_req_header_handler(
         &session_data_p->verdict,
         session_data_p->session_id,
         request,
-        modifications
+        modifications,
+        REQUEST_END
     );
 }
 
@@ -154,7 +155,7 @@ does_contain_body(ngx_http_headers_in_t *headers)
 void *
 ngx_http_cp_req_header_handler_thread(void *_ctx)
 {
-    struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t*)_ctx;
+    struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t *)_ctx;
     ngx_http_request_t *request = ctx->request;
     ngx_http_cp_session_data *session_data_p = ctx->session_data_p;
     ngx_int_t send_meta_data_result;
@@ -218,7 +219,7 @@ ngx_http_cp_req_header_handler_thread(void *_ctx)
 void *
 ngx_http_cp_req_body_filter_thread(void *_ctx)
 {
-    struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t*)_ctx;
+    struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t *)_ctx;
     ngx_http_request_t *request = ctx->request;
     ngx_http_cp_session_data *session_data_p = ctx->session_data_p;
     ngx_int_t is_last_part;
@@ -248,31 +249,14 @@ ngx_http_cp_req_body_filter_thread(void *_ctx)
     }
     session_data_p->remaining_messages_to_reply += num_messages_sent;
 
-    num_messages_sent = 0;
-    if (is_last_part) {
-        // Signals the nano service that the transaction reached the end.
-        if (ngx_http_cp_end_transaction_sender(REQUEST_END, session_data_p->session_id, &num_messages_sent) != NGX_OK) {
-            write_dbg(
-                DBG_LEVEL_WARNING,
-                "Failed to send request end data to the nano service. Session ID: %d",
-                session_data_p->session_id
-            );
-            handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
-            if (fail_mode_verdict == NGX_OK) {
-                THREAD_CTX_RETURN_NEXT_FILTER();
-            }
-            THREAD_CTX_RETURN(NGX_ERROR);
-        }
-        session_data_p->remaining_messages_to_reply++;
-    }
-
     // Fetch nano services' results.
     ctx->res = ngx_http_cp_reply_receiver(
         &session_data_p->remaining_messages_to_reply,
         &session_data_p->verdict,
         session_data_p->session_id,
         request,
-        &ctx->modifications
+        &ctx->modifications,
+        REQUEST_BODY
     );
 
     if (is_last_part) session_data_p->was_request_fully_inspected = 1;
@@ -281,9 +265,48 @@ ngx_http_cp_req_body_filter_thread(void *_ctx)
 }
 
 void *
+ngx_http_cp_req_end_transaction_thread(void *_ctx)
+{
+    struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t *)_ctx;
+    ngx_http_request_t *request = ctx->request;
+    ngx_http_cp_session_data *session_data_p = ctx->session_data_p;
+    ngx_uint_t num_messages_sent = 0;
+
+    if (ngx_http_cp_end_transaction_sender(REQUEST_END, session_data_p->session_id, &num_messages_sent) != NGX_OK) {
+        write_dbg(
+            DBG_LEVEL_WARNING,
+            "Failed to send request end data to the nano service. Session ID: %d",
+            session_data_p->session_id
+        );
+        handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
+        if (fail_mode_verdict == NGX_OK) {
+            THREAD_CTX_RETURN_NEXT_FILTER();
+        }
+        THREAD_CTX_RETURN(NGX_ERROR);
+    }
+
+    session_data_p->remaining_messages_to_reply += num_messages_sent;
+
+    if (session_data_p->verdict != TRAFFIC_VERDICT_ACCEPT &&
+        session_data_p->verdict != TRAFFIC_VERDICT_DROP) {
+        // Fetch nano services' results.
+        ctx->res = ngx_http_cp_reply_receiver(
+            &session_data_p->remaining_messages_to_reply,
+            &session_data_p->verdict,
+            session_data_p->session_id,
+            request,
+            &ctx->modifications,
+            REQUEST_END
+        );
+    }
+
+    return NULL;
+}
+
+void *
 ngx_http_cp_res_header_filter_thread(void *_ctx)
 {
-    struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t*)_ctx;
+    struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t *)_ctx;
     ngx_http_request_t *request = ctx->request;
     ngx_http_cp_session_data *session_data_p = ctx->session_data_p;
     ngx_int_t set_response_content_encoding_res;
@@ -383,7 +406,8 @@ ngx_http_cp_res_header_filter_thread(void *_ctx)
         &session_data_p->verdict,
         session_data_p->session_id,
         request,
-        &ctx->modifications
+        &ctx->modifications,
+        RESPONSE_HEADER
     );
 
     return NULL;
@@ -392,7 +416,7 @@ ngx_http_cp_res_header_filter_thread(void *_ctx)
 void *
 ngx_http_cp_res_body_filter_thread(void *_ctx)
 {
-    struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t*)_ctx;
+    struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t *)_ctx;
     ngx_http_request_t *request = ctx->request;
     ngx_http_cp_session_data *session_data_p = ctx->session_data_p;
     ngx_int_t send_body_result;
@@ -446,7 +470,50 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
         &session_data_p->verdict,
         session_data_p->session_id,
         request,
-        &ctx->modifications
+        &ctx->modifications,
+        RESPONSE_BODY
+    );
+
+    return NULL;
+}
+
+void *
+ngx_http_cp_hold_verdict_thread(void *_ctx)
+{
+    struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t *)_ctx;
+
+    ngx_http_request_t *request = ctx->request;
+    ngx_http_cp_session_data *session_data_p = ctx->session_data_p;
+
+    ngx_uint_t num_messages_sent = 0;
+
+    if (ngx_http_cp_wait_sender(session_data_p->session_id, &num_messages_sent) != NGX_OK) {
+        write_dbg(
+            DBG_LEVEL_WARNING,
+            "Failed to send inspect wait request to the nano service. Session ID: %d",
+            session_data_p->session_id
+        );
+        handle_inspection_failure(inspection_failure_weight, fail_mode_hold_verdict, session_data_p);
+        if (fail_mode_hold_verdict == NGX_OK) {
+            THREAD_CTX_RETURN_NEXT_FILTER();
+        }
+        THREAD_CTX_RETURN(NGX_ERROR);
+    }
+    session_data_p->remaining_messages_to_reply += num_messages_sent;
+
+    ctx->res = ngx_http_cp_reply_receiver(
+        &session_data_p->remaining_messages_to_reply,
+        &session_data_p->verdict,
+        session_data_p->session_id,
+        request,
+        &ctx->modifications,
+        HOLD_DATA
+    );
+
+    write_dbg(
+        DBG_LEVEL_TRACE,
+        "Successfully receivied response to wait from the nano service. Session ID: %d",
+        session_data_p->session_id
     );
 
     return NULL;

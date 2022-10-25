@@ -83,6 +83,18 @@ getFailOpenTimeout()
     return conf_data.getNumericalValue("fail_open_timeout");
 }
 
+int
+isFailOpenHoldMode()
+{
+    return conf_data.getNumericalValue("is_fail_open_mode_hold_enabled");
+}
+
+unsigned int
+getFailOpenHoldTimeout()
+{
+    return conf_data.getNumericalValue("fail_open_hold_timeout");
+}
+
 unsigned int
 getMaxSessionsPerMinute()
 {
@@ -135,6 +147,12 @@ unsigned int
 getResBodyThreadTimeout()
 {
     return conf_data.getNumericalValue("res_body_thread_timeout_msec");
+}
+
+unsigned int
+getWaitingForVerdictThreadTimeout()
+{
+    return conf_data.getNumericalValue("waiting_for_verdict_thread_timeout_msec");
 }
 
 int

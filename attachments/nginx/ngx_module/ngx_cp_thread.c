@@ -51,7 +51,7 @@ ngx_cp_run_in_thread_timeout(CpThreadRoutine thread_func, void *arg, int timeout
     void *res = NULL;
     pthread_t thread;
     struct timespec ts;
-    struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t*)arg;
+    struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t *)arg;
 
     if (inspection_mode == NO_THREAD) return ngx_cp_run_without_thread_timeout(thread_func, arg, func_name);
 

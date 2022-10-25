@@ -44,6 +44,7 @@ namespace cereal
 #ifndef CEREAL_RAPIDJSON_ASSERT
 #define CEREAL_RAPIDJSON_ASSERT(x) if(!(x)){ \
   throw ::cereal::RapidJSONException("rapidjson internal assertion failure: " #x); }
+#define RAPIDJSON_ASSERT(x) CEREAL_RAPIDJSON_ASSERT(x)
 #endif // RAPIDJSON_ASSERT
 
 // Enable support for parsing of nan, inf, -inf

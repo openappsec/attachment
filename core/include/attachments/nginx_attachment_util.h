@@ -33,11 +33,14 @@ ngx_http_inspection_mode_e getInspectionMode();
 unsigned int getNumOfNginxIpcElements();
 unsigned int getKeepAliveIntervalMsec();
 unsigned int getDbgLevel();
-int isDebugContext(c_str client, c_str server, unsigned int port, c_str method, c_str host , c_str uri);
+int isDebugContext(c_str client, c_str server, unsigned int port, c_str method, c_str host, c_str uri);
 c_str getStaticResourcesPath();
 
 int isFailOpenMode();
 unsigned int getFailOpenTimeout();
+
+int isFailOpenHoldMode();
+unsigned int getFailOpenHoldTimeout();
 
 unsigned int getMaxSessionsPerMinute();
 int isFailOpenOnSessionLimit();
@@ -51,6 +54,8 @@ unsigned int getReqBodyThreadTimeout();
 unsigned int getResProccessingTimeout();
 unsigned int getResHeaderThreadTimeout();
 unsigned int getResBodyThreadTimeout();
+
+unsigned int getWaitingForVerdictThreadTimeout();
 
 int isIPAddress(c_str ip_str);
 int isSkipSource(c_str ip_str);
