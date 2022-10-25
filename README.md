@@ -68,7 +68,7 @@ They can be found under the `lib` directory in the `<output path>` given to the 
 1. Copy the associated libraries to /usr/lib on your existing nginx server
 2. Copy the nginx attachment file lib/libngx_module.so to the following path on your existing nginx server: /usr/lib/nginx/modules/
 3. Load the attachment on your nginx by adding the following command to the main nginx.conf file: 
-   load_module /usr/lib/nginx/modules/libngx_module.so;
+   `load_module /usr/lib/nginx/modules/libngx_module.so;`
 4. Restart your nginx server.
 
 ### Compiling the attachment code and create a docker image for an existing nginx/ingres-nginx alpine docker
