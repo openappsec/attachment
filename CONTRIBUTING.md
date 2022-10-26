@@ -1,6 +1,5 @@
 # Welcome to open-appsec's Open Sources Contributing Guide
-Thank you for investing your time to consider a contribution to our project!
-Various open source repositories were released as part of Check Point's platform for distributing and deploying security applications for a variety of environments. We welcome everyone that wishes to share their knowledge and expertise to enhance and expand both our platform, and our ability to secure more environments. 
+Thank you for your interest in open-appsec. We welcome everyone that wishes to share their knowledge and expertise to enhance and expand the project. 
 
 Read our [Code of Conduct](./CODE_OF_CONDUCT.md) to keep our community approachable and respectable.
 
@@ -33,8 +32,6 @@ Please [suggest your change via our open-appsec open source distribution list](m
 For reporting or suggesting a change, of any issue detected in the documentation files of our open source repositories, please use the same guidelines as bug reports/fixes.
 
 # Final Thanks
-We value all users that use our open source files.
-We value all efforts to read, suggest changes and/or contribute to our open source files.
-Thank you for it.
+We value all efforts to read, suggest changes and/or contribute to our open source files. Thank you for your time and efforts.
 
 The open-appsec Team
