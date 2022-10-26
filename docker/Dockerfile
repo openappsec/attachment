@@ -15,4 +15,4 @@ COPY lib/libosrc_shmem_ipc.so /usr/lib/libosrc_shmem_ipc.so
 COPY lib/libngx_module.so /usr/lib/nginx/modules/ngx_cp_attachment_module.so
 
 RUN echo "load_module /usr/lib/nginx/modules/ngx_cp_attachment_module.so;"|cat - /etc/nginx/nginx.conf> /tmp/out && mv /tmp/out /etc/nginx/nginx.conf
-RUN [ -f /etc/nginx/template/nginx.tmpl ] && echo "load_module /usr/lib/nginx/modules/ngx_cp_attachment_module.so;"|cat - /etc/nginx/template/nginx.tmpl> /tmp/out.tmpl && mv /tmp/out.tmpl /etc/nginx/template/nginx.tmpl
+RUN [ -f /etc/nginx/template/nginx.tmpl ] && echo "load_module /usr/lib/nginx/modules/ngx_cp_attachment_module.so;"|cat - /etc/nginx/template/nginx.tmpl> /tmp/out.tmpl && mv /tmp/out.tmpl /etc/nginx/template/nginx.tmpl || echo ""
