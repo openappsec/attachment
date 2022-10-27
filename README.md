@@ -88,7 +88,7 @@ This step requires Docker to be installed on your comilation environment
  $ make docker
 ```
 
-Later on, you can push the image to your own registry in use it as needed.
+Later on, you can push the image to your own registry and use it as needed.
 
 ## License    
 
