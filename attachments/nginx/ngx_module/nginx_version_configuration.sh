@@ -25,23 +25,39 @@ mkdir -p ${BUILD_OUTPUT_DIR}
 cd ${BUILD_OUTPUT_DIR}
 
 wget --no-check-certificate https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz
+if [[ $? != 0 ]]; then
+    echo "Failed to download NGINX source code. Path used: 'https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz'"
+    exit 1
+fi
 
 tar -xzvf nginx-${NGINX_VERSION}.tar.gz
+if [[ $? != 0 ]]; then
+    echo "Failed to untar NGINX source code. Tar file: 'nginx-${NGINX_VERSION}.tar.gz'"
+    exit 1
+fi
 
-rm nginx-${NGINX_VERSION}.tar.gz
+rm -f nginx-${NGINX_VERSION}.tar.gz
 
 mv nginx-${NGINX_VERSION} nginx-src
 cd nginx-src
 
-if test ! -f configured.ok; then 
+if test ! -f configured.ok; then
     echo "Configuring nginx compiler: ./configure ${CONFIGURE_OPT} --with-cc-opt=\"${EXTRA_CC_OPT} ${LOCAL_CC_OPT}\" && touch configured.ok"
     ./configure ${CONFIGURE_OPT} --with-cc-opt="${EXTRA_CC_OPT} ${LOCAL_CC_OPT}" && touch configured.ok
 else 
     echo "Nginx compiler already Configured...\n"
 fi
 
-make && echo "${EXTRA_CC_OPT}" > cc_flags.mk
+if test ! -f configured.ok; then
+    echo "Failed to configure NGINX source code"
+    exit 1
+fi
 
+make && echo "${EXTRA_CC_OPT}" > cc_flags.mk
+if [[ $? != 0 ]]; then
+    echo "Failed to build NGINX source code"
+    exit 1
+fi
 
 OUTPUT_FILE_NAME=include_paths.mk
 
