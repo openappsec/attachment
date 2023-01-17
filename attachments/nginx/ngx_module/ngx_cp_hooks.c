@@ -72,7 +72,8 @@ init_cp_session_data(ngx_http_request_t *request)
 
     session_data->was_request_fully_inspected = 0;
     session_data->verdict = TRAFFIC_VERDICT_INSPECT;
-    session_data->session_id = session_id++;
+    session_data->session_id = (session_id << 1) | 1U; // Prevent collision with Squid sessions
+    session_id++;
     session_data->remaining_messages_to_reply = 0;
     session_data->response_data.response_data_status = NGX_OK;
     if (!metric_timeout.tv_sec) {
