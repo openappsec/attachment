@@ -161,22 +161,6 @@ HttpAttachmentConfiguration::load(cereal::JSONInputArchive &archive)
     loadNumericalValue(archive, "nginx_inspection_mode", 0);
     loadNumericalValue(archive, "num_of_nginx_ipc_elements", 200);
     loadNumericalValue(archive, "keep_alive_interval_msec", DEFAULT_KEEP_ALIVE_INTERVAL_MSEC);
-
-    try {
-        string user_check_logo_path;
-        archive(cereal::make_nvp("user_check_logo_path", user_check_logo_path));
-        ifstream logo_file(user_check_logo_path);
-        if (!logo_file.is_open()) {
-            string_values.erase("user_check_logo");
-        } else {
-            string_values["user_check_logo"] = string(
-                istreambuf_iterator<char>(logo_file),
-                istreambuf_iterator<char>()
-            );
-        }
-    } catch (const cereal::Exception &) {
-        string_values.erase("user_check_logo");
-    }
 }
 
 bool

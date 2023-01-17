@@ -200,14 +200,16 @@ ngx_http_cp_send_data_to_service(
 {
     ngx_int_t max_retries;
     ngx_int_t res = NGX_OK;
+    int err_code = 0;
     write_dbg(DBG_LEVEL_TRACE, "Sending session data chunk for inspection");
 
     for (max_retries = 5; max_retries > 0; max_retries--) {
-        if (res == NGX_OK && sendChunkedData(nano_service_ipc, fragments_sizes, (const char **)fragments, num_of_data_elem) == 0) {
+        err_code = sendChunkedData(nano_service_ipc, fragments_sizes, (const char **)fragments, num_of_data_elem);
+        if (res == NGX_OK && err_code == 0) {
             return NGX_OK;
         }
 
-        write_dbg(DBG_LEVEL_WARNING, "Failed to send data for inspection - trying again after signaling nano service");
+        write_dbg(DBG_LEVEL_DEBUG, "Failed to send data for inspection - %d attempts remained", max_retries - 1);
 
         if (was_waiting) {
             *was_waiting = 1;
@@ -217,6 +219,24 @@ ngx_http_cp_send_data_to_service(
         if (res != NGX_OK && res != NGX_AGAIN) return res;
     }
 
+    switch(err_code)
+    {
+        case -1:
+            write_dbg(DBG_LEVEL_WARNING, "Failed to send data for inspection - Corrupted shared memory");
+            break;
+        case -2:
+            write_dbg(DBG_LEVEL_WARNING, "Failed to send data for inspection - Requested write size exceeds the write limit");
+            break;
+        case -3:
+            write_dbg(DBG_LEVEL_WARNING, "Failed to send data for inspection - Cannot write to a full queue");
+            break;
+        case -4:
+            write_dbg(DBG_LEVEL_WARNING, "Failed to send data for inspection - Attempted write to a location outside the queue");
+            break;
+        default:
+            write_dbg(DBG_LEVEL_WARNING, "Failed to send data for inspection - Unknown error code %d", err_code);
+            break;
+    }
     return NGX_ERROR;
 }
 

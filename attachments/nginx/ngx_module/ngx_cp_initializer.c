@@ -404,7 +404,7 @@ register_to_attachments_manager(ngx_http_request_t *request)
 
     // Read from the attachment manager:
     // 1. The length of signal path.
-    // 2. The signal path itsel.
+    // 2. The signal path itself.
     // If that fails - return an error.
     timeout = get_timeout_val_sec(1);
     res = exchange_communication_data_with_service(
