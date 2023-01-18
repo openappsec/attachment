@@ -1,6 +1,6 @@
 <div align=center>
 <img src="https://i2-s3-ui-static-content-prod-10.s3.eu-west-1.amazonaws.com/elpis/tree-no-bg-256.png" width="100" height="100"> 
-<h1>openappsec/attachement</h1>
+<h1>openappsec/attachment</h1>
 </div>
 
 ## About
@@ -18,7 +18,7 @@ This repository will host Attachment for different platforms. The first one is t
 
 ## open-appsec NGINX attachment compilation instructions
 
-The attchment can be compiled to support an existing alpine based nginx server or an nginx/ingress-nginx alpine based docker.
+The attachment can be compiled to support an existing alpine based nginx server or an nginx/ingress-nginx alpine based docker.
 
 Your compilation environment must be alpine based and contain git, docker, cmake and g++.
 
@@ -71,9 +71,9 @@ They can be found under the `lib` directory in the `<output path>` given to the 
    `load_module /usr/lib/nginx/modules/libngx_module.so;`
 4. Restart your nginx server.
 
-### Compiling the attachment code and create a docker image for an existing nginx/ingres-nginx alpine docker
+### Compiling the attachment code and creating a docker image for an existing nginx/ingress-nginx alpine docker
 
-This step requires Docker to be installed on your comilation environment
+This step requires Docker to be installed on your compilation environment
 
 1. Clone this repository
 3. Run Configuration script with the required docker image name and tag
@@ -89,6 +89,9 @@ This step requires Docker to be installed on your comilation environment
 ```
 
 Later on, you can push the image to your own registry and use it as needed.
+
+For deployment on docker you can deploy it using the same docker command you used before with regular nginx container, just make sure to add the parameter `--ipc=host`. 
+
 
 ## License    
 
