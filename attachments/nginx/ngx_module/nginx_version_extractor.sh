@@ -300,6 +300,7 @@ addRequiredFlags()
     BUILD_FLAG_PREFIX="--build="
     OPENSSL_VERSION_PREFIX="--with-openssl="
     OPENSSL_OPT_PREFIX="--with-openssl-opt="
+    PCRE_FOLDER_PREFIX="--with-pcre="
     HPACK_ENC_PREFIX="--with-http_v2_hpack_enc"
     AUTH_JWT_PREFIX="--with-http_auth_jwt_module"
     F4F_PREFIX="--with-http_f4f_module"
@@ -315,6 +316,7 @@ addRequiredFlags()
         [[ ! ("${argv[i]}" =~ ${ADDITIONAL_MODULE_FLAG_PREFIX}) ]] && \
         [[ ! ("${argv[i]}" =~ ${OPENSSL_VERSION_PREFIX}) ]] && \
         [[ ! ("${argv[i]}" =~ ${OPENSSL_OPT_PREFIX}) ]] && \
+        [[ ! ("${argv[i]}" =~ ${PCRE_FOLDER_PREFIX}) ]] && \
         [[ ! ("${argv[i]}" =~ ${DYNAMIC_MODULE_FLAG_PREFIX}) ]] && \
         [[ ! ("${argv[i]}" =~ ${BUILD_FLAG_PREFIX}) ]] && \
         [[ ! ("${argv[i]}" =~ ${AUTH_JWT_PREFIX}) ]] && \
