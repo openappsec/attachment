@@ -10,6 +10,7 @@ else
     exit 1
 fi
 NGINX_VERSION_CONF_OUTPUT_PATH=/tmp/nginx.sourcefile.conf
+dos2unix ${NGINX_VERSION_CONF_INPUT_PATH}
 $(dirname $0)/nginx_version_extractor.sh -i ${NGINX_VERSION_CONF_INPUT_PATH} -o ${NGINX_VERSION_CONF_OUTPUT_PATH}
 BUILD_OUTPUT_DIR=${3}
 
