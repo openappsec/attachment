@@ -100,6 +100,20 @@ ngx_http_inspection_mode_e inspection_mode = NON_BLOCKING_THREAD; ///< Default i
 ngx_uint_t num_of_nginx_ipc_elements = 200; ///< Number of NGINX IPC elements.
 ngx_msec_t keep_alive_interval_msec = DEFAULT_KEEP_ALIVE_INTERVAL_MSEC;
 
+static struct timeval
+getCurrTimeFast()
+{
+    struct timeval curr_time;
+    struct timespec curr_time_mono;
+
+
+    clock_gettime(CLOCK_MONOTONIC_COARSE, &curr_time_mono);
+
+    curr_time.tv_sec = curr_time_mono.tv_sec;
+    curr_time.tv_usec = curr_time_mono.tv_nsec/1000.0;
+    return curr_time;
+}
+
 void
 init_list_iterator(ngx_list_t *list, ngx_http_cp_list_iterator *iterator)
 {
@@ -453,8 +467,7 @@ is_timeout_reached(struct timeval *timeout)
 {
     struct timeval curr_time;
 
-    gettimeofday(&curr_time, NULL);
-
+    curr_time = getCurrTimeFast();
     return (timercmp(timeout, &curr_time, <));
 }
 
@@ -463,7 +476,7 @@ get_timeout_val_sec(const int delta_time_in_sec)
 {
     struct timeval time;
 
-    gettimeofday(&time, NULL);
+    time = getCurrTimeFast();
     time.tv_sec += delta_time_in_sec;
     return time;
 }
@@ -473,7 +486,7 @@ get_timeout_val_usec(const int delta_time_in_usec)
 {
     struct timeval time;
 
-    gettimeofday(&time, NULL);
+    time = getCurrTimeFast();
     time.tv_usec += delta_time_in_usec;
     return time;
 }
@@ -714,7 +727,7 @@ write_dbg_impl(int _dbg_level, const char *func, const char *file, int line_num,
     char str_uid[140];
 
     time(&ttime);
-    gettimeofday(&tv, NULL);
+    tv = getCurrTimeFast();
     millisec = lrint(tv.tv_usec/1000.0);
     if (millisec>=1000) {
         // Allow for rounding up to nearest second
@@ -1039,13 +1052,14 @@ set_metric_cpu_usage(void)
     static struct timeval prev_time = {0, 0};
     static const unsigned int usecs_in_sec = 1000000;
 
-    struct timeval curr_time = {0, 0};
+    struct timeval curr_time;
     struct timeval diff_time = {0, 0};
     struct timeval total_usage_time = {0, 0};
     double total_cpu_usage_fraction = 0;
     uint64_t cpu_usage_percent = 0;
 
-    gettimeofday(&curr_time, NULL);
+    curr_time = getCurrTimeFast();
+
     timersub(&curr_time, &prev_time, &diff_time);
     get_total_cpu_usage_time(&total_usage_time);
     total_cpu_usage_fraction = (double)(total_usage_time.tv_sec * usecs_in_sec + total_usage_time.tv_usec) /
