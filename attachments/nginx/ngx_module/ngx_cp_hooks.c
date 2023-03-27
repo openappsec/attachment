@@ -152,7 +152,7 @@ ngx_http_cp_hold_verdict(struct ngx_http_cp_event_thread_ctx_t *ctx)
     for (uint i = 0; i < 3; i++) {
         sleep(1);
         int res = ngx_cp_run_in_thread_timeout(
-            ngx_http_cp_hold_verdict_thread, 
+            ngx_http_cp_hold_verdict_thread,
             (void *)ctx,
             waiting_for_verdict_thread_timeout_msec,
             "ngx_http_cp_hold_verdict_thread"
@@ -166,7 +166,7 @@ ngx_http_cp_hold_verdict(struct ngx_http_cp_event_thread_ctx_t *ctx)
             );
             continue;
         }
-        
+
         if (session_data_p->verdict != TRAFFIC_VERDICT_WAIT) {
             // Verdict was updated.
             write_dbg(
@@ -550,12 +550,15 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
             req_body_thread_timeout_msec,
             "ngx_http_cp_req_body_filter_thread"
         );
-        if (!res) {
+        if (!res || ctx.res == NGX_ERROR) {
             // failed to execute thread task, or it timed out
             session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
             write_dbg(
                 DBG_LEVEL_DEBUG,
-                "req_body_filter thread failed, returning default fail mode verdict. Session id: %d, verdict: %s",
+                "req_body_filter thread failed, returning default fail mode verdict. "
+                "thread execution result: %d, nano service reply: %d, Session id: %d, verdict: %s",
+                res,
+                ctx.res,
                 session_data_p->session_id,
                 session_data_p->verdict == TRAFFIC_VERDICT_ACCEPT ? "accept" : "drop"
             );
