@@ -1,5 +1,3 @@
-install(TARGETS ngx_module DESTINATION lib)
-
 add_custom_command(
     OUTPUT ${CMAKE_INSTALL_PREFIX}/nginx-docker.img
     COMMAND docker build -t nginx-docker ${CMAKE_INSTALL_PREFIX}
