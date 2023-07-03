@@ -46,3 +46,4 @@ target_include_directories(ngx_module PRIVATE ${NGX_INCLUDES})
 target_compile_options(ngx_module PRIVATE ${CC_FLAG_LIST})
 
 install(TARGETS ngx_module DESTINATION lib)
+install(TARGETS ngx_module DESTINATION nginx_attachment/lib)
