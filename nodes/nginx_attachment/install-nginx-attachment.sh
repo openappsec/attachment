@@ -55,7 +55,7 @@ run_installation()
     [ -f /usr/local/share/lua/5.1/kong/templates/nginx.lua ] && sed -i 's|http {|http {\ncp_worker_processes ${{nginx_worker_processes}};|g' /usr/local/share/lua/5.1/kong/templates/nginx.lua || echo
 
     command -v nginx > /dev/null && nginx -s reload
-    command -v kong > /dev/null && kong restart -c /etc/kong/kong.conf
+    command -v kong > /dev/null && kong restart
 
     cp_print "Installation completed successfully." $FORCE_STDOUT
 }
