@@ -54,6 +54,9 @@ run_installation()
     [ -f /usr/local/share/lua/5.1/kong/templates/nginx.lua ] && sed -i 's|return [[|return [[\\nload_module /usr/lib64/nginx/modules/ngx_cp_attachment_module.so;|g' /usr/local/share/lua/5.1/kong/templates/nginx.lua || echo
     [ -f /usr/local/share/lua/5.1/kong/templates/nginx.lua ] && sed -i 's|http {|http {\ncp_worker_processes ${{nginx_worker_processes}};|g' /usr/local/share/lua/5.1/kong/templates/nginx.lua || echo
 
+    command -v nginx > /dev/null && nginx -s reload
+    command -v kong > /dev/null && kong restart -c /etc/kong/kong.conf
+
     cp_print "Installation completed successfully." $FORCE_STDOUT
 }
 
