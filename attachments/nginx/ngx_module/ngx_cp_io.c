@@ -665,7 +665,11 @@ ngx_http_cp_meta_data_sender(ngx_http_request_t *request, uint32_t cur_request_i
     uint16_t chunck_type;
     uint16_t listening_port;
     ngx_int_t res;
+    ngx_str_t ngx_parsed_host_str = ngx_string("host");
     ngx_str_t maybe_host = { 0, (u_char *)"" };
+    ngx_str_t ngx_parsed_host = { 0, (u_char *)"" };
+    ngx_str_t parsed_uri = { 0, (u_char *)"" };
+    ngx_http_variable_value_t *ngx_var;
     char *fragments[META_DATA_COUNT + 2];
     uint16_t fragments_sizes[META_DATA_COUNT + 2];
     static int failure_count = 0;
@@ -712,6 +716,23 @@ ngx_http_cp_meta_data_sender(ngx_http_request_t *request, uint32_t cur_request_i
         maybe_host.data = request->headers_in.host->value.data;
     }
 
+    ngx_var = ngx_http_get_variable(request, &ngx_parsed_host_str, ngx_hash_key(ngx_parsed_host_str.data, ngx_parsed_host_str.len));
+    if (ngx_var != NULL && !ngx_var->not_found && ngx_var->len != 0) {
+        ngx_parsed_host.len = ngx_var->len;
+        ngx_parsed_host.data = ngx_var->data;
+    } else {
+        ngx_parsed_host.len = maybe_host.len;
+        ngx_parsed_host.data = maybe_host.data;
+    }
+
+    if (request->uri.len != 0) {
+        parsed_uri.data = request->uri.data;
+        parsed_uri.len = request->uri.len;
+    } else {
+        parsed_uri.data = request->unparsed_uri.data;
+        parsed_uri.len = request->unparsed_uri.len;
+    }
+
     // Add host data length to the fragments.
     set_fragment_elem(
         fragments,
@@ -739,7 +760,7 @@ ngx_http_cp_meta_data_sender(ngx_http_request_t *request, uint32_t cur_request_i
     listening_port = htons(((struct sockaddr_in *)request->connection->local_sockaddr)->sin_port);
     set_fragment_elem(fragments, fragments_sizes, &listening_port, sizeof(listening_port), LISTENING_PORT + 2);
 
-    // Add listening port data.
+    // Add URI data.
     set_fragment_elem(fragments, fragments_sizes, &request->unparsed_uri.len, sizeof(uint16_t), URI_SIZE + 2);
     set_fragment_elem(fragments, fragments_sizes, request->unparsed_uri.data, request->unparsed_uri.len, URI_DATA + 2);
 
@@ -751,6 +772,14 @@ ngx_http_cp_meta_data_sender(ngx_http_request_t *request, uint32_t cur_request_i
     // Add client IP data.
     client_port = htons(((struct sockaddr_in *)request->connection->sockaddr)->sin_port);
     set_fragment_elem(fragments, fragments_sizes, &client_port, sizeof(client_port), CLIENT_PORT + 2);
+
+    // Add NGX parsed host data.
+    set_fragment_elem(fragments, fragments_sizes, &ngx_parsed_host.len, sizeof(uint16_t), PARSED_HOST_SIZE + 2);
+    set_fragment_elem(fragments, fragments_sizes, ngx_parsed_host.data, ngx_parsed_host.len, PARSED_HOST_DATA + 2);
+
+    // Add parsed URI data.
+    set_fragment_elem(fragments, fragments_sizes, &parsed_uri.len, sizeof(uint16_t), PARSED_URI_SIZE + 2);
+    set_fragment_elem(fragments, fragments_sizes, parsed_uri.data, parsed_uri.len, PARSED_URI_DATA + 2);
 
     // Sends all the data to the nano service.
     res = ngx_http_cp_send_data_to_service(fragments, fragments_sizes, META_DATA_COUNT + 2, cur_request_id, NULL, fail_open_timeout);
