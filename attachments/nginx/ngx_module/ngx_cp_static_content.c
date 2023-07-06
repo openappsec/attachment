@@ -227,7 +227,7 @@ is_static_resource_request(ngx_str_t *static_resource_name)
 
     if (!is_static_resources_table_initialized()) {
         write_dbg(
-            DBG_LEVEL_WARNING,
+            DBG_LEVEL_DEBUG,
             "Cannot determine whether request is for a static resource: static resources' table is not initialized"
         );
         return 0;

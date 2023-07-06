@@ -29,10 +29,11 @@ Before compiling, ensure the latest development versions of the following librar
 * zlib
 * OpenSSL
 * Geoip
+* Python3
 
 ```bash
  $ apk update
- $ apk add pcre-dev libxml2-dev zlib-dev openssl-dev geoip-dev
+ $ apk add pcre-dev libxml2-dev zlib-dev openssl-dev geoip-dev linux-headers python3
 ```
 
 ### Compiling the attachment code for an existing nginx server
