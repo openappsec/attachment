@@ -54,7 +54,7 @@ if test ! -f configured.ok; then
     exit 1
 fi
 
-make -j 60 && echo "${EXTRA_CC_OPT}" > cc_flags.mk
+make && echo "${EXTRA_CC_OPT}" > cc_flags.mk
 if [[ $? != 0 ]]; then
     echo "Failed to build NGINX source code"
     exit 1
