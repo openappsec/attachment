@@ -372,13 +372,20 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
     }
 
     if (!get_already_registered() || !isIpcReady()) {
-        write_dbg(DBG_LEVEL_DEBUG, "spawn ngx_http_cp_registration_thread");
-        res = ngx_cp_run_in_thread_timeout(
-            ngx_http_cp_registration_thread,
-            (void *)&ctx,
-            registration_thread_timeout_msec,
-            "ngx_http_cp_registration_thread"
-        );
+        if (is_registration_timeout_reached()) {
+            write_dbg(DBG_LEVEL_DEBUG, "spawn ngx_http_cp_registration_thread");
+            reset_registration_timeout();
+            res = ngx_cp_run_in_thread_timeout(
+                ngx_http_cp_registration_thread,
+                (void *)&ctx,
+                registration_thread_timeout_msec,
+                "ngx_http_cp_registration_thread"
+            );
+        } else {
+            res = 0;
+            write_dbg(DBG_LEVEL_DEBUG, "Attachment registration has recently started, wait for timeout");
+        }
+
         if (!res) {
             // failed to execute thread task, or it timed out
             session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
@@ -405,6 +412,7 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
     }
 
     set_already_registered(1);
+    reset_registration_timeout_duration();
 
     if (handle_shmem_corruption() == NGX_ERROR) {
         session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;

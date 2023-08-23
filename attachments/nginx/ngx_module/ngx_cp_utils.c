@@ -491,6 +491,17 @@ get_timeout_val_usec(const int delta_time_in_usec)
     return time;
 }
 
+struct timeval
+get_timeout_val_msec(const int delta_time_in_msec)
+{
+    struct timeval time;
+
+    time = getCurrTimeFast();
+    time.tv_sec += delta_time_in_msec / 1000;
+    time.tv_usec += (delta_time_in_msec % 1000) * 1000;
+    return time;
+}
+
 void
 set_custom_response(const ngx_str_t *title, const ngx_str_t *body, const ngx_str_t *uuid, ngx_uint_t response_code)
 {
@@ -577,7 +588,7 @@ get_response_page(ngx_http_request_t *request, ngx_chain_t (*out_chain)[7])
 
     for (idx = 0; idx < 7; idx++) {
         buf[idx] = ngx_calloc_buf(request->pool);
-        if (buf == NULL) {
+        if (buf[idx] == NULL) {
             for (; idx >= 0; idx--) {
                 ngx_pfree(request->pool, buf[idx]);
             }

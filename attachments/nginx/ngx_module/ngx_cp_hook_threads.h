@@ -65,6 +65,26 @@ void set_already_registered(ngx_int_t value);
 /// 
 ngx_int_t get_already_registered(void);
 
+///
+/// @brief Resets the registration timeout duration to its minimal value.
+/// @returns NULL.
+///
+void reset_registration_timeout_duration(void);
+
+///
+/// @brief Resets the registration timeout.
+/// The timeout is being reset to now + timeout duration, where the timeout duration gets doubled every reset.
+/// The initial timeout duration is 100 msec, and the maximum is 3200 msec.
+/// @returns NULL.
+///
+void reset_registration_timeout(void);
+
+///
+/// @brief Checks if registration timeout has elapsed.
+/// @returns 1 if timeout has elapsed, 0 if not.
+///
+ngx_int_t is_registration_timeout_reached(void);
+
 /// 
 /// @brief Initates ngx_http_cp_event_thread_ctx_t struct.
 /// @param[in, out] ctx  struct to initiate.
