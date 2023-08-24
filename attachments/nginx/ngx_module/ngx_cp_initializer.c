@@ -91,7 +91,7 @@ exchange_communication_data_with_service(
         if (res < 0) {
             close(socket);
             socket = -1;
-            write_dbg_if_needed(DBG_LEVEL_TRACE, "Failed to communicate with the socket");
+            write_dbg(DBG_LEVEL_TRACE, "Failed to communicate with the socket, Error: %s", strerror(errno));
             break;
         }
 
@@ -102,7 +102,7 @@ exchange_communication_data_with_service(
         if (is_timeout_reached(remaining_timeout)) {
             close(socket);
             socket = -1;
-            write_dbg_if_needed(DBG_LEVEL_TRACE, "Reached timeout while communicating with the socket");
+            write_dbg(DBG_LEVEL_TRACE, "Reached timeout while communicating with the socket");
             break;
         }
     }
@@ -132,7 +132,7 @@ init_signaling_socket()
     // Setup a new socket
     comm_socket = socket(AF_UNIX, SOCK_STREAM, 0);
     if (comm_socket < 0) {
-        write_dbg_if_needed(DBG_LEVEL_WARNING, "Could not create socket");
+        write_dbg(DBG_LEVEL_WARNING, "Could not create socket, Error: %s", strerror(errno));
         return NGX_ERROR;
     }
 
@@ -142,7 +142,7 @@ init_signaling_socket()
     if (connect(comm_socket, (struct sockaddr *)&server, sizeof(struct sockaddr_un)) == -1) {
         close(comm_socket);
         comm_socket = -1;
-        write_dbg_if_needed(
+        write_dbg(
             DBG_LEVEL_DEBUG,
             "Could not connect to nano service. Path: %s, Error: %s",
             server.sun_path,
@@ -165,7 +165,7 @@ init_signaling_socket()
         &timeout
     );
     if (res <= 0) {
-        write_dbg_if_needed(DBG_LEVEL_WARNING, "Failed to send unique id size");
+        write_dbg(DBG_LEVEL_WARNING, "Failed to send unique id size");
         return NGX_ERROR;
     }
 
@@ -177,13 +177,13 @@ init_signaling_socket()
         &timeout
     );
     if (res <= 0) {
-        write_dbg_if_needed(DBG_LEVEL_WARNING, "Failed to send unique id %s", unique_id);
+        write_dbg(DBG_LEVEL_WARNING, "Failed to send unique id %s", unique_id);
         return NGX_ERROR;
     }
 
     res = exchange_communication_data_with_service(comm_socket, &nginx_user_id, sizeof(uint32_t), WRITE_TO_SOCKET, &timeout);
     if (res <= 0) {
-        write_dbg_if_needed(DBG_LEVEL_WARNING, "Failed to send nginx user id");
+        write_dbg(DBG_LEVEL_WARNING, "Failed to send nginx user id");
         return NGX_ERROR;
     }
 
@@ -195,7 +195,7 @@ init_signaling_socket()
         &timeout
     );
     if (res <= 0) {
-        write_dbg_if_needed(DBG_LEVEL_WARNING, "Failed to send nginx group id");
+        write_dbg(DBG_LEVEL_WARNING, "Failed to send nginx group id");
         return NGX_ERROR;
     }
 
@@ -209,11 +209,11 @@ init_signaling_socket()
         &timeout
     );
     if (res <= 0) {
-        write_dbg_if_needed(DBG_LEVEL_WARNING, "Failed to read registration ack");
+        write_dbg(DBG_LEVEL_WARNING, "Failed to read registration ack");
         return NGX_ERROR;
     }
 
-    write_dbg_if_needed(DBG_LEVEL_DEBUG, "Successfully connected on client socket %d", comm_socket);
+    write_dbg(DBG_LEVEL_DEBUG, "Successfully connected on client socket %d", comm_socket);
     return NGX_OK;
 }
 
@@ -298,7 +298,7 @@ register_to_attachments_manager(ngx_http_request_t *request)
     // Connect a new socket.
     registration_socket = socket(AF_UNIX, SOCK_STREAM, 0);
     if (registration_socket < 0) {
-    	write_dbg(DBG_LEVEL_WARNING, "Could not create socket");
+    	write_dbg(DBG_LEVEL_WARNING, "Could not create socket, Error: %s", strerror(errno));
         return NGX_ERROR;
     }
 
@@ -309,7 +309,7 @@ register_to_attachments_manager(ngx_http_request_t *request)
         cur_errno = errno;
         close(registration_socket);
         registration_socket = -1;
-        write_dbg_if_needed(
+        write_dbg(
             DBG_LEVEL_DEBUG,
             "Could not connect to nano service. Path: %s, Error: %s, Errno: %d",
             server.sun_path,
@@ -338,7 +338,7 @@ register_to_attachments_manager(ngx_http_request_t *request)
         &timeout
     );
     if (res <= 0) {
-        write_dbg_if_needed(DBG_LEVEL_WARNING, "Failed to send attachment type");
+        write_dbg(DBG_LEVEL_WARNING, "Failed to send attachment type");
         close(registration_socket);
         registration_socket = -1;
         return NGX_ERROR;
@@ -352,7 +352,7 @@ register_to_attachments_manager(ngx_http_request_t *request)
         &timeout
     );
     if (res <= 0) {
-        write_dbg_if_needed(DBG_LEVEL_WARNING, "Failed to send worker ID");
+        write_dbg(DBG_LEVEL_WARNING, "Failed to send worker ID");
         close(registration_socket);
         registration_socket = -1;
         return NGX_ERROR;
@@ -366,7 +366,7 @@ register_to_attachments_manager(ngx_http_request_t *request)
         &timeout
     );
     if (res <= 0) {
-        write_dbg_if_needed(DBG_LEVEL_WARNING, "Failed to send workers amount");
+        write_dbg(DBG_LEVEL_WARNING, "Failed to send workers amount");
         close(registration_socket);
         registration_socket = -1;
         return NGX_ERROR;
@@ -380,7 +380,7 @@ register_to_attachments_manager(ngx_http_request_t *request)
         &timeout
     );
     if (res <= 0) {
-        write_dbg_if_needed(DBG_LEVEL_WARNING, "Failed to send family name size");
+        write_dbg(DBG_LEVEL_WARNING, "Failed to send family name size");
         close(registration_socket);
         registration_socket = -1;
         return NGX_ERROR;
@@ -395,7 +395,7 @@ register_to_attachments_manager(ngx_http_request_t *request)
             &timeout
         );
         if (res <= 0) {
-            write_dbg_if_needed(DBG_LEVEL_WARNING, "Failed to send family name");
+            write_dbg(DBG_LEVEL_WARNING, "Failed to send family name");
             close(registration_socket);
             registration_socket = -1;
             return NGX_ERROR;
@@ -416,7 +416,7 @@ register_to_attachments_manager(ngx_http_request_t *request)
     );
 
     if (res <= 0) {
-        write_dbg_if_needed(DBG_LEVEL_WARNING, "Failed to read path length");
+        write_dbg(DBG_LEVEL_WARNING, "Failed to read path length");
         close(registration_socket);
         registration_socket = -1;
         return NGX_ERROR;
@@ -430,7 +430,7 @@ register_to_attachments_manager(ngx_http_request_t *request)
         &timeout
     );
     if (res <= 0) {
-        write_dbg_if_needed(DBG_LEVEL_WARNING, "Failed to read socket path");
+        write_dbg(DBG_LEVEL_WARNING, "Failed to read socket path");
         close(registration_socket);
         registration_socket = -1;
         return NGX_ERROR;
@@ -440,7 +440,7 @@ register_to_attachments_manager(ngx_http_request_t *request)
     shared_verdict_signal_path[path_length] = '\0';
     int32_t dbg_id = worker_id;
     int32_t dbg_size = workers_amount_to_send;
-    write_dbg_if_needed(
+    write_dbg(
         DBG_LEVEL_DEBUG,
         "Successfully registered on client. socket: %d, instance ID: %d, instances amount: %d, received path: %s",
         registration_socket,
@@ -535,23 +535,23 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
 
     if (need_registration) {
         if (register_to_attachments_manager(request) == NGX_ERROR) {
-            write_dbg_if_needed(DBG_LEVEL_INFO, "Failed to register to Attachments Manager service");
+            write_dbg(DBG_LEVEL_INFO, "Failed to register to Attachments Manager service");
             return NGX_ERROR;
         }
         need_registration = 0;
     }
 
     if (comm_socket < 0) {
-        write_dbg_if_needed(DBG_LEVEL_DEBUG, "Registering to nano service");
+        write_dbg(DBG_LEVEL_DEBUG, "Registering to nano service");
         if (init_signaling_socket() == NGX_ERROR) {
-            write_dbg_if_needed(DBG_LEVEL_DEBUG, "Failed to register to the Nano Service");
+            write_dbg(DBG_LEVEL_DEBUG, "Failed to register to the Nano Service");
             need_registration = 1;
             return NGX_ERROR;
         }
     }
 
     if (init_general_config(SHARED_ATTACHMENT_CONF_PATH) == NGX_ERROR) {
-        write_dbg_if_needed(DBG_LEVEL_INFO, "Failed to initialize attachment's configuration");
+        write_dbg(DBG_LEVEL_INFO, "Failed to initialize attachment's configuration");
         return NGX_ERROR;
     }
 
@@ -560,7 +560,7 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
     static const int  max_ipc_init_retry_count = 10;
     static int max_retry_count = max_ipc_init_retry_count;
     if (nano_service_ipc == NULL) {
-        write_dbg_if_needed(DBG_LEVEL_INFO, "Initializing IPC channel");
+        write_dbg(DBG_LEVEL_INFO, "Initializing IPC channel");
         nano_service_ipc = initIpc(
             unique_id,
             nginx_user_id,
@@ -574,7 +574,7 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
                 restart_communication(request);
                 max_retry_count = max_ipc_init_retry_count;
             }
-            write_dbg_if_needed(DBG_LEVEL_INFO, "Failed to initialize IPC with nano service");
+            write_dbg(DBG_LEVEL_INFO, "Failed to initialize IPC with nano service");
             return NGX_ERROR;
         }
     }
@@ -611,7 +611,7 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
 int
 restart_communication(ngx_http_request_t *request)
 {
-    write_dbg_if_needed(DBG_LEVEL_TRACE, "Restarting communication channels with nano service");
+    write_dbg(DBG_LEVEL_TRACE, "Restarting communication channels with nano service");
     if (nano_service_ipc != NULL) {
         destroyIpc(nano_service_ipc, 0);
         nano_service_ipc = NULL;
@@ -619,7 +619,7 @@ restart_communication(ngx_http_request_t *request)
 
     if (init_signaling_socket() == NGX_ERROR) {
         if (register_to_attachments_manager(request) == NGX_ERROR) {
-            write_dbg_if_needed(DBG_LEVEL_DEBUG, "Failed to register to Attachments Manager service");
+            write_dbg(DBG_LEVEL_DEBUG, "Failed to register to Attachments Manager service");
             return -1;
         }
 

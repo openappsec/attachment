@@ -145,7 +145,7 @@ ngx_int_t free_list_from_pool(ngx_pool_t *memory_pool, ngx_list_t *list);
 /// @param[in] bucket_size Bucket size to set in the hash table.
 /// @param[in, out] keys Keys initiate and put into the hash_table.
 /// @param[in, out] initial_value Initial hash value.
-/// @param[in, out] initial_value_size Initial hash value's size. 
+/// @param[in, out] initial_value_size Initial hash value's size.
 /// @return ngx_int_t
 ///         - #NGX_OK.
 ///         - #NGX_ERROR.
@@ -280,6 +280,13 @@ struct timeval get_timeout_val_sec(const int delta_time_in_sec);
 /// @returns timeval struct with tv_sec value of += delta_time_in_usec.
 ///
 struct timeval get_timeout_val_usec(const int delta_time_in_usec);
+
+///
+/// @brief Get delta current time + delta_time_in_msec value in msec.
+/// @param[in] delta_time_in_msec Delta time to return
+/// @returns timeval struct with tv_sec, tv_usec set accordingly
+///
+struct timeval get_timeout_val_msec(const int delta_time_in_msec);
 
 ///
 /// @brief Get the currently set response page.
@@ -420,12 +427,12 @@ u_char *reverse_strnchr(u_char *string, const u_char char_to_find, const size_t 
 ngx_msec_t get_keep_alive_interval_msec(void);
 
 ///
-/// @brief Update CPU's max, average metrics and time usage metric. 
+/// @brief Update CPU's max, average metrics and time usage metric.
 ///
 void set_metric_cpu_usage(void);
 
 ///
-/// @brief Update memory's max, average metrics and time usage metric. 
+/// @brief Update memory's max, average metrics and time usage metric.
 ///
 void set_metric_memory_usage(void);
 

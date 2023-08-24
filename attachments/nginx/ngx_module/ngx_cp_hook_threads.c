@@ -55,16 +55,41 @@ static ngx_int_t already_registered = 0; ///< Registration status with the nano 
 static const ngx_int_t inspection_irrelevant = INSPECTION_IRRELEVANT;
 extern struct timeval metric_timeout; ///< Holds per-session metric timeout.
 
-void
+#define MIN_REGISTRATION_DURATION_MSEC 100
+#define MAX_REGISTRATION_DURATION_MSEC 3200
+static uint current_registration_duration_msec = MIN_REGISTRATION_DURATION_MSEC;
+static struct timeval registration_timeout = (struct timeval){0};
+
+inline void
 set_already_registered(ngx_int_t value)
 {
     already_registered = value;
 }
 
-ngx_int_t
+inline ngx_int_t
 get_already_registered()
 {
     return already_registered;
+}
+
+inline void
+reset_registration_timeout(void)
+{
+    registration_timeout = get_timeout_val_msec(current_registration_duration_msec);
+    if (current_registration_duration_msec < MAX_REGISTRATION_DURATION_MSEC)
+        current_registration_duration_msec *= 2;
+}
+
+inline void
+reset_registration_timeout_duration(void)
+{
+    current_registration_duration_msec = MIN_REGISTRATION_DURATION_MSEC;
+}
+
+inline ngx_int_t
+is_registration_timeout_reached(void)
+{
+    return is_timeout_reached(&registration_timeout);
 }
 
 void
@@ -88,14 +113,15 @@ ngx_http_cp_registration_thread(void *_ctx)
 {
     struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t *)_ctx;
     ngx_int_t res = ngx_cp_attachment_init_process(ctx->request);
-    if (res == NGX_ABORT && already_registered) {
-        already_registered = 0;
+    if (res == NGX_ABORT && get_already_registered()) {
+        set_already_registered(0);
         disconnect_communication();
         reset_transparent_mode();
     }
     if (res != NGX_OK) {
         // failed to register to the attachment service.
-        if (already_registered) handle_inspection_failure(registration_failure_weight, fail_mode_verdict, ctx->session_data_p);
+        if (get_already_registered())
+            handle_inspection_failure(registration_failure_weight, fail_mode_verdict, ctx->session_data_p);
         write_dbg(DBG_LEVEL_DEBUG, "Communication with nano service is not ready yet");
         THREAD_CTX_RETURN(NGX_OK);
     }
