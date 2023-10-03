@@ -17,10 +17,11 @@ This repository will host Attachment for different platforms. The first one is t
 
 
 ## open-appsec NGINX attachment compilation instructions
+*We Provide an Example for compilation instructions on alpine, the attachment can be complied on other environments that match the environment hosting nginx, yet compilation instructions could need adjustments*
 
-The attachment can be compiled to support an existing alpine based nginx server or an nginx/ingress-nginx alpine based docker.
+The attachment can be compiled to support an existing nginx server or an nginx/ingress-nginxdocker.
 
-Your compilation environment must be alpine based and contain git, docker, cmake and g++.
+Your compilation environment must contain git, docker, cmake and g++.
 
 Before compiling, ensure the latest development versions of the following libraries:
 
@@ -61,39 +62,3 @@ On your compilation environment:
 
 #### NGINX plugin associated libraries
 The NGINX plugin uses these libraries: shmem_ipc, compression_utils, and nginx_attachment_util.
-
-They can be found under the `lib` directory in the `<output path>` given to the CMake.
-
-#### Deploying the attachment on an existing alpine nginx server
-
-1. Copy the associated libraries to /usr/lib on your existing nginx server
-2. Copy the nginx attachment file lib/libngx_module.so to the following path on your existing nginx server: /usr/lib/nginx/modules/
-3. Load the attachment on your nginx by adding the following command to the main nginx.conf file: 
-   `load_module /usr/lib/nginx/modules/libngx_module.so;`
-4. Restart your nginx server.
-
-### Compiling the attachment code and creating a docker image for an existing nginx/ingress-nginx alpine docker
-
-This step requires Docker to be installed on your compilation environment
-
-1. Clone this repository
-3. Run Configuration script with the required docker image name and tag
-4. Run CMake command
-5. Run make command
-
-```bash
- $ git clone https://github.com/openappsec/attachment.git
- $ ./attachments/nginx/ngx_module/nginx_version_configuration.sh --docker <input docker image> build_out
- $ cmake -DCMAKE_INSTALL_PREFIX=build_out -DOUTPUT_DOCKER_IMAGE=<output docker image> .
- $ make install
- $ make docker
-```
-
-Later on, you can push the image to your own registry and use it as needed.
-
-For deployment on docker you can deploy it using the same docker command you used before with regular nginx container, just make sure to add the parameter `--ipc=host`. 
-
-
-## License    
-
-open-appsec/attachment is open source and available under the Apache 2.0 license.
