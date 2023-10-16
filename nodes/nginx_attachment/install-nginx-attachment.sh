@@ -49,6 +49,11 @@ run_installation()
     cp_exec "cp lib/libngx_module.so /usr/lib/nginx/modules/ngx_cp_attachment_module.so"
     cp_exec "cp lib/libngx_module.so /usr/lib64/nginx/modules/ngx_cp_attachment_module.so"
 
+    [ -f /etc/nginx/nginx.conf ] && sed -i -e '/load_module.*ngx_cp_attachment_module.so;/d' /etc/nginx/nginx.conf || echo
+    [ -f /etc/nginx/template/nginx.tmpl ] && sed -i -e '/load_module.*ngx_cp_attachment_module.so;/d' /etc/nginx/template/nginx.tmpl || echo
+    [ -f /usr/local/share/lua/5.1/kong/templates/nginx.lua ] && sed -i -e '/load_module.*ngx_cp_attachment_module.so;/d' /usr/local/share/lua/5.1/kong/templates/nginx.lua || echo
+    [ -f /usr/local/share/lua/5.1/kong/templates/nginx.lua ] && sed -i -e '/cp_worker_processes/d'/usr/local/share/lua/5.1/kong/templates/nginx.lua || echo
+
     [ -f /etc/nginx/nginx.conf ] && sed -i 1i'load_module /usr/lib/nginx/modules/ngx_cp_attachment_module.so;' /etc/nginx/nginx.conf || echo
     [ -f /etc/nginx/template/nginx.tmpl ] && sed -i 1i'load_module /usr/lib/nginx/modules/ngx_cp_attachment_module.so;' /etc/nginx/template/nginx.tmpl || echo
     [ -f /usr/local/share/lua/5.1/kong/templates/nginx.lua ] && sed -i 's|return [[|return [[\\nload_module /usr/lib64/nginx/modules/ngx_cp_attachment_module.so;|g' /usr/local/share/lua/5.1/kong/templates/nginx.lua || echo
