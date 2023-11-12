@@ -320,6 +320,81 @@ calcProcessingTime(ngx_http_cp_session_data *session_data_p, struct timespec *ho
     }
 }
 
+///
+/// @brief Calculates the size of a request.
+/// @details Calculates the size of a given request according to headers
+/// and body parts lengths.
+/// @param[in] request NGINX request.
+/// @return the calculated size of the request.
+///
+static uint64_t
+calc_request_size(ngx_http_request_t *request)
+{
+    uint64_t  request_size = 0;
+    ngx_list_part_t *part;
+    ngx_table_elt_t *header;
+    static const uint64_t  max_expected_request_size = 100ULL * 1024 * 1024;
+
+    // Calculate the size of request headers
+    for (part = &request->headers_in.headers.part; part != NULL; part = part->next) {
+        header = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            request_size += header[i].key.len + header[i].value.len + 2; // 2 bytes for CRLF
+        }
+    }
+    request_size += 2;
+
+    // Calculate the size of the request body
+    if (request->request_body && request->request_body->buf) {
+        request_size += ngx_buf_size(request->request_body->buf);
+    }
+    write_dbg(DBG_LEVEL_TRACE, "Request size %d", request_size);
+    if (request_size > max_expected_request_size) {
+        write_dbg(DBG_LEVEL_WARNING, "Request size is higher than expected: %d", request_size);
+    }
+    return request_size;
+}
+
+///
+/// @brief Calculates the size of a response.
+/// @details Calculates the size of a response according to Content-Length
+/// header if available or according to header and body parts lengths if it
+/// is not available.
+/// @param[in] request NGINX request.
+/// @return the calculated size of the response.
+///
+static uint64_t
+calc_response_size(ngx_http_request_t *request)
+{
+    uint64_t response_size = 0;
+    ngx_list_part_t *part;
+    ngx_table_elt_t *header;
+
+    // Calculate the size of response headers
+    for (part = &request->headers_out.headers.part; part != NULL; part = part->next) {
+        header = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            response_size += header[i].key.len + header[i].value.len + 2; // 2 bytes for CRLF
+        }
+    }
+    response_size += 2;
+
+    // Calculate the size of the request body
+    if (request->headers_out.content_length_n != -1) {
+        // If Content-Length header is set, use it
+        response_size += request->headers_out.content_length_n;
+    } else {
+        // Otherwise, iterate through response buffers and add their sizes
+        ngx_chain_t *chain = request->out;
+        for (chain = request->out; chain != NULL ; chain = chain->next) {
+            if (chain->buf) response_size += ngx_buf_size(chain->buf);
+        }
+    }
+
+    write_dbg(DBG_LEVEL_TRACE, "Response size %d", response_size);
+    return response_size;
+}
+
 ngx_int_t
 ngx_http_cp_req_header_handler(ngx_http_request_t *request)
 {
@@ -347,6 +422,8 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
     set_current_session_id(0);
     reset_dbg_ctx();
     write_dbg(DBG_LEVEL_DEBUG, "Request headers received");
+
+    updateMetricField(REQUEST_OVERALL_SIZE_COUNT, calc_request_size(request));
     if (is_in_transparent_mode()) {
         updateMetricField(TRANSPARENTS_COUNT, 1);
         return fail_mode_verdict;
@@ -459,6 +536,15 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
         ctx.should_return,
         ctx.res
     );
+
+    if (session_data_p->verdict == TRAFFIC_VERDICT_WAIT) {
+        res = ngx_http_cp_hold_verdict(&ctx);
+        if (!res) {
+            session_data_p->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+            updateMetricField(HOLD_THREAD_TIMEOUT, 1);
+            return fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+        }
+    }
 
     calcProcessingTime(session_data_p, &hook_time_begin, 1);
     if (ctx.should_return) {
@@ -713,6 +799,8 @@ ngx_http_cp_res_header_filter(ngx_http_request_t *request)
     set_current_session_id(session_data_p->session_id);
 
     write_dbg(DBG_LEVEL_DEBUG, "Response header filter handling session ID: %d", session_data_p->session_id);
+
+    updateMetricField(RESPONSE_OVERALL_SIZE_COUNT, calc_response_size(request));
 
     if (!isIpcReady()) {
         write_dbg(
