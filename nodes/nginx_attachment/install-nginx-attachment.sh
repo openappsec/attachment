@@ -53,14 +53,17 @@ run_installation()
     [ -f /etc/nginx/template/nginx.tmpl ] && sed -i -e '/load_module.*ngx_cp_attachment_module.so;/d' /etc/nginx/template/nginx.tmpl || echo
     [ -f /usr/local/share/lua/5.1/kong/templates/nginx.lua ] && sed -i -e '/load_module.*ngx_cp_attachment_module.so;/d' /usr/local/share/lua/5.1/kong/templates/nginx.lua || echo
     [ -f /usr/local/share/lua/5.1/kong/templates/nginx.lua ] && sed -i -e '/cp_worker_processes/d'/usr/local/share/lua/5.1/kong/templates/nginx.lua || echo
+    [ -f /usr/local/apisix/apisix/cli/ngx_tpl.lua ] && sed -i -e '/load_module.*ngx_cp_attachment_module.so;/d' /usr/local/apisix/apisix/cli/ngx_tpl.lua || echo
 
     [ -f /etc/nginx/nginx.conf ] && sed -i 1i'load_module /usr/lib/nginx/modules/ngx_cp_attachment_module.so;' /etc/nginx/nginx.conf || echo
     [ -f /etc/nginx/template/nginx.tmpl ] && sed -i 1i'load_module /usr/lib/nginx/modules/ngx_cp_attachment_module.so;' /etc/nginx/template/nginx.tmpl || echo
-    [ -f /usr/local/share/lua/5.1/kong/templates/nginx.lua ] && sed -i 's|return [[|return [[\\nload_module /usr/lib64/nginx/modules/ngx_cp_attachment_module.so;|g' /usr/local/share/lua/5.1/kong/templates/nginx.lua || echo
+    [ -f /usr/local/share/lua/5.1/kong/templates/nginx.lua ] && sed -i 's|return \[\[|return \[\[\nload_module /usr/lib/nginx/modules/ngx_cp_attachment_module.so;|g' /usr/local/share/lua/5.1/kong/templates/nginx.lua || echo
     [ -f /usr/local/share/lua/5.1/kong/templates/nginx.lua ] && sed -i 's|http {|http {\ncp_worker_processes ${{nginx_worker_processes}};|g' /usr/local/share/lua/5.1/kong/templates/nginx.lua || echo
+    [ -f /usr/local/apisix/apisix/cli/ngx_tpl.lua ] && sed -i 's|return \[\=\[|return \[\=\[\nload_module /usr/lib/nginx/modules/ngx_cp_attachment_module.so;|' /usr/local/apisix/apisix/cli/ngx_tpl.lua || echo
 
     command -v nginx > /dev/null && nginx -s reload
     command -v kong > /dev/null && kong restart
+    command -v apisix > /dev/null && apisix reload
 
     cp_print "Installation completed successfully." $FORCE_STDOUT
 }
