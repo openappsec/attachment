@@ -17,11 +17,11 @@ This repository will host Attachments for different platforms. The first one is 
 
 
 ## open-appsec NGINX attachment compilation instructions
-*We provide an example for compilation instructions on Alpine, the attachment can be comiplied on other environments that match the environment hosting nginx, yet compilation instructions could need adjustment*
+*We provide an example for compilation instructions on Alpine, the attachment can be complied on other environments that match the environment hosting nginx, yet compilation instructions could need adjustment*
 
 The attachment can be compiled to support an existing nginx server or an nginx/ingress-nginxdocker.
 
-Your compilation environment must contain git, docker, cmake and g++.
+Your compilation environment must contain git, docker, cmake, and g++.
 
 Before compiling, ensure the latest development versions of the following libraries:
 
@@ -33,8 +33,8 @@ Before compiling, ensure the latest development versions of the following librar
 * Python3
 
 ```bash
- $ apk update
- $ apk add pcre-dev libxml2-dev zlib-dev openssl-dev geoip-dev linux-headers python3
+ apk update
+ apk add pcre-dev libxml2-dev zlib-dev openssl-dev geoip-dev linux-headers python3
 ```
 
 ### Compiling the attachment code for an existing NGINX server
@@ -43,7 +43,7 @@ On your existing nginx server:
 1. Run command to extract nginx compilation flags to a file
 
 ```bash
- $ nginx -V &> /tmp/nginx.ver
+ nginx -V &> /tmp/nginx.ver
 ```
 On your compilation environment:
 1. Clone this repository
@@ -55,12 +55,12 @@ On your compilation environment:
 7. install
 
 ```bash
- $ git clone https://github.com/openappsec/attachment.git
- $ cd attachment
- $ ./attachments/nginx/ngx_module/nginx_version_configuration.sh --conf /tmp/nginx.ver build_out
- $ cmake -DCMAKE_INSTALL_PREFIX=build_out .
- $ make install
- $ make package 
+ git clone https://github.com/openappsec/attachment.git
+ cd attachment
+ ./attachments/nginx/ngx_module/nginx_version_configuration.sh --conf /tmp/nginx.ver build_out
+ cmake -DCMAKE_INSTALL_PREFIX=build_out .
+ make install
+ make package 
 ```
 
 #### NGINX plugin-associated libraries
@@ -74,25 +74,7 @@ They can be found under the `lib` directory in the `<output path>` given to the 
 3. Load the attachment on your nginx by adding the following command to the main nginx.conf file: 
    `load_module /usr/lib/nginx/modules/libngx_module.so;`
 4. Restart your nginx server.
-
-### Compiling the attachment code and creating a docker image for an existing nginx/ingress-nginx docker
-
-This step requires Docker to be installed on your compilation environment
-
-1. Clone this repository
-3. Run Configuration script with the required docker image name and tag
-4. Run CMake command
-5. Run make command
-
-```bash
- $ git clone https://github.com/openappsec/attachment.git
- $ cd attachment 
- $ ./attachments/nginx/ngx_module/nginx_version_configuration.sh --docker <input docker image> build_out
- $ cmake -DCMAKE_INSTALL_PREFIX=build_out -DOUTPUT_DOCKER_IMAGE=<output docker image> .
- $ make install
- $ make docker
-```
-
+   
 Later on, you can push the image to your registry and use it as needed.
 
 For deployment on docker you can deploy it using the same docker command you used before with a regular nginx container, just make sure to add the parameter `--ipc=host`. 
