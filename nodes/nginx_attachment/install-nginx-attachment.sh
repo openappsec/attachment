@@ -54,7 +54,7 @@ run_installation()
     [ -f /etc/nginx/nginx.conf ] && sed -i -e '/load_module.*ngx_cp_attachment_module.so;/d' /etc/nginx/nginx.conf || echo
     [ -f /etc/nginx/template/nginx.tmpl ] && sed -i -e '/load_module.*ngx_cp_attachment_module.so;/d' /etc/nginx/template/nginx.tmpl || echo
     [ -f /usr/local/share/lua/5.1/kong/templates/nginx.lua ] && sed -i -e '/load_module.*ngx_cp_attachment_module.so;/d' /usr/local/share/lua/5.1/kong/templates/nginx.lua || echo
-    [ -f /usr/local/share/lua/5.1/kong/templates/nginx.lua ] && sed -i -e '/cp_worker_processes/d'/usr/local/share/lua/5.1/kong/templates/nginx.lua || echo
+    [ -f /usr/local/share/lua/5.1/kong/templates/nginx.lua ] && sed -i -e '/cp_worker_processes/d' /usr/local/share/lua/5.1/kong/templates/nginx.lua || echo
     [ -f /usr/local/apisix/apisix/cli/ngx_tpl.lua ] && sed -i -e '/load_module.*ngx_cp_attachment_module.so;/d' /usr/local/apisix/apisix/cli/ngx_tpl.lua || echo
 
     [ -f /etc/nginx/nginx.conf ] && sed -i 1i'load_module /usr/lib/nginx/modules/ngx_cp_attachment_module.so;' /etc/nginx/nginx.conf || echo
