@@ -132,7 +132,7 @@ ngx_http_cp_registration_thread(void *_ctx)
 
 ///
 /// @brief Sends end request header to the attachment's service.
-/// @details Communicates with the attachment service by sending end request header 
+/// @details Communicates with the attachment service by sending end request header
 /// to the attachment's service and returns verdict.
 /// @param[in, out] session_data_p If the function returns NGX_OK, session data will be modified.
 /// @param[in, out] request NGINX Request.
@@ -383,7 +383,7 @@ ngx_http_cp_res_header_filter_thread(void *_ctx)
     }
 
     session_data_p->remaining_messages_to_reply += num_messages_sent;
-    
+
     // Sets response body's content encoding.
     set_response_content_encoding_res = set_response_content_encoding(
         &session_data_p->response_data.original_compression_type,

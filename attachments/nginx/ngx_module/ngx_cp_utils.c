@@ -1123,3 +1123,64 @@ set_metric_memory_usage(void)
     updateMetricField(MAX_VM_MEMORY_USAGE, vm_size);
     updateMetricField(MAX_RSS_MEMORY_USAGE, rss_size);
 }
+
+void
+print_buffer(ngx_buf_t *buf, int num_bytes, int _dbg_level)
+{
+    if (_dbg_level < dbg_level || !is_ctx_match) return;
+
+    char fmt[64];
+    unsigned char *pos = buf->pos;
+    unsigned char *last = buf->last;
+    int i = 0;
+
+    if (num_bytes > 0) {
+        if (last - pos > num_bytes) {
+            last = pos + num_bytes;
+        }
+    } else if (num_bytes < 0) {
+        if (last - pos > -num_bytes) {
+            pos = last + num_bytes;
+        }
+    }
+
+    for (; pos + 16 < last; pos += 16)
+    {
+        write_dbg(
+            _dbg_level,
+            "%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+            *pos, *(pos+1), *(pos+2), *(pos+3), *(pos+4), *(pos+5), *(pos+6), *(pos+7),
+            *(pos+8), *(pos+9), *(pos+10), *(pos+11), *(pos+12), *(pos+13), *(pos+14), *(pos+15)
+        );
+    }
+
+    for(; pos < last; pos++){
+        sprintf(fmt+i*3, "%02X ", *pos);
+        i++;
+    }
+    if (i > 0) {
+        fmt[i*3 - 1] = 0;
+        write_dbg(
+            _dbg_level,
+            "%s",
+            fmt
+        );
+    }
+}
+
+void
+print_buffer_chain(ngx_chain_t *chain, char *msg, int num_bytes, int _dbg_level)
+{
+    if (_dbg_level < dbg_level || !is_ctx_match) return;
+
+    for (ngx_chain_t *chain_elem = chain; chain_elem != NULL; chain_elem = chain_elem->next) {
+        write_dbg(
+            DBG_LEVEL_WARNING,
+            "%s chain elem: size: %d, is last buf: %d",
+            msg,
+            chain_elem->buf->last - chain_elem->buf->pos,
+            chain_elem->buf->last_buf
+        );
+        print_buffer(chain_elem->buf, num_bytes, _dbg_level);
+    }
+}

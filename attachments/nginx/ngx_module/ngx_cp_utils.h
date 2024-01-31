@@ -436,4 +436,23 @@ void set_metric_cpu_usage(void);
 ///
 void set_metric_memory_usage(void);
 
+///
+/// @brief prints to debug the buffer in hex with optional limit
+/// @param[in]  buf nginx buffer to print
+/// @param[in]  num_bytes number of bytes to print in the buffer.
+///     num_bytes > 0 : prints prefix, num_bytes < 0 : prints suffix, num_bytes = 0 : prints all
+/// @param[in]  _dbg_level debug level
+///
+void print_buffer(ngx_buf_t *buf, int num_bytes, int _dbg_level);
+
+///
+/// @brief prints to debug the buffer chain in hex with optional limit
+/// @param[in]  chain nginx buffers chain to print
+/// @param[in]  num_bytes number of bytes to print of each buffer in the chain.
+///     num_bytes > 0 : prints prefix, num_bytes < 0 : prints suffix, num_bytes = 0 : prints all
+/// @param[in]  _dbg_level debug level
+///
+void print_buffer_chain(ngx_chain_t *chain, char *msg, int num_bytes, int _dbg_level);
+
+
 #endif // __NGX_CP_UTILS_H__

@@ -934,6 +934,8 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
     set_current_session_id(session_data_p->session_id);
     write_dbg(DBG_LEVEL_DEBUG, "Response body filter handling response ID: %d", session_data_p->session_id);
 
+    print_buffer_chain(body_chain, "incoming", 32, DBG_LEVEL_TRACE);
+
     if (!isIpcReady()) {
         write_dbg(
             DBG_LEVEL_TRACE,
@@ -1212,6 +1214,8 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
                 NGX_ERROR;
         }
     }
+
+    print_buffer_chain(body_chain, "outgoing", 32, DBG_LEVEL_TRACE);
 
     return ngx_http_next_response_body_filter(request, body_chain);
 }

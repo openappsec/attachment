@@ -190,6 +190,8 @@ compression_data_filter(
 
     if (should_compress) {
         // Compressing data.
+        write_dbg(DBG_LEVEL_TRACE, "compressing data(%d), is last: %d", input->len, params->is_last_part);
+
         compression_result = compressData(
             compression_stream,
             params->compression_type,
@@ -258,7 +260,6 @@ compression_buffer_filter(
     ngx_str_t src_data;
     ngx_str_t dest_data;
     ngx_int_t compression_result;
-
     write_dbg(DBG_LEVEL_TRACE, "Performing %s on buffer", should_compress ? "compression" : "decompression");
 
     if (is_valid_compression_buffer(should_compress, src) != NGX_OK) {
@@ -270,7 +271,7 @@ compression_buffer_filter(
 
     if (should_compress) {
         // Preparing data for compression.
-        params->is_last_part = src->last_buf;
+        params->is_last_part |= src->last_buf;
 
         if (params->is_last_part && src->pos == NULL) {
             src->start = (u_char *)"";
@@ -336,6 +337,10 @@ compression_chain_filter(
     ngx_buf_t *output_buffer = ngx_calloc_buf(pool);
     ngx_chain_t *curr_input_link = NULL;
     ngx_chain_t *curr_original_contents_link = original_body_contents == NULL ? NULL : *original_body_contents;
+    ngx_cp_http_compression_params params_copy;
+    if (params != NULL) {
+        params_copy = *params;
+    }
 
     if (body == NULL) {
         // Null body parameter has been passed.
@@ -351,6 +356,9 @@ compression_chain_filter(
 
     for (curr_input_link = *body; curr_input_link != NULL; curr_input_link = curr_input_link->next) {
         // Decompress or compresses buffer
+        if (params != NULL) {
+            params_copy.is_last_part = (params->is_last_part && curr_input_link->next == NULL);
+        }
         compression_result = compression_buffer_filter(
             should_compress,
             compression_stream,
@@ -358,7 +366,7 @@ compression_chain_filter(
             output_buffer,
             curr_input_link->buf,
             pool,
-            params
+            params != NULL ? &params_copy : NULL
         );
         if (compression_result != NGX_OK) {
             // Failed to decompress or compress.
