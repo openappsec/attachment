@@ -34,7 +34,7 @@ typedef struct {
 ///
 /// @brief Creates NGINX cp attachment configuration.
 /// @param[in, out] conf NGINX configuration.
-/// @return 
+/// @return
 ///         - #ngx_cp_attachment_conf_t if successed to create conf.
 ///         - #NULL if failed to create conf.
 ///

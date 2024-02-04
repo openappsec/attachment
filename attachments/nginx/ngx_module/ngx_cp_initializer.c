@@ -557,8 +557,7 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
 
     // Initalize the the communication channel with the service.
     // If we encounter repeated failures - we will restart the whole communication.
-    static const int  max_ipc_init_retry_count = 10;
-    static int max_retry_count = max_ipc_init_retry_count;
+    int max_retry_count = 10;
     if (nano_service_ipc == NULL) {
         write_dbg(DBG_LEVEL_INFO, "Initializing IPC channel");
         nano_service_ipc = initIpc(
@@ -572,13 +571,11 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
         if (nano_service_ipc == NULL) {
             if (max_retry_count-- == 0) {
                 restart_communication(request);
-                max_retry_count = max_ipc_init_retry_count;
             }
             write_dbg(DBG_LEVEL_INFO, "Failed to initialize IPC with nano service");
             return NGX_ERROR;
         }
     }
-    max_retry_count = max_ipc_init_retry_count;
 
     // Initialize internal resources.
     if (!is_static_resources_table_initialized()) {
