@@ -37,6 +37,12 @@ extern ngx_module_t ngx_http_cp_attachment_module; ///< NGINX Module.
 ngx_int_t is_ngx_cp_attachment_disabled(ngx_http_request_t *request);
 
 ///
+/// @brief Returns the saved number of workers value.
+/// @returns ngx_uint_t returns number of workers.
+///
+ngx_uint_t get_saved_num_of_workers();
+
+///
 /// @brief Get the number of workers.
 /// @param[in] request NGINX request.
 /// @returns ngx_uint_t returns number of workers.

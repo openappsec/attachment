@@ -209,7 +209,7 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request)
 {
     static u_char text_html[] = {'t', 'e', 'x', 't', '/', 'h', 't', 'm', 'l'};
     static size_t size_of_text_html = sizeof(text_html);
-    ngx_int_t res_code, res;
+    ngx_int_t http_res_code, rc;
     ngx_table_elt_t *location_header;
     ngx_chain_t out_chain[7]; // http://lxr.nginx.org/source/src/http/ngx_http_special_response.c#0772
     int send_response_custom_body = 1;
@@ -218,19 +218,19 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request)
 
     request->keepalive = 0;
 
-    res_code = get_response_code();
-    request->headers_out.status = res_code;
+    http_res_code = get_response_code();
+    request->headers_out.status = http_res_code;
     request->headers_out.status_line.len = 0;
 
-    if (res_code == 0) {
+    if (http_res_code == 0) {
         // Response code was not provided, setting it to NGX_HTTP_CLOSE.
         write_dbg(
             DBG_LEVEL_WARNING,
             "Response code was not provided. Returning default response: %d (NGX_HTTP_CLOSE)",
             NGX_HTTP_CLOSE
         );
-        res_code = NGX_HTTP_CLOSE;
-        request->headers_out.status = res_code;
+        request->headers_out.status = NGX_HTTP_CLOSE;
+        rc = NGX_HTTP_CLOSE;
 
         goto CUSTOM_RES_OUT;
     }
@@ -253,7 +253,7 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request)
         if (location_header == NULL) {
             // Failed to allocate header.
             write_dbg(DBG_LEVEL_ERROR, "Failed to allocate header");
-            res_code = NGX_HTTP_CLOSE;
+            rc = NGX_HTTP_CLOSE;
             goto CUSTOM_RES_OUT;
         }
 
@@ -263,6 +263,7 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request)
         }
 
         request->keepalive = 1;
+        rc = NGX_HTTP_TEMPORARY_REDIRECT;
         goto CUSTOM_RES_OUT;
     }
 
@@ -287,14 +288,14 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request)
     delete_headers_list(&request->headers_out.headers);
 
     write_dbg(DBG_LEVEL_TRACE, "Sending response headers for rejected request");
-    res = ngx_http_send_header(request);
-    if (res == NGX_ERROR || res > NGX_OK) {
+    rc = ngx_http_send_header(request);
+    if (rc == NGX_ERROR || rc > NGX_OK) {
         // Failed to send response headers.
         write_dbg(
             DBG_LEVEL_DEBUG,
             "Failed to send response headers (result: %d). Returning response code: %d",
-            res,
-            res_code
+            rc,
+            http_res_code
         );
         goto CUSTOM_RES_OUT;
     }
@@ -317,12 +318,12 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request)
         }
         write_dbg(DBG_LEVEL_TRACE, "Successfully generated web response page for rejected request");
         write_dbg(DBG_LEVEL_TRACE, "Sending web response body");
-        ngx_int_t output_filter_result = ngx_http_output_filter(request, out_chain);
-        if (output_filter_result != NGX_OK) {
+        rc = ngx_http_output_filter(request, out_chain);
+        if (rc != NGX_OK && rc != NGX_AGAIN) {
             // Failed to send response body.
             write_dbg(DBG_LEVEL_WARNING, "Failed to send web response body");
         } else {
-            write_dbg(DBG_LEVEL_TRACE, "Successfully sent web response body");
+            write_dbg(DBG_LEVEL_TRACE, "%s web response body sent", rc == NGX_AGAIN ? "Partial" : "Full" );
         }
     } else {
         out_chain[0].buf = ngx_calloc_buf(request->pool);
@@ -337,8 +338,8 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request)
     }
 
 CUSTOM_RES_OUT:
-    ngx_http_finalize_request(request, res_code);
-    return res_code;
+    ngx_http_finalize_request(request, rc);
+    return NGX_OK;
 }
 
 ///
