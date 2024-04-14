@@ -647,11 +647,11 @@ convert_sock_addr_to_string(const struct sockaddr *sa, char *ip_addr)
     void *ip = NULL;
     if (sa->sa_family == AF_INET) {
         ip = (void *) &(((struct sockaddr_in*)sa)->sin_addr);
+        inet_ntop(AF_INET, ip, ip_addr, INET6_ADDRSTRLEN);
     } else {
         ip = (void *)&(((struct sockaddr_in6*)sa)->sin6_addr);
+        inet_ntop(AF_INET6, ip, ip_addr, INET6_ADDRSTRLEN);
     }
-
-    inet_ntop(AF_INET, ip, ip_addr, INET6_ADDRSTRLEN);
 }
 
 ngx_int_t

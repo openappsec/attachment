@@ -127,4 +127,13 @@ ngx_int_t was_transaction_timedout(ngx_http_cp_session_data *ctx);
 ///
 ngx_http_cp_verdict_e enforce_sessions_rate();
 
+
+///
+/// @Updates request and response sizes metrics.
+/// @param[in, out] request NGINX request.
+/// @returns ngx_int_t
+///         - #NGX_DECLINED
+///
+ngx_int_t ngx_http_cp_request_and_response_size_handler(ngx_http_request_t *request);
+
 #endif // __NGX_CP_HOOKS_H__
