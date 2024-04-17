@@ -23,7 +23,7 @@
 typedef enum ngx_cp_comm_direction {
     READ_FROM_SOCKET,
     WRITE_TO_SOCKET
-} ngx_cp_comm_direction_e; ///< Indicate whether communication exchange is to read or to write from a socket. 
+} ngx_cp_comm_direction_e; ///< Indicate whether communication exchange is to read or to write from a socket.
 
 ///
 /// @brief Initialize all the attachments resources and communication channels.
@@ -43,7 +43,7 @@ ngx_int_t ngx_cp_attachment_init_process(ngx_http_request_t *);
 ///     - #READ_FROM_SOCKET
 ///     - #WRITE_TO_SOCKET
 /// @param[in] remaining_timeout Points to the maximal time point the function is allowed to reach.
-/// @return int - positive if successful, other values indicate an error. 
+/// @return int - positive if successful, other values indicate an error.
 ///
 int exchange_communication_data_with_service(
     int socket,
@@ -92,5 +92,21 @@ void disconnect_communication();
 /// @returns ngx_int_t - 1 if communication is active, otherwise 0.
 ///
 ngx_int_t isIpcReady();
+
+void init_attachment_registration_thread();
+
+///
+/// @brief Cancels registration thread and reset attachment registration status.
+///
+void reset_attachment_registration();
+
+///
+/// @brief Register the attachment instance with the attachment manager to associate it with a service.
+/// @param[in] num_of_workers The number of workers that is needed to be registered.
+/// @returns ngx_int_t
+///         - #NGX_OK
+///         - #NGX_ERROR
+///
+ngx_int_t register_to_attachments_manager(ngx_int_t num_of_workers);
 
 #endif // __NGX_CP_INITIALIZER_H__

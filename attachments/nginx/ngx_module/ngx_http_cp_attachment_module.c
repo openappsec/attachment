@@ -17,6 +17,7 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 #include <ngx_files.h>
+#include <pthread.h>
 
 #include "ngx_cp_hooks.h"
 #include "ngx_cp_utils.h"
@@ -213,6 +214,11 @@ ngx_cp_attachment_create_conf(ngx_conf_t *conf)
     return module_conf;
 }
 
+ngx_uint_t
+get_saved_num_of_workers()
+{
+    return workers_amount_to_send;
+}
 
 ngx_uint_t
 get_num_of_workers(ngx_http_request_t *request)
@@ -440,6 +446,8 @@ ngx_cp_attachment_init_worker(ngx_cycle_t *cycle)
             keep_alive_interval_msec,
             timer_interval_msec
         );
+
+        init_attachment_registration_thread();
     }
     return NGX_OK;
 }
@@ -452,6 +460,8 @@ ngx_cp_attachment_fini_worker(ngx_cycle_t *cycle)
     // only worker number 0 (always exists since it is worker number 1 is allowed to create
     // the single instance of the timer and destroy it)
     if (ngx_worker != 0) return;
+    
+    reset_attachment_registration();
 
     (void)cycle;
     if (is_timer_active) ngx_del_timer(&ngx_keep_alive_event);
@@ -463,6 +473,7 @@ static ngx_int_t
 ngx_cp_attachment_init(ngx_conf_t *conf)
 {
     ngx_http_handler_pt *handler;
+    ngx_http_handler_pt *size_metrics_handler;
     ngx_http_core_main_conf_t *http_core_main_conf;
     write_dbg(DBG_LEVEL_TRACE, "Setting the memory pool used in the current context");
     if (conf->pool == NULL) {
@@ -496,6 +507,14 @@ ngx_cp_attachment_init(ngx_conf_t *conf)
 
     ngx_http_next_response_body_filter = ngx_http_top_body_filter;
     ngx_http_top_body_filter = ngx_http_cp_res_body_filter;
+
+    size_metrics_handler = ngx_array_push(&http_core_main_conf->phases[NGX_HTTP_LOG_PHASE].handlers);
+    if (size_metrics_handler == NULL) {
+        write_dbg(DBG_LEVEL_WARNING, "Failed to set sizes calculation handler");
+        return NGX_ERROR;
+    }
+
+    *size_metrics_handler = ngx_http_cp_request_and_response_size_handler;
 
     write_dbg(DBG_LEVEL_TRACE, "Successfully set attachment module's hooks");
 

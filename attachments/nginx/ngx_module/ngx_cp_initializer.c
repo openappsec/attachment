@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <dirent.h>
 #include <arpa/inet.h>
+#include <pthread.h>
 
 #include <ngx_log.h>
 #include <ngx_core.h>
@@ -34,21 +35,115 @@
 #include "ngx_http_cp_attachment_module.h"
 
 typedef enum ngx_cp_attachment_registration_state {
-    SET_UNIQUE_ID,
-    RESGISTER_TO_NODE,
-    LOAD_CONFIG,
-    LOAD_IPC,
-    DONE
-} ngx_cp_attachment_registration_state_e; ///< Indicates the current initialization stage.
+    NOT_REGISTERED,
+    PENDING,
+    REGISTERED
+} ngx_cp_attachment_registration_state_e; ///< Indicates the current attachment registation stage.
 
 char unique_id[MAX_NGINX_UID_LEN] = ""; // Holds the unique identifier for this instance.
 char shared_verdict_signal_path[128]; // Holds the path associating the attachment and service.
 
 int registration_socket = -1; // Holds the file descriptor used for registering the instance.
 
+static pthread_t registration_thread;
+
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static ngx_cp_attachment_registration_state_e need_registration = NOT_REGISTERED;
+
 struct sockaddr_un server;
 
 uint32_t nginx_user_id, nginx_group_id; // Hold the process UID and GID respectively.
+
+///
+/// @brief Set shared registration value to the provided state.
+/// @param[in] ngx_cp_attachment_registration_state_e Provided state that needs to be set.
+///
+static void
+set_need_registration(ngx_cp_attachment_registration_state_e state)
+{
+    pthread_mutex_lock(&mutex);
+    need_registration = state;
+    pthread_mutex_unlock(&mutex);
+}
+
+///
+/// @brief Get shared registration value to the provided state.
+/// @returns ngx_cp_attachment_registration_state_e
+///         - #NOT_REGISTERED,
+///         - #PENDING,
+///         - #REGISTERED
+///
+static ngx_cp_attachment_registration_state_e
+get_need_registration()
+{
+    ngx_cp_attachment_registration_state_e state;
+
+    pthread_mutex_lock(&mutex);
+    state = need_registration;
+    pthread_mutex_unlock(&mutex);
+
+    return state;
+}
+
+void *
+register_workers() {
+    int num_of_workers = get_saved_num_of_workers();
+
+    if (num_of_workers == 0) {
+        write_dbg(DBG_LEVEL_INFO, "Number of workers is 0, ignore registration");
+        set_need_registration(NOT_REGISTERED);
+        return NULL;
+    }
+
+    write_dbg(
+        DBG_LEVEL_INFO,
+        "Initiating registration of %d workers to the attachment",
+        num_of_workers
+    );
+
+    while (register_to_attachments_manager(num_of_workers) != NGX_OK) {
+        write_dbg(
+            DBG_LEVEL_INFO,
+            "unable to register %d workers to the attachment, will try again in 5 seconds",
+            num_of_workers
+        );
+        if (get_need_registration() != PENDING) {
+            write_dbg(DBG_LEVEL_INFO, "Drop registration attempt, registration is not needed anymore");
+            return NULL;
+        }
+        sleep(5);
+    }
+    set_need_registration(REGISTERED);
+    return NULL;
+}
+
+void
+init_attachment_registration_thread()
+{
+    pthread_mutex_lock(&mutex);
+    if (need_registration != NOT_REGISTERED) {
+        pthread_mutex_unlock(&mutex);
+        return;
+    }
+    need_registration = PENDING;
+    pthread_mutex_unlock(&mutex);
+
+    int result = pthread_create(&registration_thread, NULL, register_workers, NULL);
+    if (result != 0) {
+        write_dbg(DBG_LEVEL_INFO, "Failed to create thread");
+    }
+}
+
+void
+reset_attachment_registration()
+{
+    int result = pthread_cancel(registration_thread);
+    if (result != 0) {
+        write_dbg(DBG_LEVEL_INFO, "Failed to cancel thread %d", result);
+    }
+    set_need_registration(NOT_REGISTERED);
+}
 
 int
 exchange_communication_data_with_service(
@@ -114,7 +209,7 @@ exchange_communication_data_with_service(
 /// @returns ngx_int_t
 ///         - #NGX_OK
 ///         - #NGX_ERROR
-/// 
+///
 static ngx_int_t
 init_signaling_socket()
 {
@@ -257,28 +352,21 @@ get_docker_id(char **_docker_id)
     free(line);
     fclose(file);
 
-    // Return the answer and set the indication so we won't have to 
+    // Return the answer and set the indication so we won't have to
     *_docker_id = docker_id;
     already_evaluated = 1;
     return  NGX_OK;
 }
 
-///
-/// @brief Register the attachment instance with the attachment manager to associate it with a service.
-/// @param[in] request Points to an HTTP request, needed to get the number of workers.
-/// @returns ngx_int_t
-///         - #NGX_OK
-///         - #NGX_ERROR
-///
-static ngx_int_t
-register_to_attachments_manager(ngx_http_request_t *request)
+ngx_int_t
+register_to_attachments_manager(ngx_int_t num_of_workers)
 {
     uint8_t path_length;
     int res = 0;
     uint8_t family_name_size = strlen(unique_id);
     uint8_t attachment_type = NGINX_ATT_ID;
     uint8_t worker_id = ngx_worker + 1;
-    uint8_t workers_amount = get_num_of_workers(request);
+    uint8_t workers_amount = num_of_workers;
     char *family_name = NULL;
     int cur_errno = 0; // temp fix for errno changing during print
     struct timeval timeout = get_timeout_val_sec(1);
@@ -509,7 +597,6 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
     ngx_pool_t *memory_pool;
     nginx_user_id = getuid();
     nginx_group_id = getgid();
-    static int need_registration = 1;
     num_of_connection_attempts++;
 
     // Best-effort attempt to read the configuration before we start.
@@ -533,19 +620,28 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
         }
     }
 
-    if (need_registration) {
-        if (register_to_attachments_manager(request) == NGX_ERROR) {
+    if (get_need_registration() == PENDING) {
+        write_dbg(DBG_LEVEL_INFO, "Registration to the Attachments Manager is in process");
+        return NGX_ERROR;
+    }
+
+    if (get_need_registration() == NOT_REGISTERED) {
+        if (register_to_attachments_manager(get_num_of_workers(request)) == NGX_ERROR) {
             write_dbg(DBG_LEVEL_INFO, "Failed to register to Attachments Manager service");
             return NGX_ERROR;
         }
-        need_registration = 0;
+        set_need_registration(REGISTERED);
     }
 
     if (comm_socket < 0) {
         write_dbg(DBG_LEVEL_DEBUG, "Registering to nano service");
         if (init_signaling_socket() == NGX_ERROR) {
             write_dbg(DBG_LEVEL_DEBUG, "Failed to register to the Nano Service");
-            need_registration = 1;
+            pthread_mutex_lock(&mutex);
+            if (need_registration != PENDING) {
+                need_registration = NOT_REGISTERED;
+            }
+            pthread_mutex_unlock(&mutex);
             return NGX_ERROR;
         }
     }
@@ -615,7 +711,7 @@ restart_communication(ngx_http_request_t *request)
     }
 
     if (init_signaling_socket() == NGX_ERROR) {
-        if (register_to_attachments_manager(request) == NGX_ERROR) {
+        if (register_to_attachments_manager(get_num_of_workers(request)) == NGX_ERROR) {
             write_dbg(DBG_LEVEL_DEBUG, "Failed to register to Attachments Manager service");
             return -1;
         }
@@ -638,6 +734,9 @@ disconnect_communication()
         destroyIpc(nano_service_ipc, 0);
         nano_service_ipc = NULL;
     }
+
+    set_need_registration(NOT_REGISTERED);
+    init_attachment_registration_thread();
 }
 
 ngx_int_t
