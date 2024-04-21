@@ -323,8 +323,8 @@ handle_custom_web_response(ngx_http_cp_web_response_data_t *web_response_data)
         // Setting custom web response title's and body's data.
         title.data = (u_char *)web_response_data->response_data.custom_response_data.data;
         body.data = (u_char *)web_response_data->response_data.custom_response_data.data + title.len;
-        uuid.data = (u_char *)web_response_data->response_data.custom_response_data.data + title.len + body.len;
     }
+    uuid.data = (u_char *)web_response_data->response_data.custom_response_data.data + title.len + body.len;
     set_custom_response(&title, &body, &uuid, web_response_data->response_data.custom_response_data.response_code);
 }
 
