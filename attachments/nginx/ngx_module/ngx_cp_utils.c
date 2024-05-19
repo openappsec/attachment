@@ -51,6 +51,7 @@ static char web_response_body[256]; ///< Web response body static buffer.
 
 static ngx_uint_t web_response_uuid_size = 0;
 static char web_response_uuid[64]; ///< Web response body uuid buffer.
+static char incident[sizeof(web_response_uuid) + 16]; ///< Web response body uuid buffer with incident Id prefix.
 
 static ngx_uint_t add_event_id = 0;
 static ngx_uint_t redirect_location_size = 0; ///< Redirect location size.
@@ -525,8 +526,11 @@ set_custom_response(const ngx_str_t *title, const ngx_str_t *body, const ngx_str
     // Copies the provided variables into their respective response variables.
     memcpy(web_response_title, title->data, web_response_title_size);
     memcpy(web_response_body, body->data, web_response_body_size);
-    memcpy(web_response_uuid, "Incident Id: ", strlen("Incident Id: "));
-    memcpy(web_response_uuid + strlen("Incident Id: "), uuid->data, web_response_uuid_size);
+    if (web_response_uuid_size >= sizeof(web_response_uuid)) {
+        web_response_uuid_size = sizeof(web_response_uuid) - 1;
+    }
+    memcpy(web_response_uuid, uuid->data, web_response_uuid_size);
+    web_response_uuid[web_response_uuid_size] = 0;
 }
 
 void
@@ -540,7 +544,12 @@ set_redirect_response(const ngx_str_t *location, const ngx_str_t *uuid, uint add
     // Sets the redirection location data and the web response uuid.
     redirect_location_size = location->len;
     memcpy(redirect_location, location->data, redirect_location_size);
+    web_response_uuid_size = uuid->len;
+    if (web_response_uuid_size >= sizeof(web_response_uuid)) {
+        web_response_uuid_size = sizeof(web_response_uuid) - 1;
+    }
     memcpy(web_response_uuid, uuid->data, web_response_uuid_size);
+    web_response_uuid[web_response_uuid_size] = 0;
 }
 
 u_char *
@@ -579,12 +588,16 @@ get_response_page(ngx_http_request_t *request, ngx_chain_t (*out_chain)[7])
 {
     ngx_int_t idx;
     ngx_chain_t *tmp_next;
+    size_t incident_prefix_size = strlen("Incident Id: ");
     ngx_buf_t *buf[7]; // Title prefix -> Title -> Body prefix -> Body -> UUID prefix -> UUID -> UUID suffix
     ngx_str_t title  = { web_response_title_size, (u_char *)web_response_title };
     ngx_str_t body = { web_response_body_size, (u_char *)web_response_body };
-    ngx_str_t uuid = { web_response_uuid_size, (u_char *)web_response_uuid };
+    ngx_str_t uuid = { web_response_uuid_size + incident_prefix_size, (u_char *)incident };
 
     if (web_response_title_size == 0 || web_response_body_size == 0) return NGX_ERROR_ERR;
+
+    memcpy(incident, "Incident Id: ", incident_prefix_size);
+    memcpy(incident + incident_prefix_size, web_response_uuid, web_response_uuid_size);
 
     for (idx = 0; idx < 7; idx++) {
         buf[idx] = ngx_calloc_buf(request->pool);
@@ -634,7 +647,7 @@ get_response_page_length(void)
 
     total_length += web_response_title_size;
     total_length += web_response_body_size;
-    total_length += web_response_uuid_size;
+    total_length += strlen("Incident Id: ") + web_response_uuid_size;
 
     return total_length;
 }
@@ -648,13 +661,13 @@ get_response_code(void)
 const char *
 get_web_response_uuid(void)
 {
-    return web_response_uuid + strlen("Incident Id: ");
+    return web_response_uuid;
 }
 
 ngx_uint_t
 get_web_response_uuid_size(void)
 {
-    return web_response_uuid_size - strlen("Incident Id: ");
+    return web_response_uuid_size;
 }
 
 const char *
