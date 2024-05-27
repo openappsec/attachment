@@ -271,7 +271,7 @@ ngx_http_cp_req_body_filter_thread(void *_ctx)
         if (fail_mode_verdict == NGX_OK) {
             THREAD_CTX_RETURN_NEXT_FILTER();
         }
-        THREAD_CTX_RETURN(NGX_ERROR);
+        THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
     }
     session_data_p->remaining_messages_to_reply += num_messages_sent;
 
@@ -308,7 +308,7 @@ ngx_http_cp_req_end_transaction_thread(void *_ctx)
         if (fail_mode_verdict == NGX_OK) {
             THREAD_CTX_RETURN_NEXT_FILTER();
         }
-        THREAD_CTX_RETURN(NGX_ERROR);
+        THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
     }
 
     session_data_p->remaining_messages_to_reply += num_messages_sent;
@@ -357,7 +357,7 @@ ngx_http_cp_res_header_filter_thread(void *_ctx)
         if (fail_mode_verdict == NGX_OK) {
             THREAD_CTX_RETURN_NEXT_FILTER();
         }
-        THREAD_CTX_RETURN(NGX_ERROR);
+        THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
     }
 
     session_data_p->remaining_messages_to_reply += num_messages_sent;
@@ -379,7 +379,7 @@ ngx_http_cp_res_header_filter_thread(void *_ctx)
         if (fail_mode_verdict == NGX_OK) {
             THREAD_CTX_RETURN_NEXT_FILTER();
         }
-        THREAD_CTX_RETURN(NGX_ERROR);
+        THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
     }
 
     session_data_p->remaining_messages_to_reply += num_messages_sent;
@@ -399,7 +399,7 @@ ngx_http_cp_res_header_filter_thread(void *_ctx)
         if (fail_mode_verdict == NGX_OK) {
             THREAD_CTX_RETURN_NEXT_FILTER();
         }
-        THREAD_CTX_RETURN(NGX_ERROR);
+        THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
     }
     session_data_p->response_data.new_compression_type = session_data_p->response_data.original_compression_type;
 
@@ -421,7 +421,7 @@ ngx_http_cp_res_header_filter_thread(void *_ctx)
         if (fail_mode_verdict == NGX_OK) {
             THREAD_CTX_RETURN_NEXT_FILTER();
         }
-        THREAD_CTX_RETURN(NGX_ERROR);
+        THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
     }
 
     session_data_p->remaining_messages_to_reply += num_messages_sent;
@@ -468,7 +468,7 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
         if (fail_mode_verdict == NGX_OK) {
             THREAD_CTX_RETURN_NEXT_FILTER();
         }
-        THREAD_CTX_RETURN(NGX_ERROR);
+        THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
     }
     session_data_p->remaining_messages_to_reply += num_messages_sent;
 
@@ -485,7 +485,7 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
             if (fail_mode_verdict == NGX_OK) {
                 THREAD_CTX_RETURN_NEXT_FILTER();
             }
-            THREAD_CTX_RETURN(NGX_ERROR);
+            THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
         }
         session_data_p->remaining_messages_to_reply++;
     }
@@ -523,7 +523,7 @@ ngx_http_cp_hold_verdict_thread(void *_ctx)
         if (fail_mode_hold_verdict == NGX_OK) {
             THREAD_CTX_RETURN_NEXT_FILTER();
         }
-        THREAD_CTX_RETURN(NGX_ERROR);
+        THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
     }
     session_data_p->remaining_messages_to_reply += num_messages_sent;
 
