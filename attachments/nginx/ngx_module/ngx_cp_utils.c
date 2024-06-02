@@ -208,7 +208,7 @@ free_list_from_pool(ngx_pool_t *memory_pool, ngx_list_t *list)
 /// @param[in, out] key_list List of keys to add to the initialized hash table.
 /// @param[in] initial_data_value_ptr Initial data value pointer.
 /// @param[in] initial_data_size Initial data size that will be increased if necessary.
-/// @returns ngx_int_t 
+/// @returns ngx_int_t
 ///         - #NGX_OK.
 ///         - #NGX_ERROR.
 ///
@@ -407,7 +407,7 @@ split_chain_elem(ngx_chain_t *elem, uint16_t split_index, ngx_pool_t *pool)
 /// @param[in] data_size Size of the data to be put in NGINX chain.
 /// @param[in, out] data Data to put into the newly allocates NGINX chain.
 /// @param[in, out] pool NGINX pool to allocate buffers from.
-/// @returns 
+/// @returns
 ///
 ngx_chain_t *
 create_chain_elem(uint32_t data_size, char *data, ngx_pool_t *pool)
@@ -929,11 +929,11 @@ init_general_config(const char *conf_path)
     }
 
     // Setting fail open/close.
-    fail_mode_verdict = isFailOpenMode() == 1 ? NGX_OK : NGX_ERROR;
+    fail_mode_verdict = isFailOpenMode() == 1 ? NGX_OK : NGX_HTTP_FORBIDDEN;
     fail_open_timeout = getFailOpenTimeout();
 
     // Setting fail wait open/close
-    fail_mode_hold_verdict = isFailOpenHoldMode() == 1 ? NGX_OK : NGX_ERROR;
+    fail_mode_hold_verdict = isFailOpenHoldMode() == 1 ? NGX_OK : NGX_HTTP_FORBIDDEN;
     fail_open_hold_timeout = getFailOpenHoldTimeout();
 
     // Setting attachment's variables.

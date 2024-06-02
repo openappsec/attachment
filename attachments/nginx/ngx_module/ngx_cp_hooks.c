@@ -600,7 +600,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
             updateMetricField(MAX_REQ_BODY_SIZE_UPON_TIMEOUT, session_data_p->processed_req_body_size);
             updateMetricField(MIN_REQ_BODY_SIZE_UPON_TIMEOUT, session_data_p->processed_req_body_size);
 
-            return fail_mode_verdict == NGX_OK ? ngx_http_next_request_body_filter(request, request_body_chain) : NGX_ERROR;
+            return fail_mode_verdict == NGX_OK ? ngx_http_next_request_body_filter(request, request_body_chain) : NGX_HTTP_FORBIDDEN;
         }
         write_dbg(
             DBG_LEVEL_DEBUG,
@@ -615,7 +615,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
             if (!res) {
                 session_data_p->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
                 updateMetricField(HOLD_THREAD_TIMEOUT, 1);
-                return fail_mode_verdict == NGX_OK ? ngx_http_next_request_body_filter(request, request_body_chain) : NGX_ERROR;
+                return fail_mode_verdict == NGX_OK ? ngx_http_next_request_body_filter(request, request_body_chain) : NGX_HTTP_FORBIDDEN;
             }
         }
 
@@ -636,7 +636,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
                     session_data_p->verdict == TRAFFIC_VERDICT_ACCEPT ? "accept" : "drop"
                 );
                 updateMetricField(REQ_BODY_THREAD_TIMEOUT, 1);
-                return fail_mode_verdict == NGX_OK ? ngx_http_next_request_body_filter(request, request_body_chain) : NGX_ERROR;
+                return fail_mode_verdict == NGX_OK ? ngx_http_next_request_body_filter(request, request_body_chain) : NGX_HTTP_FORBIDDEN;
             }
 
             write_dbg(
@@ -671,7 +671,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
             session_data_p->session_id,
             session_data_p->verdict == TRAFFIC_VERDICT_ACCEPT ? "accept" : "drop"
         );
-        return fail_mode_verdict == NGX_OK ? ngx_http_next_request_body_filter(request, request_body_chain) : NGX_ERROR;
+        return fail_mode_verdict == NGX_OK ? ngx_http_next_request_body_filter(request, request_body_chain) : NGX_HTTP_FORBIDDEN;
     }
 
     final_res = ctx.res;
@@ -978,7 +978,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
     if (was_transaction_timedout(session_data_p)) {
         // Session was timed out.
         if (session_data_p->verdict == TRAFFIC_VERDICT_DROP) {
-            return NGX_ERROR;
+            return NGX_HTTP_FORBIDDEN;
         }
         session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
         fini_cp_session_data(session_data_p);
@@ -1041,7 +1041,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
             if (fail_mode_verdict == NGX_OK) {
                 return ngx_http_next_response_body_filter(request, body_chain);
             }
-            return NGX_ERROR;
+            return NGX_HTTP_FORBIDDEN;
         }
         write_dbg(
             DBG_LEVEL_DEBUG,
@@ -1080,7 +1080,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
         if (fail_mode_verdict == NGX_OK) {
             return ngx_http_next_response_body_filter(request, body_chain);
         }
-        return NGX_ERROR;
+        return NGX_HTTP_FORBIDDEN;
     }
 
     final_res = ctx.res;
@@ -1100,7 +1100,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
         if (fail_mode_verdict == NGX_OK) {
             return ngx_http_next_response_body_filter(request, body_chain);
         }
-        return NGX_ERROR;
+        return NGX_HTTP_FORBIDDEN;
     }
 
     if (ctx.modifications) {
@@ -1112,7 +1112,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
             if (fail_mode_verdict == NGX_OK) {
                 return ngx_http_next_response_body_filter(request, body_chain);
             }
-            return NGX_ERROR;
+            return NGX_HTTP_FORBIDDEN;
         }
     }
 
@@ -1148,7 +1148,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
             fini_cp_session_data(session_data_p);
             return fail_mode_verdict == NGX_OK ?
                 ngx_http_next_response_body_filter(request, body_chain) :
-                NGX_ERROR;
+                NGX_HTTP_FORBIDDEN;
         }
     }
 

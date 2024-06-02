@@ -736,7 +736,6 @@ disconnect_communication()
     }
 
     set_need_registration(NOT_REGISTERED);
-    init_attachment_registration_thread();
 }
 
 ngx_int_t
