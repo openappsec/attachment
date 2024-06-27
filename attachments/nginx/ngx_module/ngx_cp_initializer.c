@@ -102,6 +102,7 @@ register_workers() {
         num_of_workers
     );
 
+    sleep(5);
     while (register_to_attachments_manager(num_of_workers) != NGX_OK) {
         write_dbg(
             DBG_LEVEL_INFO,
