@@ -38,7 +38,7 @@ typedef struct ngx_http_cp_session_data {
     ngx_int_t              was_request_fully_inspected; ///< Holds if the request fully inspected.
     ngx_http_cp_verdict_e  verdict; ///< Holds the session's verdict from the Nano Service.
     uint32_t               session_id; ///< Current session's Id.
-    ngx_int_t              remaining_messages_to_reply; ///< Remaining messages left for the agent to respond to. 
+    ngx_int_t              remaining_messages_to_reply; ///< Remaining messages left for the agent to respond to.
     ngx_http_response_data response_data; ///< Holds session's response data.
     struct timespec        session_start_time; ///< Holds session's start time.
     double                 req_proccesing_time; ///< Holds session's request processing time.
@@ -99,7 +99,7 @@ ngx_int_t ngx_http_cp_req_header_handler(ngx_http_request_t *request);
 
 ///
 /// @brief Sends a request to the nano service to update the verdict.
-/// @note Should be called after the nano service provided the verdict TRAFFIC_VERDICT_WAIT to get the updated verdict. 
+/// @note Should be called after the nano service provided the verdict TRAFFIC_VERDICT_WAIT to get the updated verdict.
 /// @param[in, out] request Event thread context to be updated.
 /// @returns ngx_int_t
 ///         - #1 if request was properly communicated with the nano service and provided an updated response.

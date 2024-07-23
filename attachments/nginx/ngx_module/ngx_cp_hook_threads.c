@@ -168,7 +168,8 @@ end_req_header_handler(
         session_data_p->session_id,
         request,
         modifications,
-        REQUEST_END
+        REQUEST_END,
+        0
     );
 }
 
@@ -282,7 +283,8 @@ ngx_http_cp_req_body_filter_thread(void *_ctx)
         session_data_p->session_id,
         request,
         &ctx->modifications,
-        REQUEST_BODY
+        REQUEST_BODY,
+        session_data_p->processed_req_body_size
     );
 
     if (is_last_part) session_data_p->was_request_fully_inspected = 1;
@@ -322,7 +324,8 @@ ngx_http_cp_req_end_transaction_thread(void *_ctx)
             session_data_p->session_id,
             request,
             &ctx->modifications,
-            REQUEST_END
+            REQUEST_END,
+            session_data_p->processed_req_body_size
         );
     }
 
@@ -433,7 +436,8 @@ ngx_http_cp_res_header_filter_thread(void *_ctx)
         session_data_p->session_id,
         request,
         &ctx->modifications,
-        RESPONSE_HEADER
+        RESPONSE_HEADER,
+        0
     );
 
     return NULL;
@@ -497,7 +501,8 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
         session_data_p->session_id,
         request,
         &ctx->modifications,
-        RESPONSE_BODY
+        RESPONSE_BODY,
+        session_data_p->processed_res_body_size
     );
 
     return NULL;
@@ -533,7 +538,8 @@ ngx_http_cp_hold_verdict_thread(void *_ctx)
         session_data_p->session_id,
         request,
         &ctx->modifications,
-        HOLD_DATA
+        HOLD_DATA,
+        0
     );
 
     write_dbg(

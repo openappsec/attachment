@@ -100,6 +100,9 @@ ngx_uint_t waiting_for_verdict_thread_timeout_msec = 150; ///< Wait thread proce
 ngx_http_inspection_mode_e inspection_mode = NON_BLOCKING_THREAD; ///< Default inspection mode.
 ngx_uint_t num_of_nginx_ipc_elements = 200; ///< Number of NGINX IPC elements.
 ngx_msec_t keep_alive_interval_msec = DEFAULT_KEEP_ALIVE_INTERVAL_MSEC;
+ngx_uint_t min_retries_for_verdict = 3; ///< Minimum number of retries for verdict.
+ngx_uint_t max_retries_for_verdict = 15; ///< Maximum number of retries for verdict.
+ngx_uint_t body_size_trigger = 200000; ///< Request body size in bytes to switch to maximum retries for verdict.
 
 static struct timeval
 getCurrTimeFast()
@@ -948,6 +951,9 @@ init_general_config(const char *conf_path)
     res_header_thread_timeout_msec = getResHeaderThreadTimeout();
     res_body_thread_timeout_msec = getResBodyThreadTimeout();
     waiting_for_verdict_thread_timeout_msec = getWaitingForVerdictThreadTimeout();
+    min_retries_for_verdict = getMinRetriesForVerdict();
+    max_retries_for_verdict = getMaxRetriesForVerdict();
+    body_size_trigger = getReqBodySizeTrigger();
 
     num_of_nginx_ipc_elements = getNumOfNginxIpcElements();
     keep_alive_interval_msec = (ngx_msec_t) getKeepAliveIntervalMsec();
@@ -976,7 +982,10 @@ init_general_config(const char *conf_path)
         "wait thread timeout: %u msec, "
         "static resources path: %s, "
         "num of nginx ipc elements: %u, "
-        "keep alive interval msec: %u msec",
+        "keep alive interval msec: %u msec"
+        "min retries for verdict: %u"
+        "max retries for verdict: %u"
+        "body size trigger for request: %u",
         inspection_mode,
         new_dbg_level,
         (fail_mode_verdict == NGX_OK ? "fail-open" : "fail-close"),
@@ -995,7 +1004,10 @@ init_general_config(const char *conf_path)
         waiting_for_verdict_thread_timeout_msec,
         getStaticResourcesPath(),
         num_of_nginx_ipc_elements,
-        keep_alive_interval_msec
+        keep_alive_interval_msec,
+        min_retries_for_verdict,
+        max_retries_for_verdict,
+        body_size_trigger
     );
 
 
