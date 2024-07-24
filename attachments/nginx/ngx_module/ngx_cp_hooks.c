@@ -83,7 +83,7 @@ init_cp_session_data(ngx_http_request_t *request)
     session_data->req_proccesing_time = 0;
     session_data->res_proccesing_time = 0;
     session_data->processed_req_body_size = 0;
-    session_data->processed_req_body_size = 0;
+    session_data->processed_res_body_size = 0;
 
     ngx_http_set_ctx(request, session_data, ngx_http_cp_attachment_module);
 

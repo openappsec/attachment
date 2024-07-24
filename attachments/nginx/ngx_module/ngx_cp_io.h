@@ -48,6 +48,7 @@ extern int comm_socket; ///< Communication socket.
 /// @param[in, out] request NGINX request.
 /// @param[in] modification_list
 /// @param[in] chunk_type Chunk type that the attachment is waiting for a response from nano service.
+/// @param[in] processed_body_size Processed body size to determinate number of retries from nano service.
 /// @returns ngx_int_t
 ///         - #NGX_OK
 ///         - #NGX_HTTP_FORBIDDEN
@@ -60,7 +61,8 @@ ngx_http_cp_reply_receiver(
     uint32_t cur_session_id,
     ngx_http_request_t *request,
     ngx_http_cp_modification_list **modification_list,
-    ngx_http_chunk_type_e chunk_type
+    ngx_http_chunk_type_e chunk_type,
+    uint64_t processed_body_size
 );
 
 ///
