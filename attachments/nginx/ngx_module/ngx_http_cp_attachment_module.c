@@ -424,6 +424,14 @@ ngx_cp_attachment_init_worker(ngx_cycle_t *cycle)
         core_main_conf = (ngx_core_conf_t *)ngx_get_conf(cycle->conf_ctx, ngx_core_module);
         workers_amount_to_send = core_main_conf->worker_processes;
     }
+    if (!workers_amount_to_send) {
+        write_dbg(DBG_LEVEL_DEBUG, "No specific worker count configured. Defaulting to auto-detect based on CPU cores.");
+        workers_amount_to_send = ngx_ncpu;
+    }
+    if (!workers_amount_to_send) {
+        write_dbg(DBG_LEVEL_DEBUG, "Auto-detection of CPU cores failed. Defaulting to a single worker process.");
+        workers_amount_to_send = 1;
+    }
     // Worker number 0 will always exist.
     // Therefore the single instance of the timer will be created and destroyed by it.
     if (ngx_worker == 0) {
