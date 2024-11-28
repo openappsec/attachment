@@ -846,7 +846,7 @@ ngx_http_cp_res_header_filter(ngx_http_request_t *request)
             return NGX_ERROR;
         }
     }
-
+    
     handle_inspection_success(session_data_p);
     return ngx_http_next_response_header_filter(request);
 }

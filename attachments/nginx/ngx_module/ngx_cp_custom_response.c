@@ -187,7 +187,7 @@ ngx_add_event_id_to_header(ngx_http_request_t *request)
 {
     u_char *uuid = (u_char *)get_web_response_uuid();
     ngx_uint_t uuid_size = get_web_response_uuid_size();
-    static u_char uuid_key[] = { 'x', '_', 'e', 'v', 'e', 'n', 't', '_', 'i', 'd' };
+    static u_char uuid_key[] = { 'X', '-', 'E', 'v', 'e', 'n', 't', '-', 'I', 'D' };
 
     write_dbg(
         DBG_LEVEL_WARNING,
