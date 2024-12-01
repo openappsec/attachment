@@ -406,7 +406,7 @@ create_modification_node(ngx_http_cp_inject_data_t *modification, ngx_http_reque
         Injection position: %d, \
         Injection size: %d, \
         Original buffer index: %d, \
-        Data: %s, \
+        Modification data: %s, \
         Should change data: %d",
        modification_node->modification.is_header,
        modification_node->modification.injection_pos,
@@ -505,7 +505,7 @@ ngx_http_cp_reply_receiver(
 
         *verdict = reply_p->verdict;
 
-        write_dbg(DBG_LEVEL_TRACE, "Verdict %d received", *verdict);
+        write_dbg(DBG_LEVEL_TRACE, "Verdict %d received, number of repiles left: %d", *verdict, *expected_replies);
 
         switch(*verdict) {
             case TRAFFIC_VERDICT_INJECT: {
