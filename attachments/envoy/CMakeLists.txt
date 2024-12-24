@@ -1,4 +1,4 @@
-if("${PLATFORM_TYPE}" STREQUAL "x86")
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
     set(ATTACHMENTS_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/core/include/attachments)
     set(NANO_ATTACHMENT_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/attachments/nano_attachment)
     set(SHMEM_LIBRARY_DIR ${CMAKE_BINARY_DIR}/core/shmem_ipc_2)
