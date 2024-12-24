@@ -1,0 +1,8 @@
+add_definitions(-DUSERSPACE)
+add_library(nano_attachment_util SHARED nano_attachment_util.cc)
+target_link_libraries(nano_attachment_util http_configuration)
+
+# add_subdirectory(nano_attachment_util_ut)
+
+install(TARGETS nano_attachment_util DESTINATION lib)
+install(TARGETS nano_attachment_util DESTINATION http_transaction_handler_service/lib/ PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ)
