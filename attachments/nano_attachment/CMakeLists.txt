@@ -26,7 +26,6 @@ add_library(
 target_link_libraries(nano_attachment shmem_ipc_2 nano_attachment_util)
 
 # add_subdirectory(nano_attachment_ut)
-# add_subdirectory(manual_testing)
 
 install(TARGETS nano_attachment DESTINATION lib)
 install(TARGETS nano_attachment DESTINATION http_transaction_handler_service/lib/ PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ)
