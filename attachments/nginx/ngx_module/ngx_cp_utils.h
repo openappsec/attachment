@@ -65,6 +65,7 @@ extern ngx_uint_t num_of_nginx_ipc_elements;
 extern ngx_uint_t min_retries_for_verdict;
 extern ngx_uint_t max_retries_for_verdict;
 extern ngx_uint_t body_size_trigger;
+extern ngx_uint_t remove_res_server_header;
 
 ///
 /// @struct ngx_http_cp_list_iterator

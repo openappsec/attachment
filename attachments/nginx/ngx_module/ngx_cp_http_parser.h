@@ -40,6 +40,12 @@ typedef struct {
     /// - #ZLIB
     CompressionType   new_compression_type;
 
+    ///< Original compressed body.
+    ngx_chain_t* original_compressed_body;
+
+    ///< NGINX pool.
+    ngx_pool_t* request_pool;
+
     /// Compression stream
     CompressionStream *compression_stream;
 

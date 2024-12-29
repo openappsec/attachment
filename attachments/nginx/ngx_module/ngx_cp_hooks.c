@@ -76,6 +76,8 @@ init_cp_session_data(ngx_http_request_t *request)
     session_id++;
     session_data->remaining_messages_to_reply = 0;
     session_data->response_data.response_data_status = NGX_OK;
+    session_data->response_data.original_compressed_body = NULL;
+    session_data->response_data.request_pool = NULL;
     if (!metric_timeout.tv_sec) {
         metric_timeout = get_timeout_val_sec(METRIC_TIMEOUT_VAL);
     }
@@ -105,6 +107,75 @@ fini_cp_session_data(ngx_http_cp_session_data *session_data)
         finiCompressionStream(session_data->response_data.decompression_stream);
         session_data->response_data.decompression_stream = NULL;
     }
+}
+
+///
+/// @brief Cleans up session data.
+/// @param[in] data Pointer to the session data to be cleaned up.
+///
+static void
+ngx_session_data_cleanup(void *data)
+{
+    if (data == NULL) return;
+    ngx_http_cp_session_data *session_data = (ngx_http_cp_session_data *)data;
+    write_dbg(DBG_LEVEL_TRACE, "Cleaning up session data for session ID %d", session_data->session_id);
+
+    if (session_data->response_data.original_compressed_body != NULL) {
+        ngx_chain_t *current = session_data->response_data.original_compressed_body;
+        while (current != NULL) {
+            ngx_chain_t *next = current->next;
+            ngx_free_chain(session_data->response_data.request_pool, current);
+            current = next;
+        }
+        session_data->response_data.original_compressed_body = NULL;
+    }
+
+    fini_cp_session_data(session_data);
+}
+
+///
+/// @brief initializes session data with response_data chain allocation and cleanup from given ngx pool
+/// \param session_data
+/// \param request
+/// \return
+///
+static ngx_int_t
+init_cp_session_original_body(ngx_http_cp_session_data *session_data, ngx_pool_t *pool)
+{
+    ngx_pool_cleanup_t *cln;
+
+    write_dbg(DBG_LEVEL_TRACE, "Initializing original compressed body for session ID %d", session_data->session_id);
+
+    session_data->response_data.original_compressed_body = ngx_alloc_chain_link(pool);
+
+    if (session_data->response_data.original_compressed_body == NULL) {
+        write_dbg(
+            DBG_LEVEL_WARNING,
+            "Failed to allocate memory for original compressed body in session ID %d\n",
+            session_data->session_id
+        );
+        return NGX_ERROR;
+    }
+    session_data->response_data.request_pool = pool;
+    ngx_memset(session_data->response_data.original_compressed_body, 0, sizeof(ngx_chain_t));
+
+    cln = ngx_pool_cleanup_add(pool, 0);
+    if (cln == NULL) {
+        write_dbg(
+            DBG_LEVEL_WARNING,
+            "Failed to allocate cleanup memory for original compressed body in session ID %d\n",
+            session_data->session_id
+        );
+        ngx_free_chain(session_data->response_data.request_pool, session_data->response_data.original_compressed_body);
+        session_data->response_data.original_compressed_body = NULL;
+        return NGX_ERROR;
+    }
+
+    write_dbg(DBG_LEVEL_TRACE, "Adding session_data cleanup handler for session ID %d", session_data->session_id);
+    cln->handler = ngx_session_data_cleanup;
+    cln->data = session_data;
+
+    return NGX_OK;
 }
 
 ///
@@ -721,6 +792,43 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
     return ngx_http_next_request_body_filter(request, request_body_chain);
 }
 
+///
+/// @brief Removes the "Server" header from the HTTP response.
+/// 
+/// This function modifies the `headers_out` structure of the given HTTP request
+/// to remove the "Server" header. If the header is already removed, it returns `NGX_OK`.
+/// Otherwise, it allocates a new header entry, sets its key to "Server" and its value to an
+/// empty string, and updates the `headers_out` structure accordingly.
+///
+/// @param r The HTTP request object containing the headers to be modified.
+/// @return `NGX_OK` if the header was successfully removed or was already removed,
+///         `NGX_ERROR` if there was an error allocating memory for the new header entry.
+///
+static ngx_int_t
+remove_server_header(ngx_http_request_t *r)
+{
+    ngx_table_elt_t *header, **server_header_slot;
+    ngx_uint_t offset = offsetof(ngx_http_headers_out_t, server);
+
+    server_header_slot = (ngx_table_elt_t **) ((char *) &r->headers_out + offset);
+    if (*server_header_slot != NULL) return NGX_OK;
+
+    header = ngx_list_push(&r->headers_out.headers);
+    if (header == NULL) return NGX_ERROR;
+
+    header->hash = 0;
+    ngx_str_set(&header->key, "Server");
+    ngx_str_set(&header->value, "");
+
+    header->lowcase_key = ngx_pnalloc(r->pool, header->key.len);
+    if (header->lowcase_key == NULL) return NGX_ERROR;
+
+    ngx_strlow(header->lowcase_key, header->key.data, header->key.len);
+    *server_header_slot = header;
+
+    return NGX_OK;
+}
+
 ngx_int_t
 ngx_http_cp_res_header_filter(ngx_http_request_t *request)
 {
@@ -732,6 +840,8 @@ ngx_http_cp_res_header_filter(ngx_http_request_t *request)
     set_current_session_id(0);
 
     session_data_p = recover_cp_session_data(request);
+    
+    if (remove_res_server_header) remove_server_header(request);
 
     if (session_data_p == NULL) return ngx_http_next_response_header_filter(request);
 
@@ -856,8 +966,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
 {
     struct ngx_http_cp_event_thread_ctx_t ctx;
     ngx_http_cp_session_data *session_data_p;
-    ngx_chain_t *original_compressed_body = NULL;
-    ngx_int_t compression_result;
+    ngx_int_t compression_result = NGX_ERROR;
     ngx_chain_t *chain_elem = NULL;
     ngx_int_t final_res;
     int is_last_decompressed_part = 0;
@@ -920,25 +1029,23 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
     }
 
     if (body_chain->buf->pos != NULL && session_data_p->response_data.new_compression_type != NO_COMPRESSION) {
-        // Decompress and re-compress non-empty buffer to maintain consistent compression stream
-        original_compressed_body = ngx_alloc_chain_link(request->pool);
-        ngx_memset(original_compressed_body, 0, sizeof(ngx_chain_t));
+        if (init_cp_session_original_body(session_data_p, request->pool) == NGX_OK) {
+            if (session_data_p->response_data.decompression_stream == NULL) {
+                session_data_p->response_data.decompression_stream = initCompressionStream();
+            }
 
-        if (session_data_p->response_data.decompression_stream == NULL) {
-            session_data_p->response_data.decompression_stream = initCompressionStream();
+            compression_result = decompress_body(
+                    session_data_p->response_data.decompression_stream,
+                    RESPONSE_BODY,
+                    &is_last_decompressed_part,
+                    &body_chain,
+                    &session_data_p->response_data.original_compressed_body,
+                    request->pool
+            );
         }
 
-        compression_result = decompress_body(
-            session_data_p->response_data.decompression_stream,
-            RESPONSE_BODY,
-            &is_last_decompressed_part,
-            &body_chain,
-            &original_compressed_body,
-            request->pool
-        );
-
         if (compression_result != NGX_OK) {
-            copy_chain_buffers(body_chain, original_compressed_body);
+            copy_chain_buffers(body_chain, session_data_p->response_data.original_compressed_body);
             handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
             fini_cp_session_data(session_data_p);
             session_data_p->response_data.response_data_status = NGX_ERROR;
@@ -1004,8 +1111,14 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
         return ngx_http_next_response_body_filter(request, body_chain);
     }
 
-    init_thread_ctx(&ctx, request, session_data_p,
-        original_compressed_body == NULL ? body_chain : original_compressed_body);
+    init_thread_ctx(
+        &ctx,
+        request,
+        session_data_p,
+        session_data_p->response_data.original_compressed_body == NULL
+            ? body_chain
+            : session_data_p->response_data.original_compressed_body
+    );
 
     write_dbg(DBG_LEVEL_DEBUG, "spawn ngx_http_cp_res_body_filter_thread");
     // Open threads while unprocessed chain elements still exist, up to num of elements in the chain iterations
@@ -1122,8 +1235,8 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
         !ctx.modifications
     ) {
         session_data_p->response_data.new_compression_type = NO_COMPRESSION;
-        if (original_compressed_body) {
-            copy_chain_buffers(body_chain, original_compressed_body);
+        if (session_data_p->response_data.original_compressed_body) {
+            copy_chain_buffers(body_chain, session_data_p->response_data.original_compressed_body);
         }
         return ngx_http_next_response_body_filter(request, body_chain);
     }

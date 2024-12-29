@@ -218,7 +218,7 @@ compression_data_filter(
         if (output->data == NULL) {
             // Failed to allocate a new buffer.
             write_dbg(DBG_LEVEL_WARNING, "Failed to allocate a new buffer");
-
+            free(compression_result.output);
             return NGX_ERROR;
         }
 
