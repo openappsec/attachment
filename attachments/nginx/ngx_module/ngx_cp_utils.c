@@ -103,6 +103,7 @@ ngx_msec_t keep_alive_interval_msec = DEFAULT_KEEP_ALIVE_INTERVAL_MSEC;
 ngx_uint_t min_retries_for_verdict = 3; ///< Minimum number of retries for verdict.
 ngx_uint_t max_retries_for_verdict = 15; ///< Maximum number of retries for verdict.
 ngx_uint_t body_size_trigger = 200000; ///< Request body size in bytes to switch to maximum retries for verdict.
+ngx_uint_t remove_res_server_header = 0; ///< Remove server header flag.
 
 static struct timeval
 getCurrTimeFast()
@@ -954,6 +955,7 @@ init_general_config(const char *conf_path)
     min_retries_for_verdict = getMinRetriesForVerdict();
     max_retries_for_verdict = getMaxRetriesForVerdict();
     body_size_trigger = getReqBodySizeTrigger();
+    remove_res_server_header = getRemoveResServerHeader();
 
     num_of_nginx_ipc_elements = getNumOfNginxIpcElements();
     keep_alive_interval_msec = (ngx_msec_t) getKeepAliveIntervalMsec();
