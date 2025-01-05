@@ -400,7 +400,6 @@ set_docker_id(NanoAttachment *attachment)
 
     if (!uid_read) {
         write_dbg(attachment, 0, DBG_LEVEL_WARNING, "Severe error - failed to get uid!");
-        return NANO_ERROR;
     }
 
     return NANO_OK;

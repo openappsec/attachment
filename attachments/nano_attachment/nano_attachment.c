@@ -15,17 +15,18 @@
 #include "nano_utils.h"
 #include "attachment_types.h"
 #include "nano_blockpage.h"
+#include "compression_utils.h"
+#include "nano_compression.h"
 
 NanoAttachment *
 InitNanoAttachment(uint8_t attachment_type, int worker_id, int num_of_workers, int logging_fd)
 {
-    // NanoAttachment *attachment = malloc(sizeof(NanoAttachment));
-    NanoAttachment *attachment = calloc(1, sizeof(NanoAttachment));
+    NanoAttachment *attachment = malloc(sizeof(NanoAttachment));
     if (attachment == NULL) {
         return NULL;
     }
 
-    // memset(attachment, 0, sizeof(NanoAttachment));
+    memset(attachment, 0, sizeof(NanoAttachment));
 
     attachment->shared_verdict_signal_path[0] = '\0';
     attachment->worker_id = worker_id;
@@ -141,6 +142,10 @@ InitSessionData(NanoAttachment *attachment, SessionID session_id)
     session_data->processed_req_body_size = 0;
     session_data->processed_res_body_size = 0;
 
+    session_data->response_data.compression_type = NO_COMPRESSION;
+    session_data->response_data.compression_stream = NULL;
+    session_data->response_data.decompression_stream = NULL;
+
     return session_data;
 };
 
@@ -153,6 +158,16 @@ FiniSessionData(NanoAttachment *attachment, HttpSessionData *session_data)
         DBG_LEVEL_DEBUG,
         "Freeing session data for session_id"
     );
+
+    if (session_data->response_data.compression_stream != NULL) {
+        finiCompressionStream(session_data->response_data.compression_stream);
+        session_data->response_data.compression_stream = NULL;
+    }
+
+    if (session_data->response_data.decompression_stream != NULL) {
+        finiCompressionStream(session_data->response_data.decompression_stream);
+        session_data->response_data.decompression_stream = NULL;
+    }
     free(session_data);
 };
 
@@ -207,13 +222,6 @@ SendDataNanoAttachment(NanoAttachment *attachment, AttachmentData *data)
     };
     return response;
 }
-
-// LCOV_EXCL_START Reason: Simple wrapper.
-AttachmentVerdictResponse SendDataNanoAttachmentWrapper(NanoAttachment *attachment, AttachmentData data)
-{
-    return SendDataNanoAttachment(attachment, &data);
-}
-// LCOV_EXCL_STOP
 
 ///
 /// @brief Connects to the keep-alive socket.
@@ -586,4 +594,23 @@ FreeAttachmentResponseContent(
     }
 
     return;
+}
+
+HttpBody *
+compressBody(NanoAttachment *attachment, HttpSessionData *session_data, HttpBody *bodies)
+{
+    return nano_compress_body(attachment, bodies, session_data);
+}
+
+
+HttpBody *
+decompressBody(NanoAttachment *attachment, HttpSessionData *session_data, HttpBody *bodies)
+{
+    return nano_decompress_body(attachment, bodies, session_data);
+}
+
+void
+freeCompressedBody(NanoAttachment *attachment, HttpSessionData *session_data, HttpBody *bodies)
+{
+    nano_free_compressed_body(attachment, bodies, session_data);
 }

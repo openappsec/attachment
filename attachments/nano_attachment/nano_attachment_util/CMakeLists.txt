@@ -1,3 +1,7 @@
+include_directories(${Boost_INCLUDE_DIRS})
+
+link_directories(${BOOST_ROOT}/lib)
+
 add_definitions(-DUSERSPACE)
 add_library(nano_attachment_util SHARED nano_attachment_util.cc)
 target_link_libraries(nano_attachment_util http_configuration)

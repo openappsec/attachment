@@ -50,6 +50,7 @@ notify_signal_to_service(NanoAttachment *attachment, uint32_t cur_session_id)
 
     s_poll.fd = attachment->comm_socket;
     s_poll.events = POLLOUT;
+    s_poll.revents = 0;
     res = poll(&s_poll, 1, 0);
     if (res > 0 && s_poll.revents & POLLHUP) {
         write_dbg(
@@ -470,7 +471,7 @@ create_modification_node(NanoAttachment *attachment, SessionID session_id, HttpI
         "Injection position: %d, "
         "Injection size: %d, "
         "Original buffer index: %d, "
-        "Data: %s, "
+        "Modification data: %s, "
         "Should change data: %d",
         modification_node->modification.is_header,
         modification_node->modification.injection_pos,
@@ -513,6 +514,15 @@ handle_inject_response(
     for (modification_index = 0; modification_index < modification_count; modification_index++) {
         // Go over the modifications and create nodes.
         new_modification = create_modification_node(attachment, session_id, inject_data);
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_DEBUG,
+            "create modification node %d out of %d",
+            modification_index,
+            modification_count
+        );
+
         if (new_modification == NULL) {
             write_dbg(attachment, session_id, DBG_LEVEL_WARNING, "Failed to create modification node");
             while (*modification_list) {
@@ -527,6 +537,10 @@ handle_inject_response(
             *modification_list = new_modification;
             current_modification = *modification_list;
         } else {
+            while (*modification_list) {
+                current_modification = *modification_list;
+                *modification_list = (*modification_list)->next;
+            }
             current_modification->next = new_modification;
             current_modification = current_modification->next;
         }

@@ -4,9 +4,10 @@ include_directories(include)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_GNU_SOURCE -lpthread -Wall")
 
-link_directories(../../core)
-link_directories(../../core/shmem_ipc)
-include_directories(../../core/include/attachments)
+link_directories(${ng_module_osrc_zlib_path}/lib)
+link_directories(${CMAKE_BINARY_DIR}/core)
+link_directories(${CMAKE_BINARY_DIR}/core/shmem_ipc)
+include_directories(${PROJECT_SOURCE_DIR}/core/include/attachments)
 
 
 add_library(
@@ -21,9 +22,10 @@ add_library(
     nano_attachment_sender.c
     nano_attachment_sender_thread.c
     nano_attachment_metric.c
+    nano_compression.c
 )
 
-target_link_libraries(nano_attachment shmem_ipc_2 nano_attachment_util)
+target_link_libraries(nano_attachment shmem_ipc_2 nano_attachment_util compression_utils)
 
 # add_subdirectory(nano_attachment_ut)
 

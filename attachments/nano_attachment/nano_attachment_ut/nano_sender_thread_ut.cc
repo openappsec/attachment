@@ -25,7 +25,6 @@ public:
         ).WillOnce(
             Return(NanoCommunicationResult::NANO_OK)
         );
-        setenv("CLOUDGUARD_UID", "Testing", 1);
         attachment = InitNanoAttachment(
             static_cast<uint8_t>(AttachmentType::NGINX_ATT_ID),
             2,
@@ -77,7 +76,7 @@ public:
         create_nano_str("/dogs.html")
     };
 
-    HttpHeaderData http_headers[3] = {
+    HttpHeaderData http_headers[4] = {
         {
             create_nano_str("Host"),
             create_nano_str("www.nanoattachmentut.com")
@@ -89,12 +88,16 @@ public:
         {
             create_nano_str("Accept"),
             create_nano_str("text/html")
+        },
+        {
+            create_nano_str("content-encoding"),
+            create_nano_str("gzip")
         }
     };
 
     HttpHeaders http_headers_data = {
         http_headers,
-        3
+        4
     };
 
     HttpRequestFilterData request_filter_data = {
@@ -348,12 +351,14 @@ TEST_F(NanoAttachmentSenderThreadTest, SendResponseHeadersThread)
             AttachmentDataType::RESPONSE_HEADER,
             session_data->session_id,
             &session_data->remaining_messages_to_reply,
-            false
+            true
         )
     );
 
     init_thread_ctx(&ctx, attachment, &res_header_data);
     SendResponseHeadersThread(&ctx);
+
+    EXPECT_EQ(session_data->response_data.compression_type, CompressionType::GZIP);
 }
 
 TEST_F(NanoAttachmentSenderThreadTest, SendRequestBodyThread)

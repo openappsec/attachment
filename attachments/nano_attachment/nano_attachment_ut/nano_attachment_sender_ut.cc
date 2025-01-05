@@ -26,7 +26,6 @@ public:
         ).WillOnce(
             Return(NanoCommunicationResult::NANO_OK)
         );
-        setenv("CLOUDGUARD_UID", "Testing", 1);
         attachment = InitNanoAttachment(
             static_cast<uint8_t>(AttachmentType::NGINX_ATT_ID),
             2,

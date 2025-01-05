@@ -1,3 +1,5 @@
+include_directories(${Boost_INCLUDE_DIRS})
+
 add_library(shmem_ipc_2 SHARED shmem_ipc.c shared_ring_queue.c)
 
 target_link_libraries(shmem_ipc_2 -lrt)

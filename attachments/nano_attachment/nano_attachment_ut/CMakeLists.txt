@@ -49,3 +49,9 @@ add_unit_test(
     "nano_attachment_metrics_ut.cc"
     "nano_attachment"
 )
+
+add_unit_test(
+    nano_compression_ut
+    "nano_compression_ut.cc"
+    "nano_attachment"
+)

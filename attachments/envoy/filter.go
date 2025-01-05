@@ -107,6 +107,7 @@ type filter struct {
 	session_data  *C.HttpSessionData
 	cp_attachment *nano_attachment
 	request_structs *filterRequestStructs
+	body_buffer_chunk int
 }
 
 type filterRequestStructs struct {
@@ -230,10 +231,6 @@ func (f *filter) sendBody(buffer api.BufferInstance, is_req bool) C.AttachmentVe
 	data := buffer.Bytes()
 	data_len := len(data)
 	buffer_size := 8 * 1024
-
-	// body_chunk := newNanoStr(data)
-	// body_chunk.data = (*C.uchar)(unsafe.Pointer(&data[0]))
-
 	num_of_buffers := ((data_len - 1) / buffer_size) + 1
 
 	// TO DO: FIX THIS ASAP
@@ -299,20 +296,7 @@ func (f *filter) handleStartTransaction(header api.RequestHeaderMap) {
 }
 
 func (f *filter) sendLocalReplyInternal(ret_code int, custom_response string, headers map[string][]string) api.StatusType {
-	//f.callbacks.DecoderFilterCallbacks().SendLocalReply(ret_code, custom_response, headers, 0, "") // new api
-	// var headers_map map[string]string = nil
-	// if headers != nil {
-	// 	headers_map = make(map[string]string)
-	// 	for key, val := range headers {
-	// 		header_val := ""
-	// 		if len(val) > 0 {
-	// 			header_val = val[0]
-	// 		}
-
-	// 		headers_map[key] = header_val
-	// 	}
-	// }
-	f.callbacks.DecoderFilterCallbacks().SendLocalReply(ret_code, custom_response, headers, 0, "")
+	f.callbacks.SendLocalReply(ret_code, custom_response, headers, 0, "")
 	return api.LocalReply
 }
 
@@ -428,6 +412,21 @@ func (f *filter) EncodeHeaders(header api.ResponseHeaderMap, endStream bool) api
 	return ret
 }
 
+func injectBodyChunk(
+	curr_modification *C.struct_NanoHttpModificationList,
+	body_buffer_chunk int,
+	buffer *api.BufferInstance) {
+	for curr_modification != nil {
+		if (int(curr_modification.modification.orig_buff_index) == body_buffer_chunk) {
+			mod := curr_modification.modification // type: HttpInjectData
+			modifications := C.GoString(curr_modification.modification_buffer)
+			new_buffer:= insertAtPosition((*buffer).String(), modifications, int(mod.injection_pos))
+			(*buffer).SetString(new_buffer)
+		}
+		curr_modification = curr_modification.next
+	}
+}
+
 // EncodeData might be called multiple times during handling the response body.
 // The endStream is true when handling the last piece of the body.
 func (f *filter) EncodeData(buffer api.BufferInstance, endStream bool) api.StatusType {
@@ -448,6 +447,8 @@ func (f *filter) EncodeData(buffer api.BufferInstance, endStream bool) api.Statu
 	}
 
 	res := f.sendBody(buffer, false)
+	injectBodyChunk(res.modifications, f.body_buffer_chunk, &buffer)
+	f.body_buffer_chunk++
 	if C.AttachmentVerdict(res.verdict) != C.ATTACHMENT_VERDICT_INSPECT {
 		api.LogInfof("got final verict: %v", res.verdict)
 		return f.finalizeRequest(&res)
@@ -471,15 +472,15 @@ func (f *filter) EncodeTrailers(trailers api.ResponseTrailerMap) api.StatusType 
 }
 
 // OnLog is called when the HTTP stream is ended on HTTP Connection Manager filter.
-func (f *filter) OnLog(api.RequestHeaderMap, api.RequestTrailerMap, api.ResponseHeaderMap, api.ResponseTrailerMap) {}
+func (f *filter) OnLog() {}
 
 // OnLogDownstreamStart is called when HTTP Connection Manager filter receives a new HTTP request
 // (required the corresponding access log type is enabled)
-func (f *filter) OnLogDownstreamStart(api.RequestHeaderMap) {}
+func (f *filter) OnLogDownstreamStart() {}
 
 // OnLogDownstreamPeriodic is called on any HTTP Connection Manager periodic log record
 // (required the corresponding access log type is enabled)
-func (f *filter) OnLogDownstreamPeriodic(api.RequestHeaderMap, api.RequestTrailerMap, api.ResponseHeaderMap, api.ResponseTrailerMap) {}
+func (f *filter) OnLogDownstreamPeriodic() {}
 
 func (f *filter) OnDestroy(reason api.DestroyReason) {
 	freeHttpMetaDataFields(f.request_structs.http_meta_data)

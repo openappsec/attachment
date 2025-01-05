@@ -6,6 +6,7 @@
 #include "mock_nano_initializer.h"
 #include "mock_nano_attachment_sender.h"
 #include "mock_nano_configuration.h"
+#include "mock_nano_compression.h"
 
 extern "C" {
 #include "nano_attachment.h"
@@ -26,7 +27,6 @@ public:
         ).WillOnce(
             Return(NanoCommunicationResult::NANO_OK)
         );
-        setenv("CLOUDGUARD_UID", "Testing", 1);
         attachment = InitNanoAttachment(
             static_cast<uint8_t>(AttachmentType::NGINX_ATT_ID),
             2,
@@ -199,6 +199,7 @@ public:
     StrictMock<NanoInitializerMocker> initializer_mocker;
     StrictMock<NanoSocketMocker> socket_mocker;
     StrictMock<NanoConfigurationMocker> configuration_mocker;
+    StrictMock<NanoCompressionMocker> compression_mocker;
 };
 
 TEST_F(NanoAttachmentTest, InitNanoAttachment)
@@ -449,4 +450,33 @@ TEST_F(NanoAttachmentTest, SendAccumulatedMetricData)
 {
     EXPECT_CALL(sender_mocker, SendMetricData(attachment)).WillOnce(Return(NanoCommunicationResult::NANO_OK));
     SendAccumulatedMetricData(attachment);
+}
+
+TEST_F(NanoAttachmentTest, CompressData)
+{
+    EXPECT_CALL(
+        compression_mocker,
+        nano_compress_body(attachment, &http_body_data, session_data)
+        ).WillOnce(Return(nullptr)
+    );
+    compressBody(attachment, session_data,  &http_body_data);
+}
+
+TEST_F(NanoAttachmentTest, DecompressData)
+{
+    EXPECT_CALL(
+        compression_mocker,
+        nano_decompress_body(attachment, &http_body_data, session_data)
+        ).WillOnce(Return(nullptr)
+    );
+    decompressBody(attachment, session_data, &http_body_data);
+}
+
+TEST_F(NanoAttachmentTest, FreeCompressedData)
+{
+    EXPECT_CALL(
+        compression_mocker,
+        nano_free_compressed_body(attachment, &http_body_data, session_data)
+    );
+    freeCompressedBody(attachment, session_data, &http_body_data);
 }

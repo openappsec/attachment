@@ -14,6 +14,7 @@ import (
 	"unsafe"
 	"os"
 	"runtime"
+    "strconv"
 )
 func getEnv(key, defaultValue string) string {
 	value, exists := os.LookupEnv(key)
@@ -23,49 +24,48 @@ func getEnv(key, defaultValue string) string {
 	return value
 }
 
+var INSERT_POS_ERR_MSG = "Got invalid insertion position, will not insert."
+
 func copyToSlice(dest []byte, src unsafe.Pointer, size C.size_t, location int) int {
 	C.memcpy(unsafe.Pointer(&dest[location]), src, size)
 	return location + int(size)
 }
 
 func newNanoStr(data []byte) *C.nano_str_t {
-	// Allocate memory for the nano_str_t struct
 	nanoStr := (*C.nano_str_t)(C.malloc(C.size_t(unsafe.Sizeof(C.nano_str_t{}))))
 	if nanoStr == nil {
 		panic("failed to allocate memory for nano_str_t struct")
 	}
 
-	// Set the length of the data
 	nanoStr.len = C.size_t(len(data))
-
-	// Allocate memory for the data field and copy the Go byte slice into it
-	// nanoStr.data = (*C.uchar)(C.malloc(C.size_t(len(data))))
-	// if nanoStr.data == nil {
-	// 	C.free(unsafe.Pointer(nanoStr))
-	// 	panic("failed to allocate memory for data field")
-	// }
-	// copy((*[1 << 30]byte)(unsafe.Pointer(nanoStr.data))[:len(data):len(data)], data)
-
 	return nanoStr
+}
+
+func insertAtPosition(buff string, injection string, pos int) string {
+	if pos < 0 || pos > len(buff) {
+		api.LogDebugf(
+			INSERT_POS_ERR_MSG +
+			" Position: " +
+			strconv.Itoa(pos) +
+			", buffer's lenght: " +
+			strconv.Itoa(len(buff)))
+		return buff
+	}
+	return_buff := buff[:pos] + injection + buff[pos:]
+	return return_buff
 }
 
 func createNanoStr(str string) C.nano_str_t {
     c_str := C.CString(str)
-	// nanoStr := (*C.nano_str_t)(C.malloc(C.size_t(unsafe.Sizeof(C.nano_str_t{}))))
     nanoStr := C.nano_str_t{
         len:  C.size_t(len(str)),
         data: (*C.uchar)(unsafe.Pointer(c_str)),
     }
 
-	// nanoStr.len = C.size_t(len(str))
-	// nanoStr.data = (*C.uchar)(unsafe.Pointer(c_str))
-
     return nanoStr
 }
 
 func createNanoStrWithoutCopy(str string) C.nano_str_t {
-    //c_str := C.CString(str)
-
     nanoStr := C.nano_str_t{
         len:  C.size_t(len(str)),
         data: (*C.uchar)(unsafe.Pointer((*(*reflect.StringHeader)(unsafe.Pointer(&str))).Data)),

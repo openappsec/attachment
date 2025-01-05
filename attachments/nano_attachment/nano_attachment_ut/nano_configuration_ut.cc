@@ -90,7 +90,6 @@ TEST_F(NanoConfigurationTest, InitAttachmentConfiguration)
     res = set_logging_fd(&attachment, STDOUT_FILENO);
     EXPECT_EQ(res, NanoCommunicationResult::NANO_OK);
 
-    setenv("CLOUDGUARD_UID", "Testing", 1);
     res = set_docker_id(&attachment);
     EXPECT_EQ(res, NanoCommunicationResult::NANO_OK);
 

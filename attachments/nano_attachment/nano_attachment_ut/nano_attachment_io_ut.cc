@@ -25,7 +25,6 @@ public:
             initializer_mocker,
             nano_attachment_init_process(_)).WillOnce(Return(NanoCommunicationResult::NANO_OK)
         );
-        setenv("CLOUDGUARD_UID", "Testing", 1);
         attachment = InitNanoAttachment(
             static_cast<uint8_t>(AttachmentType::NGINX_ATT_ID),
             2,
@@ -67,6 +66,10 @@ public:
         free(reply_from_service_mock);
         FiniSessionData(attachment, session_data);
         FiniNanoAttachment(attachment);
+        ::testing::Mock::VerifyAndClearExpectations(&initializer_mocker);
+        ::testing::Mock::VerifyAndClearExpectations(&mock_shmem_ipc);
+        ::testing::Mock::VerifyAndClearExpectations(&mock_nano_socket);
+        ::testing::Mock::VerifyAndClearExpectations(&mock_nano_poll);
     }
 
     nano_str_t
@@ -156,6 +159,8 @@ public:
     HttpWebResponseData *web_response_data;
     uint32_t reply_session_id = -1;
     void *reply_session_id_void = &reply_session_id;
+    struct pollfd fds;
+    struct pollfd *mock_fds = &fds;
     const char **replay_data_mock;
 
     NanoAttachment *attachment;
@@ -421,7 +426,17 @@ TEST_F(NanoAttachmentIoTest, NanoBodySender)
     EXPECT_CALL(
         mock_nano_poll,
         poll(_, _, _)
-    ).WillRepeatedly(Return(1));
+    ).WillRepeatedly(
+        DoAll(
+            SaveArg<0>(&mock_fds),
+            InvokeWithoutArgs(
+                [&] () {
+                    mock_fds[0].revents = POLLIN;
+                }
+            ),
+            Return(1)
+        )
+    );
 
     EXPECT_CALL(
         mock_nano_socket,
