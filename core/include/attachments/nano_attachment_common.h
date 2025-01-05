@@ -7,6 +7,8 @@
 #include <sys/types.h>
 #include <assert.h>
 
+#include "compression_utils.h"
+
 typedef uint32_t SessionID;
 typedef void* DataBuffer;
 
@@ -330,6 +332,22 @@ typedef struct NanoHttpModificationList {
     char *modification_buffer; ///< Modification buffer used to store extra needed data.
 } NanoHttpModificationList;
 
+/// @struct NanoHttpResponseData
+/// Holds all the data for Compression in a session.
+typedef struct {
+
+    /// Original compression type, can hold the following values:
+    /// - #GZIP
+    /// - #ZLIB
+    CompressionType   compression_type;
+
+    /// Compression stream
+    CompressionStream *compression_stream;
+
+    /// Decompression stream
+    CompressionStream *decompression_stream;
+} NanoHttpResponseData;
+
 /// @struct HttpSessionData
 /// @brief Holds all the session's information needed to communicate with the nano service.
 /// @details Such as to save verdict and session ID between the request and the response
@@ -339,7 +357,7 @@ typedef struct HttpSessionData {
     uint32_t               session_id; ///< Current session's Id.
     unsigned int           remaining_messages_to_reply; ///< Remaining messages left for the agent to respond to.
 
-    // NanoHttpResponseData_t response_data; ///< Holds session's response data.
+    NanoHttpResponseData   response_data; ///< Holds session's response data.
 
     double                 req_proccesing_time; ///< Holds session's request processing time.
     double                 res_proccesing_time; ///< Holds session's response processing time.
