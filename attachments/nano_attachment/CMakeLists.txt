@@ -25,7 +25,7 @@ add_library(
     nano_compression.c
 )
 
-target_link_libraries(nano_attachment shmem_ipc_2 nano_attachment_util compression_utils)
+target_link_libraries(nano_attachment shmem_ipc_2 nano_attachment_util osrc_compression_utils)
 
 # add_subdirectory(nano_attachment_ut)
 
