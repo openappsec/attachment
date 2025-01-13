@@ -515,7 +515,7 @@ def mutate():
 
         if ISTIO_CONTAINER_NAME:
             add_env_if_not_exist(containers, ISTIO_CONTAINER_NAME, patches)
-            add_env_variable_value_from(containers, ISTIO_CONTAINER_NAME, 'CLOUDGUARD_UID', None, patches, value_from={"fieldRef": {"fieldPath": "metadata.uid"}})
+            add_env_variable_value_from(containers, ISTIO_CONTAINER_NAME, 'OPENAPPSEC_UID', None, patches, value_from={"fieldRef": {"fieldPath": "metadata.uid"}})
             if LIBRARY_PATH_VALUE:
                 add_env_variable(containers, ISTIO_CONTAINER_NAME, 'LD_LIBRARY_PATH', LIBRARY_PATH_VALUE, patches)
             if CONCURRENCY_CALC_VALUE:
@@ -562,7 +562,7 @@ def mutate():
             app.logger.debug("Added volume definition patch: %s", patches[-1])
 
             if DEPLOY_FILTER and SELECTOR_LABEL_NAME and SELECTOR_LABEL_VALUE:
-                RELEASE_NAME = os.getenv('RELEASE_NAME', 'cloudguard-waf-injected')
+                RELEASE_NAME = os.getenv('RELEASE_NAME', 'openappsec-waf-injected')
                 envoy_filter_name = RELEASE_NAME + "-waf-filter"
                 create_or_update_envoy_filter(envoy_filter_name, namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
         else:
