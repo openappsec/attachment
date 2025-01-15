@@ -359,6 +359,20 @@ sendChunkedData(
 {
     writeDebug(&(ipc->logging_data), TraceLevel, "Sending %u chunks of data\n", num_of_data_elem);
 
+    int i = 0;
+    while (data_elem_to_send[i] != NULL) { // Assume the array is NULL-terminated
+        writeDebug(&(ipc->logging_data), WarningLevel, "String %d address: %p\n", i, (void *)data_elem_to_send[i]);
+        writeDebug(&(ipc->logging_data), WarningLevel, "String %d content in hex: ", i);
+
+        char *current = data_elem_to_send[i];
+        while (*current) {
+            writeDebug(&(ipc->logging_data), WarningLevel, "%02x ", (unsigned char)*current);
+            current++;
+        }
+        i++;
+    }
+
+
     return pushBuffersToQueue(
         &(ipc->logging_data),
         ipc->tx_queue,
