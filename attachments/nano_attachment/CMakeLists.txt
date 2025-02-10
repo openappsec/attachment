@@ -4,7 +4,6 @@ include_directories(include)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_GNU_SOURCE -lpthread -Wall")
 
-link_directories(${ng_module_osrc_zlib_path}/lib)
 link_directories(${CMAKE_BINARY_DIR}/core)
 link_directories(${CMAKE_BINARY_DIR}/core/shmem_ipc)
 include_directories(${PROJECT_SOURCE_DIR}/core/include/attachments)
