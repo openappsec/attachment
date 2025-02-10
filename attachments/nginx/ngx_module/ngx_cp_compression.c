@@ -370,7 +370,17 @@ compression_chain_filter(
         );
         if (compression_result != NGX_OK) {
             // Failed to decompress or compress.
-            free_chain(pool, *body);
+            if (curr_original_contents_link != NULL) {
+                write_dbg(
+                    DBG_LEVEL_WARNING,
+                    "Failed to %s chain: free unused chain link "
+                    "and copy original chain back to body up to current link",
+                    should_compress ? "compress" : "decompress"
+                );
+                ngx_free_chain(pool, curr_original_contents_link);
+                curr_original_contents_link = NULL;
+                copy_chain_buffers(*body, *original_body_contents);
+            }
 
             return NGX_ERROR;
         }

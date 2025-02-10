@@ -118,15 +118,10 @@ ngx_session_data_cleanup(void *data)
 {
     if (data == NULL) return;
     ngx_http_cp_session_data *session_data = (ngx_http_cp_session_data *)data;
-    write_dbg(DBG_LEVEL_TRACE, "Cleaning up session data for session ID %d", session_data->session_id);
+    write_dbg(DBG_LEVEL_DEBUG, "Cleaning up session data for session ID %d", session_data->session_id);
 
     if (session_data->response_data.original_compressed_body != NULL) {
-        ngx_chain_t *current = session_data->response_data.original_compressed_body;
-        while (current != NULL) {
-            ngx_chain_t *next = current->next;
-            ngx_free_chain(session_data->response_data.request_pool, current);
-            current = next;
-        }
+        free_chain(session_data->response_data.request_pool, session_data->response_data.original_compressed_body);
         session_data->response_data.original_compressed_body = NULL;
     }
 
@@ -220,8 +215,8 @@ ngx_int_t
 ngx_http_cp_hold_verdict(struct ngx_http_cp_event_thread_ctx_t *ctx)
 {
     ngx_http_cp_session_data *session_data_p = ctx->session_data_p;
-    for (uint i = 0; i < 3; i++) {
-        sleep(1);
+    for (uint i = 0; i < hold_verdict_retries; i++) {
+        sleep(hold_verdict_polling_time);
         int res = ngx_cp_run_in_thread_timeout(
             ngx_http_cp_hold_verdict_thread,
             (void *)ctx,
@@ -436,16 +431,16 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
 
     if (is_in_transparent_mode()) {
         updateMetricField(TRANSPARENTS_COUNT, 1);
-        return fail_mode_verdict;
+        return fail_mode_verdict == NGX_OK ? NGX_DECLINED : NGX_ERROR;
     }
 
     if (is_ngx_cp_attachment_disabled(request)) {
         write_dbg(DBG_LEVEL_TRACE, "Ignoring inspection of request on a disabled location");
-        return NGX_OK;
+        return NGX_DECLINED;
     }
 
     session_data_p = init_cp_session_data(request);
-    if (session_data_p == NULL) return NGX_OK;
+    if (session_data_p == NULL) return NGX_DECLINED;
 
     set_current_session_id(session_data_p->session_id);
     write_dbg(DBG_LEVEL_DEBUG, "Request header filter handling session ID: %d", session_data_p->session_id);
@@ -455,7 +450,7 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
     sessions_per_minute_verdict = enforce_sessions_rate();
     if (sessions_per_minute_verdict != TRAFFIC_VERDICT_INSPECT) {
         session_data_p->verdict = sessions_per_minute_verdict;
-        return sessions_per_minute_verdict == TRAFFIC_VERDICT_ACCEPT ? NGX_OK : NGX_ERROR;
+        return sessions_per_minute_verdict == TRAFFIC_VERDICT_ACCEPT ? NGX_DECLINED : NGX_ERROR;
     }
 
     if (!get_already_registered() || !isIpcReady()) {
@@ -484,7 +479,7 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
             );
             updateMetricField(REG_THREAD_TIMEOUT, 1);
 
-            return fail_mode_verdict;
+            return fail_mode_verdict == NGX_OK ? NGX_DECLINED : fail_mode_verdict;
         }
         write_dbg(
             DBG_LEVEL_DEBUG,
@@ -494,7 +489,7 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
         );
         if (ctx.should_return) {
             session_data_p->verdict = TRAFFIC_VERDICT_ACCEPT;
-            return ctx.res;
+            return ctx.res == NGX_OK ? NGX_DECLINED : ctx.res;
         }
     }
 
@@ -509,7 +504,7 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
             session_data_p->session_id,
             session_data_p->verdict == TRAFFIC_VERDICT_ACCEPT ? "accept" : "drop"
         );
-        return fail_mode_verdict;
+        return fail_mode_verdict == NGX_OK ? NGX_DECLINED : fail_mode_verdict;
     }
 
     handle_static_resource_result = handle_static_resource_request(
@@ -538,7 +533,7 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
         );
         updateMetricField(REQ_HEADER_THREAD_TIMEOUT, 1);
 
-        return fail_mode_verdict;
+        return fail_mode_verdict == NGX_OK ? NGX_DECLINED : fail_mode_verdict;
     }
     write_dbg(
         DBG_LEVEL_DEBUG,
@@ -552,22 +547,23 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
         if (!res) {
             session_data_p->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
             updateMetricField(HOLD_THREAD_TIMEOUT, 1);
-            return fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+            return fail_mode_verdict == NGX_OK ? NGX_DECLINED : fail_mode_verdict;
         }
     }
 
     calcProcessingTime(session_data_p, &hook_time_begin, 1);
     if (ctx.should_return) {
-        return ctx.res;
+        return ctx.res == NGX_OK ? NGX_DECLINED : ctx.res;
     }
 
     // There's no body for inspection
-    return ngx_http_cp_finalize_request_headers_hook(
+    ngx_int_t result = ngx_http_cp_finalize_request_headers_hook(
         request,
         session_data_p,
         ctx.modifications,
         ctx.res
     );
+    return result == NGX_OK ? NGX_DECLINED : result;
 }
 
 ngx_int_t
@@ -686,7 +682,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
             if (!res) {
                 session_data_p->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
                 updateMetricField(HOLD_THREAD_TIMEOUT, 1);
-                return fail_mode_verdict == NGX_OK ? ngx_http_next_request_body_filter(request, request_body_chain) : NGX_HTTP_FORBIDDEN;
+                return fail_mode_hold_verdict == NGX_OK ? ngx_http_next_request_body_filter(request, request_body_chain) : NGX_HTTP_FORBIDDEN;
             }
         }
 
@@ -725,7 +721,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
         }
 
         if (ctx.should_return) {
-            return ctx.res;
+            return ctx.res == NGX_OK ? NGX_DECLINED : ctx.res;
         }
         if (was_transaction_timedout(session_data_p)) {
             session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
@@ -1029,6 +1025,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
     }
 
     if (body_chain->buf->pos != NULL && session_data_p->response_data.new_compression_type != NO_COMPRESSION) {
+        write_dbg(DBG_LEVEL_TRACE, "Decompressing response body");
         if (init_cp_session_original_body(session_data_p, request->pool) == NGX_OK) {
             if (session_data_p->response_data.decompression_stream == NULL) {
                 session_data_p->response_data.decompression_stream = initCompressionStream();
@@ -1045,7 +1042,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
         }
 
         if (compression_result != NGX_OK) {
-            copy_chain_buffers(body_chain, session_data_p->response_data.original_compressed_body);
+            write_dbg(DBG_LEVEL_WARNING, "Failed to decompress response body");
             handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
             fini_cp_session_data(session_data_p);
             session_data_p->response_data.response_data_status = NGX_ERROR;
@@ -1056,6 +1053,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
     }
 
     if (session_data_p->verdict == TRAFFIC_VERDICT_ACCEPT) {
+        write_dbg(DBG_LEVEL_TRACE, "Compressing response body");
         if (session_data_p->response_data.compression_stream == NULL) {
             session_data_p->response_data.compression_stream = initCompressionStream();
         }
@@ -1070,6 +1068,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
             request->pool
         );
         if (compression_result != NGX_OK) {
+            write_dbg(DBG_LEVEL_WARNING, "Failed to compress response body");
             // Failed to compress body.
             handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
             fini_cp_session_data(session_data_p);
@@ -1167,7 +1166,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
         calcProcessingTime(session_data_p, &hook_time_begin, 0);
 
         if (ctx.should_return) {
-            return ctx.res;
+            return ctx.res == NGX_OK ? NGX_DECLINED : ctx.res;
         }
 
         if (ctx.should_return_next_filter) {
