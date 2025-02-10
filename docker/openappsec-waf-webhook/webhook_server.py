@@ -64,7 +64,11 @@ def get_sidecar_container():
         "volumeMounts": [
             {"name": "envoy-attachment-shared", "mountPath": "/envoy/attachment/shared/"}
         ],
-        "resources": {},
+        "resources": {
+            "requests": {
+                "cpu": "200m"
+            }
+        },
         "securityContext": {
             "runAsNonRoot": False,
             "runAsUser": 0

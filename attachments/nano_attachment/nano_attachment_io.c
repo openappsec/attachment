@@ -971,11 +971,11 @@ set_fragments_identifiers(
     char **meta_data_elems,
     uint16_t *meta_data_sizes,
     uint16_t *data_type,
-    uint32_t cur_request_id
+    uint32_t *cur_request_id
 )
 {
     set_fragment_elem(meta_data_elems, meta_data_sizes, data_type, sizeof(uint16_t), 0);
-    set_fragment_elem(meta_data_elems, meta_data_sizes, &cur_request_id, sizeof(cur_request_id), 1);
+    set_fragment_elem(meta_data_elems, meta_data_sizes, cur_request_id, sizeof(uint32_t), 1);
 }
 
 ///
@@ -1104,7 +1104,7 @@ nano_metadata_sender(
 
     // Sets the fragments
     chunk_type = REQUEST_START;
-    set_fragments_identifiers(fragments, fragments_sizes, &chunk_type, cur_request_id);
+    set_fragments_identifiers(fragments, fragments_sizes, &chunk_type, &cur_request_id);
 
     // Add protocol length to fragments.
     set_fragment_elem(
@@ -1291,7 +1291,7 @@ nano_send_response_code(
 
     write_dbg(attachment, cur_request_id, DBG_LEVEL_TRACE, "Sending response code (%d) for inspection", response_code);
 
-    set_fragments_identifiers(fragments, fragments_sizes, &chunk_type, cur_request_id);
+    set_fragments_identifiers(fragments, fragments_sizes, &chunk_type, &cur_request_id);
     set_fragment_elem(fragments, fragments_sizes, &response_code, sizeof(uint16_t), 2);
 
     res = send_session_data_to_service(
@@ -1333,7 +1333,7 @@ nano_send_response_content_length(
         content_length
     );
 
-    set_fragments_identifiers(fragments, fragments_sizes, &chunk_type, cur_request_id);
+    set_fragments_identifiers(fragments, fragments_sizes, &chunk_type, &cur_request_id);
     set_fragment_elem(fragments, fragments_sizes, &content_length, sizeof(content_length), 2);
 
     res = send_session_data_to_service(
@@ -1386,7 +1386,7 @@ send_header_bulk(
 {
     NanoCommunicationResult res;
 
-    set_fragments_identifiers(data, data_sizes, (uint16_t *)&header_type, cur_request_id);
+    set_fragments_identifiers(data, data_sizes, (uint16_t *)&header_type, &cur_request_id);
     set_fragment_elem(data, data_sizes, &is_last_part, sizeof(is_last_part), 2);
     set_fragment_elem(data, data_sizes, &bulk_part_index, sizeof(bulk_part_index), 3);
 
@@ -1579,7 +1579,7 @@ nano_body_sender(
             is_final_chunk = 1;
         }
 
-        set_fragments_identifiers(fragments, fragments_sizes, (uint16_t *)&body_type, cur_request_id);
+        set_fragments_identifiers(fragments, fragments_sizes, (uint16_t *)&body_type, &cur_request_id);
 
         set_fragment_elem(fragments, fragments_sizes, &is_final_chunk, sizeof(is_final_chunk), 2);
         set_fragment_elem(fragments, fragments_sizes, &body_index, sizeof(body_index), 3);
@@ -1648,7 +1648,7 @@ nano_end_transaction_sender(
         end_transaction_type == REQUEST_END ? "request" : "response"
     );
 
-    set_fragments_identifiers(fragments, fragments_sizes, (uint16_t *)&end_transaction_type, cur_request_id);
+    set_fragments_identifiers(fragments, fragments_sizes, (uint16_t *)&end_transaction_type, &cur_request_id);
 
     res = send_session_data_to_service(
         attachment,
@@ -1700,7 +1700,7 @@ nano_request_delayed_verdict(
         "Sending delayed event flag for inspection"
     );
 
-    set_fragments_identifiers(fragments, fragments_sizes, (uint16_t *)&wait_transaction_type, cur_request_id);
+    set_fragments_identifiers(fragments, fragments_sizes, (uint16_t *)&wait_transaction_type, &cur_request_id);
 
     res = send_session_data_to_service(
         attachment,
