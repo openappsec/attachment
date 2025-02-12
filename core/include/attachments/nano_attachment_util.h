@@ -17,7 +17,7 @@
 
 #include <stdio.h>
 
-#include "nginx_attachment_common.h"
+#include "nano_attachment_common.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,7 +29,7 @@ typedef const char * c_str;
 
 int initAttachmentConfig(c_str conf_file);
 
-ngx_http_inspection_mode_e getInspectionMode();
+NanoHttpInspectionMode getInspectionMode();
 unsigned int getNumOfNginxIpcElements();
 unsigned int getKeepAliveIntervalMsec();
 unsigned int getDbgLevel();
@@ -41,9 +41,6 @@ unsigned int getFailOpenTimeout();
 
 int isFailOpenHoldMode();
 unsigned int getFailOpenHoldTimeout();
-
-unsigned int getHoldVerdictPollingTime();
-unsigned int getHoldVerdictRetries();
 
 unsigned int getMaxSessionsPerMinute();
 int isFailOpenOnSessionLimit();
@@ -57,10 +54,6 @@ unsigned int getReqBodyThreadTimeout();
 unsigned int getResProccessingTimeout();
 unsigned int getResHeaderThreadTimeout();
 unsigned int getResBodyThreadTimeout();
-unsigned int getMinRetriesForVerdict();
-unsigned int getMaxRetriesForVerdict();
-unsigned int getReqBodySizeTrigger();
-unsigned int getRemoveResServerHeader();
 
 unsigned int getWaitingForVerdictThreadTimeout();
 

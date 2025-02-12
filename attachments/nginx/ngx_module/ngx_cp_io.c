@@ -1116,8 +1116,9 @@ ngx_http_cp_body_sender(
 
     write_dbg(
         DBG_LEVEL_TRACE,
-        "Sending %s body chunk for inspection",
-        body_type == REQUEST_BODY ? "request" : "response"
+        "Sending %s body chunk from session id %d for inspection",
+        body_type == REQUEST_BODY ? "request" : "response",
+        session_data->session_id
     );
 
     // Sets fragments identifier to the provided body type.

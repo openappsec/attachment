@@ -102,6 +102,8 @@ ngx_uint_t num_of_nginx_ipc_elements = 200; ///< Number of NGINX IPC elements.
 ngx_msec_t keep_alive_interval_msec = DEFAULT_KEEP_ALIVE_INTERVAL_MSEC;
 ngx_uint_t min_retries_for_verdict = 3; ///< Minimum number of retries for verdict.
 ngx_uint_t max_retries_for_verdict = 15; ///< Maximum number of retries for verdict.
+ngx_uint_t hold_verdict_retries = 3; ///< Number of retries for hold verdict.
+ngx_uint_t hold_verdict_polling_time = 1; ///< Polling time for hold verdict.
 ngx_uint_t body_size_trigger = 200000; ///< Request body size in bytes to switch to maximum retries for verdict.
 ngx_uint_t remove_res_server_header = 0; ///< Remove server header flag.
 
@@ -322,6 +324,15 @@ copy_chain_buffers(ngx_chain_t *dest, ngx_chain_t *src)
     ngx_chain_t *curr_src = src;
     ngx_chain_t *curr_dst = dest;
     while (curr_src != NULL && curr_dst != NULL) {
+        if (curr_src->buf == NULL || curr_dst->buf == NULL) {
+            write_dbg(
+                DBG_LEVEL_WARNING,
+                "Failed to copy chain buffers: NULL buffer found. src: %p, dst: %p",
+                curr_src,
+                curr_dst
+            );
+            return;
+        }
         ngx_memcpy(curr_dst->buf, curr_src->buf, sizeof(ngx_buf_t));
         curr_src = curr_src->next;
         curr_dst = curr_dst->next;
@@ -459,10 +470,12 @@ free_chain(ngx_pool_t *pool, ngx_chain_t *chain)
 
     while (chain) {
         ngx_pfree(pool, chain->buf->start);
+        chain->buf->start = NULL;
         ngx_pfree(pool, chain->buf);
+        chain->buf = NULL;
 
         next_chain = chain->next;
-        ngx_pfree(pool, chain);
+        ngx_free_chain(pool, chain);
         chain = next_chain;
     }
 }
@@ -940,6 +953,10 @@ init_general_config(const char *conf_path)
     fail_mode_hold_verdict = isFailOpenHoldMode() == 1 ? NGX_OK : NGX_HTTP_FORBIDDEN;
     fail_open_hold_timeout = getFailOpenHoldTimeout();
 
+    // Setting hold verdict polling time and retries.
+    hold_verdict_polling_time = getHoldVerdictPollingTime();
+    hold_verdict_retries = getHoldVerdictRetries();
+
     // Setting attachment's variables.
     sessions_per_minute_limit_verdict = isFailOpenOnSessionLimit() ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
     max_sessions_per_minute = getMaxSessionsPerMinute();
@@ -987,6 +1004,8 @@ init_general_config(const char *conf_path)
         "keep alive interval msec: %u msec"
         "min retries for verdict: %u"
         "max retries for verdict: %u"
+        "num retries for hold verdict: %u"
+        "polling time for hold verdict: %u"
         "body size trigger for request: %u",
         inspection_mode,
         new_dbg_level,
@@ -1009,6 +1028,8 @@ init_general_config(const char *conf_path)
         keep_alive_interval_msec,
         min_retries_for_verdict,
         max_retries_for_verdict,
+        hold_verdict_retries,
+        hold_verdict_polling_time,
         body_size_trigger
     );
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "nginx_attachment_util.h"
+#include "nano_attachment_util.h"
 
 #include <arpa/inet.h>
 
@@ -28,10 +28,10 @@ initAttachmentConfig(c_str conf_file)
     return conf_data.init(conf_file);
 }
 
-ngx_http_inspection_mode_e
+NanoHttpInspectionMode
 getInspectionMode()
 {
-    return static_cast<ngx_http_inspection_mode_e>(conf_data.getNumericalValue("nginx_inspection_mode"));
+    return static_cast<NanoHttpInspectionMode>(conf_data.getNumericalValue("nginx_inspection_mode"));
 }
 
 unsigned int
@@ -53,7 +53,7 @@ getDbgLevel()
 }
 
 int
-isDebugContext(c_str client, c_str server, unsigned int port, c_str method, c_str host , c_str uri)
+isDebugContext(c_str client, c_str server, unsigned int port, c_str method, c_str host, c_str uri)
 {
     auto &ctx = conf_data.getDebugContext();
     return
@@ -93,18 +93,6 @@ unsigned int
 getFailOpenHoldTimeout()
 {
     return conf_data.getNumericalValue("fail_open_hold_timeout");
-}
-
-unsigned int
-getHoldVerdictPollingTime()
-{
-    return conf_data.getNumericalValue("hold_verdict_polling_time");
-}
-
-unsigned int
-getHoldVerdictRetries()
-{
-    return conf_data.getNumericalValue("hold_verdict_retries");
 }
 
 unsigned int
@@ -165,30 +153,6 @@ unsigned int
 getWaitingForVerdictThreadTimeout()
 {
     return conf_data.getNumericalValue("waiting_for_verdict_thread_timeout_msec");
-}
-
-unsigned int
-getMinRetriesForVerdict()
-{
-    return conf_data.getNumericalValue("min_retries_for_verdict");
-}
-
-unsigned int
-getMaxRetriesForVerdict()
-{
-    return conf_data.getNumericalValue("max_retries_for_verdict");
-}
-
-unsigned int
-getReqBodySizeTrigger()
-{
-    return conf_data.getNumericalValue("body_size_trigger");
-}
-
-unsigned int
-getRemoveResServerHeader()
-{
-    return conf_data.getNumericalValue("remove_server_header");
 }
 
 int
