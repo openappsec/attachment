@@ -52,8 +52,22 @@ def get_sidecar_container():
     custom_fog_enabled = os.getenv("CUSTOM_FOG_ENABLED") == "true"  # Check if it's set to "true"
     fog_address = os.getenv("FOG_ADDRESS")
     appsec_proxy = os.getenv("APPSEC_PROXY")
+    config_map_ref = os.getenv("CONFIG_MAP_REF")
+    secret_ref = os.getenv("SECRET_REF")
+    persistence_enabled = os.getenv("APPSEC_PERSISTENCE_ENABLED", "false").lower() == "true"
+
+    # Prepare the volumeMounts list
+    volume_mounts = [
+        {"name": "envoy-attachment-shared", "mountPath": "/envoy/attachment/shared/"},
+        {"name": "advanced-model", "mountPath": "/advanced-model"}
+    ]
+
+    if persistence_enabled:
+        volume_mounts.extend([
+            {"name": "appsec-conf", "mountPath": "/etc/cp/conf"},
+            {"name": "appsec-data", "mountPath": "/etc/cp/data"}
+        ])
     
-    # Construct args list based on conditions
     args = []
     if token:
         args.extend(["--token", token])
@@ -95,14 +109,24 @@ def get_sidecar_container():
         "command": ["/cp-nano-agent"],
         "args": args,
         "env": env,
-        "volumeMounts": [
-            {"name": "envoy-attachment-shared", "mountPath": "/envoy/attachment/shared/"}
-        ],
+        "volumeMounts": volume_mounts,
         "resources": {
             "requests": {
                 "cpu": "200m"
             }
         },
+        "envFrom": [
+            {
+                "configMapRef": {
+                    "name": config_map_ref
+                }
+            },
+            {
+                "secretRef": {
+                    "name": secret_ref
+                }
+            }
+        ],
         "securityContext": {
             "runAsNonRoot": False,
             "runAsUser": 0
