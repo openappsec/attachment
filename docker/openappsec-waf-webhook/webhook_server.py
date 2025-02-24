@@ -49,26 +49,84 @@ def configure_logging():
 def get_sidecar_container():
     app.logger.debug("Entering get_sidecar_container()")
     token = os.getenv("TOKEN")
+    custom_fog_enabled = os.getenv("CUSTOM_FOG_ENABLED") == "true"  # Check if it's set to "true"
+    fog_address = os.getenv("FOG_ADDRESS")
+    appsec_proxy = os.getenv("APPSEC_PROXY")
+    config_map_ref = os.getenv("CONFIG_MAP_REF")
+    secret_ref = os.getenv("SECRET_REF")
+    persistence_enabled = os.getenv("APPSEC_PERSISTENCE_ENABLED", "false").lower() == "true"
+
+    # Prepare the volumeMounts list
+    volume_mounts = [
+        {"name": "envoy-attachment-shared", "mountPath": "/envoy/attachment/shared/"},
+        {"name": "advanced-model", "mountPath": "/advanced-model"}
+    ]
+
+    if persistence_enabled:
+        volume_mounts.extend([
+            {"name": "appsec-conf", "mountPath": "/etc/cp/conf"},
+            {"name": "appsec-data", "mountPath": "/etc/cp/data"}
+        ])
+    
+    args = []
+    if token:
+        args.extend(["--token", token])
+    else:
+        args.append("--hybrid-mode")
+    
+    if custom_fog_enabled and fog_address:
+        args.extend(["--fog", fog_address])
+    
+    if appsec_proxy:
+        args.extend(["--proxy", appsec_proxy])
+    
+    optional_env_vars = {
+        "AGENT_TOKEN": os.getenv("AGENT_TOKEN"),
+        "user_email": os.getenv("user_email"),
+        "appsecClassName": os.getenv("appsecClassName"),
+        "SHARED_STORAGE_HOST": os.getenv("SHARED_STORAGE_HOST"),
+        "LEARNING_HOST": os.getenv("LEARNING_HOST"),
+        "TUNING_HOST": os.getenv("TUNING_HOST"),
+        "LOCAL_TUNING_ENABLED": os.getenv("LOCAL_TUNING_ENABLED"),
+        "PLAYGROUND": os.getenv("PLAYGROUND"),
+        "CRDS_SCOPE": os.getenv("CRDS_SCOPE"),
+    }
+    
+    # Base environment variables
+    env = [
+        {"name": "registered_server", "value": "ISTIO Server"}
+    ]
+    
+    # Add optional environment variables if they are set
+    for var_name, var_value in optional_env_vars.items():
+        if var_value is not None:  # Only add if the variable is set
+            env.append({"name": var_name, "value": var_value})
+
     sidecar = {
         "name": "infinity-next-nano-agent",
         "image": FULL_AGENT_IMAGE,
         "imagePullPolicy": "Always",
         "command": ["/cp-nano-agent"],
-        "args": [
-            "--token",
-            token
-        ],
-        "env": [
-            {"name": "registered_server", "value": "NGINX Server"}
-        ],
-        "volumeMounts": [
-            {"name": "envoy-attachment-shared", "mountPath": "/envoy/attachment/shared/"}
-        ],
+        "args": args,
+        "env": env,
+        "volumeMounts": volume_mounts,
         "resources": {
             "requests": {
                 "cpu": "200m"
             }
         },
+        "envFrom": [
+            {
+                "configMapRef": {
+                    "name": config_map_ref
+                }
+            },
+            {
+                "secretRef": {
+                    "name": secret_ref
+                }
+            }
+        ],
         "securityContext": {
             "runAsNonRoot": False,
             "runAsUser": 0
