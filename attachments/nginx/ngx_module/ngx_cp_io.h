@@ -138,6 +138,7 @@ ngx_http_cp_content_length_sender(
 ///         - #RESPONSE_HEADER
 /// @param[in] cur_request_id Request session's Id.
 /// @param[in, out] num_messages_sent Number of messages sent will be saved onto this parameter.
+/// @param[in, out] waf_tag WAF tag to be sent.
 /// @returns ngx_int_t
 ///         - #NGX_OK
 ///         - #NGX_ERROR
@@ -147,7 +148,8 @@ ngx_http_cp_header_sender(
     ngx_list_part_t *headers,
     ngx_http_chunk_type_e header_type,
     uint32_t cur_request_id,
-    ngx_uint_t *num_messages_sent
+    ngx_uint_t *num_messages_sent,
+    ngx_str_t *waf_tag
 );
 
 ///

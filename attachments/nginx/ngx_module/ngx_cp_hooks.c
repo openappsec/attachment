@@ -412,6 +412,7 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
     int res;
     static int is_failure_state_initialized = 0;
     static int is_metric_data_initialized = 0;
+    ngx_cp_attachment_conf_t *conf;
 
     clock_gettime(CLOCK_REALTIME, &hook_time_begin);
 
