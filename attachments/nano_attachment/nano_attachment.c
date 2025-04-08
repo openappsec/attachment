@@ -502,6 +502,14 @@ GetBlockPage(NanoAttachment *attachment, HttpSessionData *session_data, Attachme
     };
 }
 
+uint16_t
+GetResponseCode(AttachmentVerdictResponse *response)
+{
+    WebResponseData *web_response_data = response->web_response_data;
+    CustomResponseData *custom_response_data;
+    custom_response_data = (CustomResponseData *) web_response_data->data;
+    return custom_response_data->response_code;
+}
 
 RedirectPageData
 GetRedirectPage(NanoAttachment *attachment, HttpSessionData *session_data, AttachmentVerdictResponse *response)

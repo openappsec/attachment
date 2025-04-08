@@ -184,6 +184,17 @@ BlockPageData GetBlockPage(
 );
 
 ///
+/// @brief Retrieves the response code for a response.
+///
+/// @param response The AttachmentVerdictResponse object containing the verdict.
+///
+/// @return
+///
+uint16_t GetResponseCode(
+    AttachmentVerdictResponse *response
+);
+
+///
 /// @brief Retrieves the redict page data for a response.
 ///
 /// @param attachment The NanoAttachment object associated with the session.

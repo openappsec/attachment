@@ -604,6 +604,14 @@ handle_custom_web_response(
         return;
     }
 
+    if (title.len == 0 || body.len == 0) {
+        custom_response_data->response_code = web_response_data->response_data.custom_response_data.response_code;
+        new_response_data->web_response_type = RESPONSE_CODE_ONLY;
+        new_response_data->data = custom_response_data;
+        *ctx_response_data = new_response_data;
+        return;
+    }
+
     // Setting custom web response title's data.
     if (title.len > 0) {
         title.data = (u_char *)web_response_data->response_data.custom_response_data.data;
