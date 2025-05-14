@@ -1,3 +1,4 @@
+message(STATUS "OUTPUT_ENVOY_FILTERS_DOCKER_IMAGE = ${OUTPUT_ENVOY_FILTERS_DOCKER_IMAGE}")
 add_custom_command(
     OUTPUT ${CMAKE_INSTALL_PREFIX}/waf-webhook-docker.img
     COMMAND docker build -t waf-webhook-docker -f ${CMAKE_CURRENT_SOURCE_DIR}/Dockerfile ${CMAKE_INSTALL_PREFIX}
