@@ -679,7 +679,7 @@ def mutate():
                 patches.append({
                     "op": "add",
                     "path": "/spec/volumes/-",
-                    "value": volume_def
+                    "value": volume
                 })
             app.logger.debug("Added volume definition patch: %s", patches[-1])
 
