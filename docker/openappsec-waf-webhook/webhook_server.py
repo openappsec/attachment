@@ -675,11 +675,12 @@ def mutate():
             app.logger.debug("Added volume mount patch to istio-proxy: %s", patches[-1])
 
             # Add the new volume definition
-            patches.append({
-                "op": "add",
-                "path": "/spec/volumes/-",
-                "value": volume_def
-            })
+            for volume in volume_def:
+                patches.append({
+                    "op": "add",
+                    "path": "/spec/volumes/-",
+                    "value": volume_def
+                })
             app.logger.debug("Added volume definition patch: %s", patches[-1])
 
             if DEPLOY_FILTER and SELECTOR_LABEL_NAME and SELECTOR_LABEL_VALUE:
