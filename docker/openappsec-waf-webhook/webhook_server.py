@@ -223,10 +223,19 @@ def get_volume_mount():
 # Volume definition for the pod
 def get_volume_definition():
     app.logger.debug("Entering get_volume_definition()")
-    volume_def = {
+    volume_def = [
+        {
         "name": "envoy-attachment-shared",
         "emptyDir": {}
-    }
+        },
+        {
+            "name": "advanced-model",
+            "configMap": {
+                "name": "advanced-model-config",
+                "optional": True
+            }
+        }
+    ]
     app.logger.debug(f"Volume definition: {volume_def}")
     app.logger.debug("Exiting get_volume_definition()")
     return volume_def
