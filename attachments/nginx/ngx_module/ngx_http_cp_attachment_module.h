@@ -27,6 +27,13 @@ extern ngx_http_output_body_filter_pt ngx_http_next_response_body_filter; ///< N
 
 extern ngx_module_t ngx_http_cp_attachment_module; ///< NGINX Module.
 
+typedef struct {
+    ngx_flag_t enable; ///< Flags if the configuration enabled.
+    ngx_int_t num_of_workers; ///< Number of workers.
+    ngx_uint_t current_loc_config_version; ///< NGINX configuration version.
+    ngx_str_t waf_tag; ///< WAF tag value for the location block.
+} ngx_cp_attachment_conf_t;
+
 ///
 /// @brief Returns if NGINX CP attachment is disabled.
 /// @param[in] request NGINX request.

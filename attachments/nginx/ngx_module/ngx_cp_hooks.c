@@ -407,9 +407,11 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
     ngx_http_cp_session_data *session_data_p;
     ngx_int_t handle_static_resource_result;
     ngx_http_cp_verdict_e sessions_per_minute_verdict;
+    ngx_cp_attachment_conf_t *conf;
     struct ngx_http_cp_event_thread_ctx_t ctx;
     struct timespec hook_time_begin;
     int res;
+
     static int is_failure_state_initialized = 0;
     static int is_metric_data_initialized = 0;
 
@@ -439,6 +441,12 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
         return NGX_DECLINED;
     }
 
+    conf = ngx_http_get_module_loc_conf(request, ngx_http_cp_attachment_module);
+    if (conf == NULL) {
+        write_dbg(DBG_LEVEL_WARNING, "Failed to get module configuration");
+        return NGX_DECLINED;
+    }
+
     session_data_p = init_cp_session_data(request);
     if (session_data_p == NULL) return NGX_DECLINED;
 
@@ -446,6 +454,7 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
     write_dbg(DBG_LEVEL_DEBUG, "Request header filter handling session ID: %d", session_data_p->session_id);
 
     init_thread_ctx(&ctx, request, session_data_p, NULL);
+    ctx.waf_tag = conf->waf_tag;
 
     sessions_per_minute_verdict = enforce_sessions_rate();
     if (sessions_per_minute_verdict != TRAFFIC_VERDICT_INSPECT) {

@@ -26,11 +26,6 @@
 #include "nginx_attachment_common.h"
 
 extern ngx_uint_t current_config_version; ///< NGINX configuration version.
-typedef struct {
-    ngx_flag_t enable; ///< Flags if the configuration enabled.
-    ngx_int_t num_of_workers; ///< Number of workers.
-    ngx_uint_t current_loc_config_version; ///< NGINX configuration version.
-} ngx_cp_attachment_conf_t;
 
 ///
 /// @brief Creates NGINX cp attachment configuration.
@@ -118,6 +113,14 @@ static ngx_command_t ngx_cp_attachment_commands[] = {
         ngx_cp_attachment_set_num_workers_conf,
         NGX_HTTP_MAIN_CONF_OFFSET,
         offsetof(ngx_cp_attachment_conf_t, num_of_workers),
+        NULL
+    },
+    {
+        ngx_string("waf_tag"),
+        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_str_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_cp_attachment_conf_t, waf_tag),
         NULL
     },
     ngx_null_command
@@ -210,6 +213,7 @@ ngx_cp_attachment_create_conf(ngx_conf_t *conf)
     module_conf->enable = NGX_CONF_UNSET;
     module_conf->num_of_workers = 0;
     module_conf->current_loc_config_version =  current_config_version;
+    ngx_str_null(&module_conf->waf_tag);
     write_dbg(DBG_LEVEL_TRACE, "Successfully created attachment module configuration");
     return module_conf;
 }
@@ -270,6 +274,7 @@ ngx_cp_attachment_merge_conf(ngx_conf_t *configure, void *curr, void *next)
 
     ngx_conf_merge_value(conf->enable, prev->enable, NGX_CONF_UNSET);
     ngx_conf_merge_value(conf->num_of_workers, prev->num_of_workers, ngx_ncpu);
+    ngx_conf_merge_str_value(conf->waf_tag, prev->waf_tag, "");
 
     write_dbg(DBG_LEVEL_TRACE, "Successfully set attachment module configuration in nginx configuration chain");
     return NGX_CONF_OK;
