@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -155,7 +154,7 @@ func configurationServer() {
 
 func init() {
 	last_keep_alive = time.Time{}
-	envoyHttp.RegisterHttpFilterConfigFactoryAndParser(Name, ConfigFactory, &parser{})
+	envoyHttp.RegisterHttpFilterFactoryAndConfigParser(Name, ConfigFactory, &parser{})
 	go configurationServer()
 }
 
