@@ -71,8 +71,8 @@ def get_sidecar_container():
 
     if persistence_enabled:
         volume_mounts.extend([
-            {"name": "appsec-conf", "mountPath": "/etc/cp/conf"},
-            {"name": "appsec-data", "mountPath": "/etc/cp/data"}
+            {"name": "open-appsec-conf", "mountPath": "/etc/cp/conf"},
+            {"name": "open-appsec-data", "mountPath": "/etc/cp/data"}
         ])
 
     args = []
@@ -110,7 +110,7 @@ def get_sidecar_container():
             env.append({"name": var_name, "value": var_value})
 
     sidecar = {
-        "name": "infinity-next-nano-agent",
+        "name": "open-appsec-nano-agent",
         "image": FULL_AGENT_IMAGE,
         "imagePullPolicy": "Always",
         "command": ["/cp-nano-agent"],
@@ -223,10 +223,13 @@ def get_volume_mount():
 # Volume definition for the pod
 def get_volume_definition():
     app.logger.debug("Entering get_volume_definition()")
+
+    persistence_enabled = os.getenv("APPSEC_PERSISTENCE_ENABLED", "false").lower() == "true"
+
     volume_def = [
         {
-        "name": "envoy-attachment-shared",
-        "emptyDir": {}
+            "name": "envoy-attachment-shared",
+            "emptyDir": {}
         },
         {
             "name": "advanced-model",
@@ -236,6 +239,23 @@ def get_volume_definition():
             }
         }
     ]
+
+    if persistence_enabled:
+        volume_def.extend([
+            {
+                "name": "open-appsec-conf",
+                "persistentVolumeClaim": {
+                    "claimName": "open-appsec-conf"
+                }
+            },
+            {
+                "name": "open-appsec-data",
+                "persistentVolumeClaim": {
+                    "claimName": "open-appsec-data"
+                }
+            }
+        ])
+
     app.logger.debug(f"Volume definition: {volume_def}")
     app.logger.debug("Exiting get_volume_definition()")
     return volume_def
@@ -537,10 +557,10 @@ def mutate():
     init_containers = obj.get('spec', {}).get('initContainers', [])
     volumes = obj.get('spec', {}).get('volumes', [])
     app.logger.debug("Current containers in the pod: %s", json.dumps(containers, indent=2))
-    sidecar_exists = any(container['name'] == 'infinity-next-nano-agent' for container in containers)
+    sidecar_exists = any(container['name'] == 'open-appsec-nano-agent' for container in containers)
     init_container_exist = any(init_container['name'] == 'prepare-attachment' for init_container in init_containers)
     volume_exist = any(volume['name'] == 'envoy-attachment-shared' for volume in volumes)
-    app.logger.debug("Does sidecar 'infinity-next-nano-agent' exist? %s", sidecar_exists)
+    app.logger.debug("Does sidecar 'open-appsec-nano-agent' exist? %s", sidecar_exists)
 
     # Determine if we should remove the injected data
     REMOVE_WAF = os.getenv('REMOVE_INJECTED_DATA', 'false').lower() == 'true'
@@ -601,7 +621,7 @@ def mutate():
                            "path": f"/spec/containers/{idx}/volumeMounts/{idx_v}"
                         })
                         app.logger.debug(f"Removed volumeMount: {patches[-1]}")
-                if container['name'] == 'infinity-next-nano-agent':
+                if container['name'] == 'open-appsec-nano-agent':
                     patches.append({
                        "op": "remove",
                        "path": f"/spec/containers/{idx}"
@@ -620,7 +640,7 @@ def mutate():
                     break  # Stop once we find and remove the target container
 
     else:
-        app.logger.debug("Before if: Sidecar 'infinity-next-nano-agent' does not exist. Preparing to add it.")
+        app.logger.debug("Before if: Sidecar 'open-appsec-nano-agent' does not exist. Preparing to add it.")
 
         # Define the sidecar container
         sidecar = get_sidecar_container()
@@ -688,11 +708,11 @@ def mutate():
                 envoy_filter_name = RELEASE_NAME + "-waf-filter"
                 create_or_update_envoy_filter(envoy_filter_name, namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
         else:
-            app.logger.debug("Before else: Sidecar 'infinity-next-nano-agent' already exists. Checking for image updates.")
+            app.logger.debug("Before else: Sidecar 'open-appsec-nano-agent' already exists. Checking for image updates.")
 
             # Optionally, update the sidecar image and tag if necessary
             for idx, container in enumerate(containers):
-                if container['name'] == 'infinity-next-nano-agent':
+                if container['name'] == 'open-appsec-nano-agent':
                     current_image = container.get('image', '')
                     app.logger.debug("Current sidecar image: %s", current_image)
                     app.logger.debug("Desired sidecar image: %s", FULL_AGENT_IMAGE)
