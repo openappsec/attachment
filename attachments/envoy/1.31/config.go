@@ -239,45 +239,43 @@ func (p *parser) Merge(parent interface{}, child interface{}) interface{} {
 	return &newConfig
 }
 
-func ConfigFactory(c interface{}) api.StreamFilterFactory {
+func ConfigFactory(c interface{}, callbacks api.FilterCallbackHandler) api.StreamFilter {
 	conf, ok := c.(*config)
 	if !ok {
 		panic("unexpected config type")
 	}
 
-	return func(callbacks api.FilterCallbackHandler) api.StreamFilter {
-		worker_thread_id := int(C.get_thread_id())
-		api.LogDebugf("worker_thread_id: %d", worker_thread_id)
-		if _, ok := thread_to_attachment_mapping[int(worker_thread_id)]; !ok {
-			api.LogDebugf("need to add new thread to the map")
-			map_size := len(attachment_to_thread_mapping)
-			if map_size < len(attachments_map) {
-				attachment_to_thread_mapping[map_size] = worker_thread_id
-				thread_to_attachment_mapping[worker_thread_id] = map_size
-				api.LogDebugf("len(attachment_to_thread_mapping): %d", len(attachment_to_thread_mapping))
-				api.LogDebugf("thread_to_attachment_mapping: %v", thread_to_attachment_mapping)
-				api.LogDebugf("attachment_to_thread_mapping: %v", attachment_to_thread_mapping)
-			} else {
-				panic("unexpected thread id")
-			}
+	worker_thread_id := int(C.get_thread_id())
+	api.LogDebugf("worker_thread_id: %d", worker_thread_id)
+	if _, ok := thread_to_attachment_mapping[int(worker_thread_id)]; !ok {
+		api.LogDebugf("need to add new thread to the map")
+		map_size := len(attachment_to_thread_mapping)
+		if map_size < len(attachments_map) {
+			attachment_to_thread_mapping[map_size] = worker_thread_id
+			thread_to_attachment_mapping[worker_thread_id] = map_size
+			api.LogDebugf("len(attachment_to_thread_mapping): %d", len(attachment_to_thread_mapping))
+			api.LogDebugf("thread_to_attachment_mapping: %v", thread_to_attachment_mapping)
+			api.LogDebugf("attachment_to_thread_mapping: %v", attachment_to_thread_mapping)
+		} else {
+			panic("unexpected thread id")
 		}
+	}
 
-		worker_id := thread_to_attachment_mapping[int(worker_thread_id)]
-		api.LogDebugf("worker_id: %d", worker_id)
+	worker_id := thread_to_attachment_mapping[int(worker_thread_id)]
+	api.LogDebugf("worker_id: %d", worker_id)
 
-		filter_id.Add(1)
-		session_id := filter_id.Load()
-		attachment_ptr := attachments_map[worker_id]
-		session_data := C.InitSessionData((*C.NanoAttachment)(attachment_ptr), C.SessionID(session_id))
+	filter_id.Add(1)
+	session_id := filter_id.Load()
+	attachment_ptr := attachments_map[worker_id]
+	session_data := C.InitSessionData((*C.NanoAttachment)(attachment_ptr), C.SessionID(session_id))
 
-		return &filter{
-			callbacks: callbacks,
-			config:    conf,
-			session_id: session_id,
-			cp_attachment: attachment_ptr,
-			session_data: session_data,
-			request_structs: attachment_to_filter_request_structs[worker_id],
-		}
+	return &filter{
+		callbacks: callbacks,
+		config:    conf,
+		session_id: session_id,
+		cp_attachment: attachment_ptr,
+		session_data: session_data,
+		request_structs: attachment_to_filter_request_structs[worker_id],
 	}
 }
 
