@@ -1,3 +1,6 @@
-add_subdirectory(envoy)
 add_subdirectory(nano_attachment)
-add_subdirectory(nginx)
+if ("${ATTACHMENT_TYPE}" STREQUAL "envoy")
+    add_subdirectory(envoy)
+else()
+    add_subdirectory(nginx)
+endif()

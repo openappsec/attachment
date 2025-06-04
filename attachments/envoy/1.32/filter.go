@@ -154,6 +154,11 @@ func (f *filter) sendData(data unsafe.Pointer, chunkType C.HttpChunkType) C.Atta
 }
 
 func (f *filter) handleCustomResponse(verdict_response *C.AttachmentVerdictResponse) api.StatusType {
+	if verdict_response.web_response_data.web_response_type == C.RESPONSE_CODE_ONLY {
+		response_code := C.GetResponseCode((*C.AttachmentVerdictResponse)(verdict_response))
+		return f.sendLocalReplyInternal(int(response_code), "", nil)
+	}
+
 	if verdict_response.web_response_data.web_response_type == C.CUSTOM_WEB_RESPONSE {
 		headers := map[string][]string{
 			"Content-Type": []string{"text/html"},
@@ -231,6 +236,7 @@ func (f *filter) sendBody(buffer api.BufferInstance, is_req bool) C.AttachmentVe
 	data := buffer.Bytes()
 	data_len := len(data)
 	buffer_size := 8 * 1024
+
 	num_of_buffers := ((data_len - 1) / buffer_size) + 1
 
 	// TO DO: FIX THIS ASAP
@@ -296,7 +302,7 @@ func (f *filter) handleStartTransaction(header api.RequestHeaderMap) {
 }
 
 func (f *filter) sendLocalReplyInternal(ret_code int, custom_response string, headers map[string][]string) api.StatusType {
-	f.callbacks.SendLocalReply(ret_code, custom_response, headers, 0, "")
+	f.callbacks.DecoderFilterCallbacks().SendLocalReply(ret_code, custom_response, headers, 0, "")
 	return api.LocalReply
 }
 
@@ -472,15 +478,15 @@ func (f *filter) EncodeTrailers(trailers api.ResponseTrailerMap) api.StatusType 
 }
 
 // OnLog is called when the HTTP stream is ended on HTTP Connection Manager filter.
-func (f *filter) OnLog() {}
+func (f *filter) OnLog(api.RequestHeaderMap, api.RequestTrailerMap, api.ResponseHeaderMap, api.ResponseTrailerMap) {}
 
 // OnLogDownstreamStart is called when HTTP Connection Manager filter receives a new HTTP request
 // (required the corresponding access log type is enabled)
-func (f *filter) OnLogDownstreamStart() {}
+func (f *filter) OnLogDownstreamStart(api.RequestHeaderMap) {}
 
 // OnLogDownstreamPeriodic is called on any HTTP Connection Manager periodic log record
 // (required the corresponding access log type is enabled)
-func (f *filter) OnLogDownstreamPeriodic() {}
+func (f *filter) OnLogDownstreamPeriodic(api.RequestHeaderMap, api.RequestTrailerMap, api.ResponseHeaderMap, api.ResponseTrailerMap) {}
 
 func (f *filter) OnDestroy(reason api.DestroyReason) {
 	freeHttpMetaDataFields(f.request_structs.http_meta_data)

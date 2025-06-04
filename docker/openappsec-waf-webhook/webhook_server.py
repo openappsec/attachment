@@ -4,6 +4,8 @@ import logging
 import base64
 import secretgen
 import sys
+import re
+import requests
 from kubernetes import client, config
 from flask import Flask, request, jsonify, Response
 
@@ -12,7 +14,12 @@ app = Flask(__name__)
 # Read agent image and tag from environment variables
 AGENT_IMAGE = os.getenv('AGENT_IMAGE', 'ghcr.io/openappsec/agent')
 AGENT_TAG = os.getenv('AGENT_TAG', 'latest')
+AGENT_CPU = os.getenv('AGENT_CPU', '200m')
+INIT_CONTAINER_IMAGE = os.getenv('INIT_CONTAINER_IMAGE', 'ghcr.io/openappsec/openappsec-envoy-filters')
+INIT_CONTAINER_TAG = os.getenv('INIT_CONTAINER_TAG', 'latest')
+ISTIOD_PORT = os.getenv('ISTIOD_PORT', '15014')
 FULL_AGENT_IMAGE = f"{AGENT_IMAGE}:{AGENT_TAG}"
+FULL_INIT_CONTAINER_IMAGE = f"{INIT_CONTAINER_IMAGE}:{INIT_CONTAINER_TAG}"
 
 config.load_incluster_config()
 
@@ -64,22 +71,22 @@ def get_sidecar_container():
 
     if persistence_enabled:
         volume_mounts.extend([
-            {"name": "appsec-conf", "mountPath": "/etc/cp/conf"},
-            {"name": "appsec-data", "mountPath": "/etc/cp/data"}
+            {"name": "open-appsec-conf", "mountPath": "/etc/cp/conf"},
+            {"name": "open-appsec-data", "mountPath": "/etc/cp/data"}
         ])
-    
+
     args = []
     if token:
         args.extend(["--token", token])
     else:
         args.append("--hybrid-mode")
-    
+
     if custom_fog_enabled and fog_address:
         args.extend(["--fog", fog_address])
-    
+
     if appsec_proxy:
         args.extend(["--proxy", appsec_proxy])
-    
+
     optional_env_vars = {
         "AGENT_TOKEN": os.getenv("AGENT_TOKEN"),
         "user_email": os.getenv("user_email"),
@@ -91,19 +98,19 @@ def get_sidecar_container():
         "PLAYGROUND": os.getenv("PLAYGROUND"),
         "CRDS_SCOPE": os.getenv("CRDS_SCOPE"),
     }
-    
+
     # Base environment variables
     env = [
         {"name": "registered_server", "value": "ISTIO Server"}
     ]
-    
+
     # Add optional environment variables if they are set
     for var_name, var_value in optional_env_vars.items():
         if var_value is not None:  # Only add if the variable is set
             env.append({"name": var_name, "value": var_value})
 
     sidecar = {
-        "name": "infinity-next-nano-agent",
+        "name": "open-appsec-nano-agent",
         "image": FULL_AGENT_IMAGE,
         "imagePullPolicy": "Always",
         "command": ["/cp-nano-agent"],
@@ -112,7 +119,7 @@ def get_sidecar_container():
         "volumeMounts": volume_mounts,
         "resources": {
             "requests": {
-                "cpu": "200m"
+                "cpu": AGENT_CPU
             }
         },
         "envFrom": [
@@ -138,15 +145,58 @@ def get_sidecar_container():
     app.logger.debug("Exiting get_sidecar_container()")
     return sidecar
 
+def get_istio_version():
+    url = f"http://istiod.istio-system:{ISTIOD_PORT}/version"
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.text.strip().split('-')[0]  # Extracting version
+    else:
+        raise Exception(f"Failed to get Istio version: {response.status_code}")
+
+def get_envoy_sha(istio_version):
+    url = f"https://raw.githubusercontent.com/istio/proxy/{istio_version}/WORKSPACE"
+    response = requests.get(url)
+    if response.status_code == 200:
+        match = re.search(r'ENVOY_SHA = \"([a-f0-9]+)\"', response.text)
+        if match:
+            return match.group(1)
+        else:
+            raise Exception("Envoy SHA not found in WORKSPACE file")
+    else:
+        raise Exception(f"Failed to get WORKSPACE file: {response.status_code}")
+
+def get_envoy_version(envoy_sha):
+    url = f"https://raw.githubusercontent.com/envoyproxy/envoy/{envoy_sha}/VERSION.txt"
+    response = requests.get(url)
+    if response.status_code == 200:
+        version = response.text.strip()
+        match = re.search(r'(\d+\.\d+)', version)
+        if match:
+            return match.group(1)
+        else:
+            raise Exception("Failed to extract major.minor version")
+    else:
+        raise Exception(f"Failed to get Envoy version: {response.status_code}")
+
+
 def get_init_container():
     # Define the initContainer you want to inject
+    istio_version = get_istio_version()
+    app.logger.debug(f"Istio Version: {istio_version}")
+
+    envoy_sha = get_envoy_sha(istio_version)
+    app.logger.debug(f"Envoy SHA: {envoy_sha}")
+
+    envoy_version = get_envoy_version(envoy_sha)
+    app.logger.info(f"Envoy Version: {envoy_version}")
+
     init_container = {
         "name": "prepare-attachment",
-        "image": FULL_AGENT_IMAGE,
+        "image": FULL_INIT_CONTAINER_IMAGE,
         "imagePullPolicy": "Always",
         "command": [
             "sh", "-c",
-            "mkdir -p /envoy/attachment/shared && cp -r /envoy/attachment/lib* /envoy/attachment/shared"
+            f"mkdir -p /envoy/attachment/shared && cp -r /envoy/attachment/lib* /envoy/attachment/shared && cp /envoy/attachment/versions/{envoy_version}/lib* /envoy/attachment/shared"
         ],
         "volumeMounts": [
             {
@@ -173,10 +223,39 @@ def get_volume_mount():
 # Volume definition for the pod
 def get_volume_definition():
     app.logger.debug("Entering get_volume_definition()")
-    volume_def = {
-        "name": "envoy-attachment-shared",
-        "emptyDir": {}
-    }
+
+    persistence_enabled = os.getenv("APPSEC_PERSISTENCE_ENABLED", "false").lower() == "true"
+
+    volume_def = [
+        {
+            "name": "envoy-attachment-shared",
+            "emptyDir": {}
+        },
+        {
+            "name": "advanced-model",
+            "configMap": {
+                "name": "advanced-model-config",
+                "optional": True
+            }
+        }
+    ]
+
+    if persistence_enabled:
+        volume_def.extend([
+            {
+                "name": "open-appsec-conf",
+                "persistentVolumeClaim": {
+                    "claimName": "open-appsec-conf"
+                }
+            },
+            {
+                "name": "open-appsec-data",
+                "persistentVolumeClaim": {
+                    "claimName": "open-appsec-data"
+                }
+            }
+        ])
+
     app.logger.debug(f"Volume definition: {volume_def}")
     app.logger.debug("Exiting get_volume_definition()")
     return volume_def
@@ -478,10 +557,10 @@ def mutate():
     init_containers = obj.get('spec', {}).get('initContainers', [])
     volumes = obj.get('spec', {}).get('volumes', [])
     app.logger.debug("Current containers in the pod: %s", json.dumps(containers, indent=2))
-    sidecar_exists = any(container['name'] == 'infinity-next-nano-agent' for container in containers)
+    sidecar_exists = any(container['name'] == 'open-appsec-nano-agent' for container in containers)
     init_container_exist = any(init_container['name'] == 'prepare-attachment' for init_container in init_containers)
     volume_exist = any(volume['name'] == 'envoy-attachment-shared' for volume in volumes)
-    app.logger.debug("Does sidecar 'infinity-next-nano-agent' exist? %s", sidecar_exists)
+    app.logger.debug("Does sidecar 'open-appsec-nano-agent' exist? %s", sidecar_exists)
 
     # Determine if we should remove the injected data
     REMOVE_WAF = os.getenv('REMOVE_INJECTED_DATA', 'false').lower() == 'true'
@@ -542,7 +621,7 @@ def mutate():
                            "path": f"/spec/containers/{idx}/volumeMounts/{idx_v}"
                         })
                         app.logger.debug(f"Removed volumeMount: {patches[-1]}")
-                if container['name'] == 'infinity-next-nano-agent':
+                if container['name'] == 'open-appsec-nano-agent':
                     patches.append({
                        "op": "remove",
                        "path": f"/spec/containers/{idx}"
@@ -561,7 +640,7 @@ def mutate():
                     break  # Stop once we find and remove the target container
 
     else:
-        app.logger.debug("Before if: Sidecar 'infinity-next-nano-agent' does not exist. Preparing to add it.")
+        app.logger.debug("Before if: Sidecar 'open-appsec-nano-agent' does not exist. Preparing to add it.")
 
         # Define the sidecar container
         sidecar = get_sidecar_container()
@@ -616,11 +695,12 @@ def mutate():
             app.logger.debug("Added volume mount patch to istio-proxy: %s", patches[-1])
 
             # Add the new volume definition
-            patches.append({
-                "op": "add",
-                "path": "/spec/volumes/-",
-                "value": volume_def
-            })
+            for volume in volume_def:
+                patches.append({
+                    "op": "add",
+                    "path": "/spec/volumes/-",
+                    "value": volume
+                })
             app.logger.debug("Added volume definition patch: %s", patches[-1])
 
             if DEPLOY_FILTER and SELECTOR_LABEL_NAME and SELECTOR_LABEL_VALUE:
@@ -628,11 +708,11 @@ def mutate():
                 envoy_filter_name = RELEASE_NAME + "-waf-filter"
                 create_or_update_envoy_filter(envoy_filter_name, namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
         else:
-            app.logger.debug("Before else: Sidecar 'infinity-next-nano-agent' already exists. Checking for image updates.")
+            app.logger.debug("Before else: Sidecar 'open-appsec-nano-agent' already exists. Checking for image updates.")
 
             # Optionally, update the sidecar image and tag if necessary
             for idx, container in enumerate(containers):
-                if container['name'] == 'infinity-next-nano-agent':
+                if container['name'] == 'open-appsec-nano-agent':
                     current_image = container.get('image', '')
                     app.logger.debug("Current sidecar image: %s", current_image)
                     app.logger.debug("Desired sidecar image: %s", FULL_AGENT_IMAGE)
