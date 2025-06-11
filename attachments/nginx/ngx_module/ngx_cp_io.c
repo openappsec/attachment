@@ -1008,7 +1008,8 @@ ngx_http_cp_header_sender(
     ngx_list_part_t *headers_list,
     ngx_http_chunk_type_e header_type,
     uint32_t cur_request_id,
-    ngx_uint_t *num_messages_sent
+    ngx_uint_t *num_messages_sent,
+    ngx_str_t *waf_tag
 )
 {
     ngx_uint_t header_idx = 0;
@@ -1024,6 +1025,7 @@ ngx_http_cp_header_sender(
     const ngx_uint_t max_bulk_size = 10;
     char *fragments[HEADER_DATA_COUNT * max_bulk_size + 4];
     uint16_t fragments_sizes[HEADER_DATA_COUNT * max_bulk_size + 4];
+    ngx_flag_t waf_tag_found = 0;
 
     write_dbg(
         DBG_LEVEL_TRACE,
@@ -1033,6 +1035,38 @@ ngx_http_cp_header_sender(
 
     // Sets fragments identifier to the provided body type.
     set_fragments_identifiers(fragments, fragments_sizes, (uint16_t *)&header_type, &cur_request_id);
+
+    // If waf_tag is provided and valid, check for existing x-waf-tag headers
+    if (waf_tag != NULL && waf_tag->len > 0) {
+        for (headers_iter = headers_list; headers_iter; headers_iter = headers_iter->next) {
+            headers_to_inspect = headers_iter->elts;
+            for (header_idx = 0; header_idx < headers_iter->nelts; ++header_idx) {
+                header = headers_to_inspect + header_idx;
+                if (header->key.len == 9 && ngx_strncasecmp(header->key.data, (u_char *)"x-waf-tag", 9) == 0) {
+                    // Found existing x-waf-tag header, override its value
+                    // header->value = *waf_tag;
+                    waf_tag_found = 1;
+                    write_dbg(DBG_LEVEL_DEBUG, "Overriding existing x-waf-tag header with value: %.*s", waf_tag->len, waf_tag->data);
+                    break;
+                }
+            }
+            if (waf_tag_found) break;
+        }
+
+        // If no existing x-waf-tag header found, add a new one
+        if (!waf_tag_found) {
+            ngx_table_elt_t waf_header;
+            waf_header.hash = 1;
+            ngx_str_set(&waf_header.key, "x-waf-tag");
+            waf_header.value = *waf_tag;
+            waf_header.lowcase_key = NULL;  // Not needed for sending to agent
+
+            add_header_to_bulk(fragments, fragments_sizes, &waf_header, idx_in_bulk);
+            idx_in_bulk++;
+            part_count++;
+            write_dbg(DBG_LEVEL_DEBUG, "Adding new x-waf-tag header with value: %.*s", waf_tag->len, waf_tag->data);
+        }
+    }
 
     for (headers_iter = headers_list;  headers_iter ; headers_iter = headers_iter->next) {
         // Going over the header list.
@@ -1051,7 +1085,16 @@ ngx_http_cp_header_sender(
 
             is_last_part = (headers_iter->next == NULL && header_idx + 1 == headers_iter->nelts) ? 1 : 0;
             // Create a header bulk to send.
+            if (waf_tag_found && header->key.len == 9 && ngx_strncasecmp(header->key.data, (u_char *)"x-waf-tag", 9) == 0) {
+                ngx_table_elt_t waf_header;
+                waf_header.hash = 1;
+                ngx_str_set(&waf_header.key, "x-waf-tag");
+                waf_header.value = *waf_tag;
+                waf_header.lowcase_key = NULL;
+                add_header_to_bulk(fragments, fragments_sizes, &waf_header, idx_in_bulk);
+            } else {
             add_header_to_bulk(fragments, fragments_sizes, header, idx_in_bulk);
+            }
 
             idx_in_bulk++;
             part_count++;

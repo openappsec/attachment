@@ -223,7 +223,8 @@ ngx_http_cp_req_header_handler_thread(void *_ctx)
         &(request->headers_in.headers.part),
         REQUEST_HEADER,
         session_data_p->session_id,
-        &num_messages_sent
+        &num_messages_sent,
+        &ctx->waf_tag
     );
     if (send_header_result != NGX_OK) {
         write_dbg(
@@ -412,7 +413,8 @@ ngx_http_cp_res_header_filter_thread(void *_ctx)
         &request->headers_out.headers.part,
         RESPONSE_HEADER,
         session_data_p->session_id,
-        &num_messages_sent
+        &num_messages_sent,
+        &ctx->waf_tag
     );
     if (send_header_result != NGX_OK) {
         write_dbg(

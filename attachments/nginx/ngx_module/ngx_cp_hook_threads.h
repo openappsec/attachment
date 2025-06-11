@@ -44,6 +44,7 @@ struct ngx_http_cp_event_thread_ctx_t
     int should_return_next_filter;
 
     ngx_http_cp_modification_list *modifications; ///< Context's modification.
+    ngx_str_t waf_tag; ///< WAF tag value for the location block.
 };
 
 /// 
