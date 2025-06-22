@@ -3,7 +3,7 @@ version = "1.0.0-1"
 
 source = {
   url = "git://github.com/openappsec/attachment.git",
-  tag = "add-kong-plugin"  -- Change to main/tag if needed
+  tag = "add-kong-plugin"  -- Update this to your correct tag/branch if needed
 }
 
 description = {
@@ -23,31 +23,31 @@ build = {
   type = "builtin",
 
   modules = {
-    ["kong.plugins.open-appsec-waf-kong-plugin.handler"] = "attachment/attachments/kong/handler.lua",
-    ["kong.plugins.open-appsec-waf-kong-plugin.nano_ffi"] = "attachment/attachments/kong/nano_ffi.lua",
-    ["kong.plugins.open-appsec-waf-kong-plugin.schema"] = "attachment/attachments/kong/schema.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.handler"] = "attachments/kong/handler.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.nano_ffi"] = "attachments/kong/nano_ffi.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.schema"] = "attachments/kong/schema.lua",
     ["lua_attachment_wrapper"] = {
       sources = {
-        "attachment/attachments/kong/lua_attachment_wrapper.c",
-        "attachment/attachments/nano_attachment/nano_attachment.c",
-        "attachment/attachments/nano_attachment/nano_attachment_io.c",
-        "attachment/attachments/nano_attachment/nano_attachment_metric.c",
-        "attachment/attachments/nano_attachment/nano_attachment_sender.c",
-        "attachment/attachments/nano_attachment/nano_attachment_sender_thread.c",
-        "attachment/attachments/nano_attachment/nano_attachment_thread.c",
-        "attachment/attachments/nano_attachment/nano_compression.c",
-        "attachment/attachments/nano_attachment/nano_configuration.c",
-        "attachment/attachments/nano_attachment/nano_initializer.c",
-        "attachment/attachments/nano_attachment/nano_utils.c",
-        "attachment/attachments/nano_attachment/nano_attachment_util/nano_attachment_util.cc",
-        "attachment/core/attachments/http_configuration/http_configuration.cc",
-        "attachment/core/compression/compression_utils.cc",
-        "attachment/core/shmem_ipc_2/shared_ring_queue.c",
-        "attachment/core/shmem_ipc_2/shmem_ipc.c"
+        "attachments/kong/lua_attachment_wrapper.c",
+        "attachments/nano_attachment/nano_attachment.c",
+        "attachments/nano_attachment/nano_attachment_io.c",
+        "attachments/nano_attachment/nano_attachment_metric.c",
+        "attachments/nano_attachment/nano_attachment_sender.c",
+        "attachments/nano_attachment/nano_attachment_sender_thread.c",
+        "attachments/nano_attachment/nano_attachment_thread.c",
+        "attachments/nano_attachment/nano_compression.c",
+        "attachments/nano_attachment/nano_configuration.c",
+        "attachments/nano_attachment/nano_initializer.c",
+        "attachments/nano_attachment/nano_utils.c",
+        "attachments/nano_attachment/nano_attachment_util/nano_attachment_util.cc",
+        "core/attachments/http_configuration/http_configuration.cc",
+        "core/compression/compression_utils.cc",
+        "core/shmem_ipc_2/shared_ring_queue.c",
+        "core/shmem_ipc_2/shmem_ipc.c"
       },
       incdirs = {
-        "attachment/core/include/attachments/",
-        "attachment/attachments/nano_attachment/"
+        "core/include/attachments/",
+        "attachments/nano_attachment/"
       },
       defines = { "_GNU_SOURCE", "ZLIB_CONST" },
       libraries = { "pthread", "z", "rt", "stdc++" },
