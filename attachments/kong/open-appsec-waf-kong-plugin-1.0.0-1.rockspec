@@ -2,7 +2,8 @@ package = "open-appsec-waf-kong-plugin"
 version = "1.0.0-1"
 
 source = {
-  url = "file://."
+  url = "git://github.com/openappsec/attachment.git",
+  tag = "add-kong-plugin"  -- Update this to your correct tag/branch if needed
 }
 
 description = {
@@ -10,7 +11,7 @@ description = {
   detailed = [[
     A Kong plugin that scans HTTP request headers using Nano Attachment.
   ]],
-  "https://example.com", # TODO: Update this to the real project homepage before release
+  homepage = "https://github.com/openappsec/attachment",
   license = "Apache"
 }
 
