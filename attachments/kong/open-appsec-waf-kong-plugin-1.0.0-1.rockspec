@@ -3,7 +3,7 @@ version = "1.0.0-1"
 
 source = {
   url = "git://github.com/openappsec/attachment.git",
-  tag = "add-kong-plugin"  -- Update this to your correct tag/branch if needed
+  tag = "main"
 }
 
 description = {
