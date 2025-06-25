@@ -2,18 +2,16 @@ FROM kong
 
 USER root
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    git \
-    curl \
-    zlib1g-dev \
-    libpcre3-dev \
-    libxml2-dev \
-    libssl-dev \
-    libgeoip-dev \
-    linux-headers-$(uname -r) \
-    python3 \
-    ca-certificates && \
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libpcre3-dev \
+        libxml2-dev \
+        zlib1g-dev \
+        libssl-dev \
+        libgeoip-dev \
+        linux-libc-dev \
+        python3 \
+        ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 ENV LUAROCKS_VER=3.11.0
