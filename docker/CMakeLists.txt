@@ -9,3 +9,4 @@ add_custom_target(docker DEPENDS ${CMAKE_INSTALL_PREFIX}/nginx-docker.img)
 
 add_subdirectory(openappsec-envoy-attachments)
 add_subdirectory(openappsec-waf-webhook)
+add_subdirectory(openappsec-kong-plugin)
