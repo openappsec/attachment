@@ -3,10 +3,10 @@ FROM kong
 USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git curl zlib1g-dev ca-certificates && \
+    build-essential git curl zlib1g-dev ca-certificates wget && \
     rm -rf /var/lib/apt/lists/*
 
-RUN curl -fSL https://github.com/USCiLab/cereal/archive/refs/tags/v1.3.2.tar.gz -o cereal.tar.gz && \
+RUN wget -O cereal.tar.gz https://github.com/USCiLab/cereal/archive/refs/tags/v1.3.2.tar.gz && \
     tar -xzf cereal.tar.gz && \
     mkdir -p /usr/local/include/cereal && \
     cp -r cereal-1.3.2/include/cereal /usr/local/include/ && \
