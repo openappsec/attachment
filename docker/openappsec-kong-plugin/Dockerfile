@@ -6,10 +6,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential git curl zlib1g-dev ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-RUN curl -sL https://github.com/USCiLab/cereal/archive/refs/tags/v1.3.2.tar.gz | tar xz && \
+RUN git clone --depth 1 --branch v1.3.2 https://github.com/USCiLab/cereal.git && \
     mkdir -p /usr/local/include/cereal && \
-    cp -r cereal-1.3.2/include/cereal /usr/local/include/ && \
-    rm -rf cereal-1.3.2
+    cp -r cereal/include/cereal /usr/local/include/ && \
+    rm -rf cereal
 
 ENV LUAROCKS_VER=3.11.0
 RUN curl -fSL https://luarocks.org/releases/luarocks-${LUAROCKS_VER}.tar.gz -o luarocks-${LUAROCKS_VER}.tar.gz && \
