@@ -1,4 +1,3 @@
-ARG VERSION
 FROM kong:$VERSION
 
 USER root
