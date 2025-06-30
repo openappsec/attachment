@@ -1,6 +1,8 @@
 add_subdirectory(nano_attachment)
 if ("${ATTACHMENT_TYPE}" STREQUAL "envoy")
     add_subdirectory(envoy)
+elseif("${ATTACHMENT_TYPE}" STREQUAL "kong")
+    message(STATUS "ATTACHMENT_TYPE = ${ATTACHMENT_TYPE}")
 else()
     add_subdirectory(nginx)
 endif()
