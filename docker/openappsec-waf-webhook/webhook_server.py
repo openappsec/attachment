@@ -15,7 +15,7 @@ app = Flask(__name__)
 AGENT_IMAGE = os.getenv('AGENT_IMAGE', 'ghcr.io/openappsec/agent')
 AGENT_TAG = os.getenv('AGENT_TAG', 'latest')
 AGENT_CPU = os.getenv('AGENT_CPU', '200m')
-AGENT_KIND = os.getenv('AGENT_KIND', 'istio')
+PROXY_KIND = os.getenv('PROXY_KIND', 'istio')
 INIT_CONTAINER_IMAGE = os.getenv('INIT_CONTAINER_IMAGE', 'ghcr.io/openappsec/openappsec-envoy-filters')
 INIT_CONTAINER_TAG = os.getenv('INIT_CONTAINER_TAG', 'latest')
 ISTIOD_PORT = os.getenv('ISTIOD_PORT', '15014')
@@ -26,7 +26,7 @@ config.load_incluster_config()
 
 def is_istio_agent():
     """Check if the current agent kind is Istio"""
-    return AGENT_KIND.lower() == "istio"
+    return PROXY_KIND.lower() == "istio"
 
 def configure_logging():
     # Read the DEBUG_LEVEL from environment variables, defaulting to WARNING
@@ -69,7 +69,7 @@ def get_sidecar_container():
     secret_ref = os.getenv("SECRET_REF")
     persistence_enabled = os.getenv("APPSEC_PERSISTENCE_ENABLED", "false").lower() == "true"
 
-    # Prepare the volumeMounts list based on AGENT_KIND
+    # Prepare the volumeMounts list based on PROXY_KIND
     if is_istio_agent():
         volume_mounts = [
             {"name": "envoy-attachment-shared", "mountPath": "/envoy/attachment/shared/"},
@@ -588,7 +588,7 @@ def mutate():
     # Only check for envoy-attachment-shared volume if agent kind is Istio
     volume_exist = any(volume['name'] == 'envoy-attachment-shared' for volume in volumes) if is_istio_agent() else False
     app.logger.debug("Does sidecar 'open-appsec-nano-agent' exist? %s", sidecar_exists)
-    app.logger.debug("Agent kind: %s", AGENT_KIND)
+    app.logger.debug("Agent kind: %s", PROXY_KIND)
 
     # Determine if we should remove the injected data
     REMOVE_WAF = os.getenv('REMOVE_INJECTED_DATA', 'false').lower() == 'true'
@@ -604,9 +604,9 @@ def mutate():
     if REMOVE_WAF:
         app.logger.debug("Removing injected sidecar and associated resources.")
 
-        # Only handle Istio-specific removal if AGENT_KIND is "istio"
+        # Only handle Istio-specific removal if PROXY_KIND is "istio"
         if is_istio_agent():
-            app.logger.debug("AGENT_KIND is istio, removing Istio-specific components.")
+            app.logger.debug("PROXY_KIND is istio, removing Istio-specific components.")
 
             if DEPLOY_FILTER and SELECTOR_LABEL_NAME and SELECTOR_LABEL_VALUE:
                 remove_envoy_filter_by_selector(namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
@@ -642,7 +642,7 @@ def mutate():
                         app.logger.debug(f"Removed init container patch: {patches[-1]}")
                         break  # Stop once we find and remove the target container
         else:
-            app.logger.debug(f"AGENT_KIND is {AGENT_KIND}, skipping Istio-specific removal.")
+            app.logger.debug(f"PROXY_KIND is {PROXY_KIND}, skipping Istio-specific removal.")
 
             # For kong agents, set automountServiceAccountToken back to false
             if 'automountServiceAccountToken' in obj.get('spec', {}):
@@ -694,9 +694,9 @@ def mutate():
         # Define the volume
         volume_def = get_volume_definition()
 
-        # Only handle Istio-specific components if AGENT_KIND is "istio"
+        # Only handle Istio-specific components if PROXY_KIND is "istio"
         if is_istio_agent():
-            app.logger.debug("AGENT_KIND is istio, adding Istio-specific components.")
+            app.logger.debug("PROXY_KIND is istio, adding Istio-specific components.")
 
             # Define the init container()
             init_container = get_init_container()
@@ -754,7 +754,7 @@ def mutate():
                 envoy_filter_name = RELEASE_NAME + "-waf-filter"
                 create_or_update_envoy_filter(envoy_filter_name, namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
         else:
-            app.logger.debug(f"AGENT_KIND is {AGENT_KIND}, skipping Istio-specific components.")
+            app.logger.debug(f"PROXY_KIND is {PROXY_KIND}, skipping Istio-specific components.")
 
             # For kong agents (like Kong), set automountServiceAccountToken to true
             current_spec = obj.get('spec', {})
