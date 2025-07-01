@@ -644,6 +644,15 @@ def mutate():
         else:
             app.logger.debug(f"AGENT_KIND is {AGENT_KIND}, skipping Istio-specific removal.")
 
+            # For kong agents, set automountServiceAccountToken back to false
+            if 'automountServiceAccountToken' in obj.get('spec', {}):
+                patches.append({
+                    "op": "replace",
+                    "path": "/spec/automountServiceAccountToken",
+                    "value": False
+                })
+                app.logger.debug("Set automountServiceAccountToken=false for kong agent removal")
+
         # Remove the sidecar container if it exists (common for all agent kinds)
         if sidecar_exists:
             for idx, container in enumerate(containers):
@@ -746,6 +755,25 @@ def mutate():
                 create_or_update_envoy_filter(envoy_filter_name, namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
         else:
             app.logger.debug(f"AGENT_KIND is {AGENT_KIND}, skipping Istio-specific components.")
+
+            # For kong agents (like Kong), set automountServiceAccountToken to true
+            current_spec = obj.get('spec', {})
+            if 'automountServiceAccountToken' in current_spec:
+                # Field exists, replace it
+                patches.append({
+                    "op": "replace",
+                    "path": "/spec/automountServiceAccountToken",
+                    "value": True
+                })
+                app.logger.debug("Replaced existing automountServiceAccountToken=true for kong agent")
+            else:
+                # Field doesn't exist, add it
+                patches.append({
+                    "op": "add",
+                    "path": "/spec/automountServiceAccountToken",
+                    "value": True
+                })
+                app.logger.debug("Added automountServiceAccountToken=true for kong agent")
 
         # Add the sidecar container (common for all agent kinds)
         if not sidecar_exists:
