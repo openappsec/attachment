@@ -15,6 +15,7 @@ app = Flask(__name__)
 AGENT_IMAGE = os.getenv('AGENT_IMAGE', 'ghcr.io/openappsec/agent')
 AGENT_TAG = os.getenv('AGENT_TAG', 'latest')
 AGENT_CPU = os.getenv('AGENT_CPU', '200m')
+PROXY_KIND = os.getenv('PROXY_KIND', 'istio')
 INIT_CONTAINER_IMAGE = os.getenv('INIT_CONTAINER_IMAGE', 'ghcr.io/openappsec/openappsec-envoy-filters')
 INIT_CONTAINER_TAG = os.getenv('INIT_CONTAINER_TAG', 'latest')
 ISTIOD_PORT = os.getenv('ISTIOD_PORT', '15014')
@@ -22,6 +23,10 @@ FULL_AGENT_IMAGE = f"{AGENT_IMAGE}:{AGENT_TAG}"
 FULL_INIT_CONTAINER_IMAGE = f"{INIT_CONTAINER_IMAGE}:{INIT_CONTAINER_TAG}"
 
 config.load_incluster_config()
+
+def is_istio_agent():
+    """Check if the current agent kind is Istio"""
+    return PROXY_KIND.lower() == "istio"
 
 def configure_logging():
     # Read the DEBUG_LEVEL from environment variables, defaulting to WARNING
@@ -45,7 +50,6 @@ def configure_logging():
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
 
-    # Remove any existing handlers
     if app.logger.hasHandlers():
         app.logger.handlers.clear()
 
@@ -58,16 +62,21 @@ def get_sidecar_container():
     token = os.getenv("TOKEN")
     custom_fog_enabled = os.getenv("CUSTOM_FOG_ENABLED") == "true"  # Check if it's set to "true"
     fog_address = os.getenv("FOG_ADDRESS")
+    registered_server = os.getenv("REGISTERED_SERVER")
     appsec_proxy = os.getenv("APPSEC_PROXY")
     config_map_ref = os.getenv("CONFIG_MAP_REF")
     secret_ref = os.getenv("SECRET_REF")
     persistence_enabled = os.getenv("APPSEC_PERSISTENCE_ENABLED", "false").lower() == "true"
 
-    # Prepare the volumeMounts list
-    volume_mounts = [
-        {"name": "envoy-attachment-shared", "mountPath": "/envoy/attachment/shared/"},
-        {"name": "advanced-model", "mountPath": "/advanced-model"}
-    ]
+    if is_istio_agent():
+        volume_mounts = [
+            {"name": "envoy-attachment-shared", "mountPath": "/envoy/attachment/shared/"},
+            {"name": "advanced-model", "mountPath": "/advanced-model"}
+        ]
+    else:
+        volume_mounts = [
+            {"name": "advanced-model", "mountPath": "/advanced-model"}
+        ]
 
     if persistence_enabled:
         volume_mounts.extend([
@@ -99,14 +108,12 @@ def get_sidecar_container():
         "CRDS_SCOPE": os.getenv("CRDS_SCOPE"),
     }
 
-    # Base environment variables
     env = [
-        {"name": "registered_server", "value": "ISTIO Server"}
+        {"name": "registered_server", "value": registered_server}
     ]
 
-    # Add optional environment variables if they are set
     for var_name, var_value in optional_env_vars.items():
-        if var_value is not None:  # Only add if the variable is set
+        if var_value is not None:
             env.append({"name": var_name, "value": var_value})
 
     sidecar = {
@@ -149,7 +156,7 @@ def get_istio_version():
     url = f"http://istiod.istio-system:{ISTIOD_PORT}/version"
     response = requests.get(url)
     if response.status_code == 200:
-        return response.text.strip().split('-')[0]  # Extracting version
+        return response.text.strip().split('-')[0]
     else:
         raise Exception(f"Failed to get Istio version: {response.status_code}")
 
@@ -209,7 +216,6 @@ def get_init_container():
     app.logger.debug("Exiting get_init_container()")
     return init_container
 
-# The volume mount configuration for both the original and sidecar containers
 def get_volume_mount():
     app.logger.debug("Entering get_volume_mount()")
     volume_mount = {
@@ -220,25 +226,35 @@ def get_volume_mount():
     app.logger.debug("Exiting get_volume_mount()")
     return volume_mount
 
-# Volume definition for the pod
 def get_volume_definition():
     app.logger.debug("Entering get_volume_definition()")
 
     persistence_enabled = os.getenv("APPSEC_PERSISTENCE_ENABLED", "false").lower() == "true"
 
-    volume_def = [
-        {
-            "name": "envoy-attachment-shared",
-            "emptyDir": {}
-        },
-        {
-            "name": "advanced-model",
-            "configMap": {
-                "name": "advanced-model-config",
-                "optional": True
+    if is_istio_agent():
+        volume_def = [
+            {
+                "name": "envoy-attachment-shared",
+                "emptyDir": {}
+            },
+            {
+                "name": "advanced-model",
+                "configMap": {
+                    "name": "advanced-model-config",
+                    "optional": True
+                }
             }
-        }
-    ]
+        ]
+    else:
+        volume_def = [
+            {
+                "name": "advanced-model",
+                "configMap": {
+                    "name": "advanced-model-config",
+                    "optional": True
+                }
+            }
+        ]
 
     if persistence_enabled:
         volume_def.extend([
@@ -385,7 +401,6 @@ def remove_env_variable(containers, container_name, env_var_name, patches):
 
 def create_or_update_envoy_filter(name, namespace, selector_label_name, selector_label_value):
     api = client.CustomObjectsApi()
-    # Define the EnvoyFilter specification
     envoy_filter_spec = {
         "apiVersion": "networking.istio.io/v1alpha3",
         "kind": "EnvoyFilter",
@@ -439,7 +454,6 @@ def create_or_update_envoy_filter(name, namespace, selector_label_name, selector
         }
     }
 
-    # Check if the EnvoyFilter exists
     try:
         existing_envoy_filter = api.get_namespaced_custom_object(
             group="networking.istio.io",
@@ -559,8 +573,10 @@ def mutate():
     app.logger.debug("Current containers in the pod: %s", json.dumps(containers, indent=2))
     sidecar_exists = any(container['name'] == 'open-appsec-nano-agent' for container in containers)
     init_container_exist = any(init_container['name'] == 'prepare-attachment' for init_container in init_containers)
-    volume_exist = any(volume['name'] == 'envoy-attachment-shared' for volume in volumes)
+    # Only check for envoy-attachment-shared volume if agent kind is Istio
+    volume_exist = any(volume['name'] == 'envoy-attachment-shared' for volume in volumes) if is_istio_agent() else False
     app.logger.debug("Does sidecar 'open-appsec-nano-agent' exist? %s", sidecar_exists)
+    app.logger.debug("Agent kind: %s", PROXY_KIND)
 
     # Determine if we should remove the injected data
     REMOVE_WAF = os.getenv('REMOVE_INJECTED_DATA', 'false').lower() == 'true'
@@ -574,53 +590,65 @@ def mutate():
     CONFIG_PORT_VALUE = os.getenv('CONFIG_PORT')
     CONCURRENCY_NUMBER_VALUE = os.getenv('CONCURRENCY_NUMBER')
     if REMOVE_WAF:
-        if DEPLOY_FILTER and SELECTOR_LABEL_NAME and SELECTOR_LABEL_VALUE:
-            remove_envoy_filter_by_selector(namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
-
         app.logger.debug("Removing injected sidecar and associated resources.")
 
-        # Remove ld library path env variable
-        if ISTIO_CONTAINER_NAME:
-            if CONCURRENCY_NUMBER_VALUE:
-                remove_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONCURRENCY_NUMBER', patches)
-            if CONFIG_PORT_VALUE:
-                remove_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONFIG_PORT', patches)
-            if CONCURRENCY_CALC_VALUE:
-                remove_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONCURRENCY_CALC', patches)
-            if LIBRARY_PATH_VALUE:
-                remove_env_variable(containers, ISTIO_CONTAINER_NAME, 'LD_LIBRARY_PATH', patches)
+        if is_istio_agent():
+            app.logger.debug("PROXY_KIND is istio, removing Istio-specific components.")
 
-        if 'shareProcessNamespace' in obj.get('spec', {}):
-            patches.append({
-                "op": "remove",
-                "path": "/spec/shareProcessNamespace"
-            })
-            app.logger.debug("Removed shareProcessNamespace patch")
+            if DEPLOY_FILTER and SELECTOR_LABEL_NAME and SELECTOR_LABEL_VALUE:
+                remove_envoy_filter_by_selector(namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
+
+            if ISTIO_CONTAINER_NAME:
+                if CONCURRENCY_NUMBER_VALUE:
+                    remove_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONCURRENCY_NUMBER', patches)
+                if CONFIG_PORT_VALUE:
+                    remove_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONFIG_PORT', patches)
+                if CONCURRENCY_CALC_VALUE:
+                    remove_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONCURRENCY_CALC', patches)
+                if LIBRARY_PATH_VALUE:
+                    remove_env_variable(containers, ISTIO_CONTAINER_NAME, 'LD_LIBRARY_PATH', patches)
+
+            if 'shareProcessNamespace' in obj.get('spec', {}):
+                patches.append({
+                    "op": "remove",
+                    "path": "/spec/shareProcessNamespace"
+                })
+                app.logger.debug("Removed shareProcessNamespace patch")
+            else:
+                app.logger.debug("shareProcessNamespace not found; no patch to remove it")
+
+            if init_container_exist:
+                for idx, init_container in enumerate(init_containers):
+                    if init_container['name'] == 'prepare-attachment':
+                        patches.append({
+                           "op": "remove",
+                           "path": f"/spec/initContainers/{idx}"
+                        })
+                        app.logger.debug(f"Removed init container patch: {patches[-1]}")
+                        break
         else:
-            app.logger.debug("shareProcessNamespace not found; no patch to remove it")
+            app.logger.debug(f"PROXY_KIND is {PROXY_KIND}, skipping Istio-specific removal.")
 
-        # Remove the init container if it exists
-        if init_container_exist:
-            for idx, init_container in enumerate(init_containers):
-                if init_container['name'] == 'prepare-attachment':
-                    patches.append({
-                       "op": "remove",
-                       "path": f"/spec/initContainers/{idx}"
-                    })
-                    app.logger.debug(f"Removed init container patch: {patches[-1]}")
-                    break  # Stop once we find and remove the target container
+            # For kong agents, set automountServiceAccountToken back to false
+            if 'automountServiceAccountToken' in obj.get('spec', {}):
+                patches.append({
+                    "op": "replace",
+                    "path": "/spec/automountServiceAccountToken",
+                    "value": False
+                })
+                app.logger.debug("Set automountServiceAccountToken=false for kong agent removal")
 
-        # Remove the sidecar container if it exists
         if sidecar_exists:
             for idx, container in enumerate(containers):
                 volume_mounts = container.get('volumeMounts', [])
-                for idx_v, volume_mount in enumerate(volume_mounts):
-                    if volume_mount['name'] == 'envoy-attachment-shared':
-                        patches.append({
-                           "op": "remove",
-                           "path": f"/spec/containers/{idx}/volumeMounts/{idx_v}"
-                        })
-                        app.logger.debug(f"Removed volumeMount: {patches[-1]}")
+                if is_istio_agent():
+                    for idx_v, volume_mount in enumerate(volume_mounts):
+                        if volume_mount['name'] == 'envoy-attachment-shared':
+                            patches.append({
+                               "op": "remove",
+                               "path": f"/spec/containers/{idx}/volumeMounts/{idx_v}"
+                            })
+                            app.logger.debug(f"Removed volumeMount: {patches[-1]}")
                 if container['name'] == 'open-appsec-nano-agent':
                     patches.append({
                        "op": "remove",
@@ -628,50 +656,44 @@ def mutate():
                     })
                     app.logger.debug(f"Removed sidecar container patch: {patches[-1]}")
 
-        # Remove the volume if it exists
         if volume_exist:
             for idx, volume in enumerate(volumes):
-                if volume['name'] == 'envoy-attachment-shared':
+                if is_istio_agent() and volume['name'] == 'envoy-attachment-shared':
                     patches.append({
                        "op": "remove",
                        "path": f"/spec/volumes/{idx}"
                     })
                     app.logger.debug(f"Removed volume patch: {patches[-1]}")
-                    break  # Stop once we find and remove the target container
+                    break
 
     else:
         app.logger.debug("Before if: Sidecar 'open-appsec-nano-agent' does not exist. Preparing to add it.")
 
-        # Define the sidecar container
         sidecar = get_sidecar_container()
 
-        # Define the init container()
-        init_container = get_init_container()
-
-        # Define the volume mount for istio-proxy
-        volume_mount = get_volume_mount()
-
-        # Define the volume
         volume_def = get_volume_definition()
 
-        if ISTIO_CONTAINER_NAME:
-            add_env_if_not_exist(containers, ISTIO_CONTAINER_NAME, patches)
-            add_env_variable_value_from(containers, ISTIO_CONTAINER_NAME, 'OPENAPPSEC_UID', None, patches, value_from={"fieldRef": {"fieldPath": "metadata.uid"}})
-            if LIBRARY_PATH_VALUE:
-                add_env_variable(containers, ISTIO_CONTAINER_NAME, 'LD_LIBRARY_PATH', LIBRARY_PATH_VALUE, patches)
-            if CONCURRENCY_CALC_VALUE:
-                add_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONCURRENCY_CALC', CONCURRENCY_CALC_VALUE, patches)
-            if CONFIG_PORT_VALUE:
-                add_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONFIG_PORT', CONFIG_PORT_VALUE, patches)
-            if CONCURRENCY_NUMBER_VALUE:
-                add_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONCURRENCY_NUMBER', CONCURRENCY_NUMBER_VALUE, patches)
-        else:
-            app.logger.debug("ISTIO_CONTAINER_NAME skipping environment variable addition")
+        if is_istio_agent():
+            app.logger.debug("PROXY_KIND is istio, adding Istio-specific components.")
 
-        # Add the sidecar container
-        if not sidecar_exists:
+            init_container = get_init_container()
 
-            # Add shareProcessNamespace if not already set
+            volume_mount = get_volume_mount()
+
+            if ISTIO_CONTAINER_NAME:
+                add_env_if_not_exist(containers, ISTIO_CONTAINER_NAME, patches)
+                add_env_variable_value_from(containers, ISTIO_CONTAINER_NAME, 'OPENAPPSEC_UID', None, patches, value_from={"fieldRef": {"fieldPath": "metadata.uid"}})
+                if LIBRARY_PATH_VALUE:
+                    add_env_variable(containers, ISTIO_CONTAINER_NAME, 'LD_LIBRARY_PATH', LIBRARY_PATH_VALUE, patches)
+                if CONCURRENCY_CALC_VALUE:
+                    add_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONCURRENCY_CALC', CONCURRENCY_CALC_VALUE, patches)
+                if CONFIG_PORT_VALUE:
+                    add_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONFIG_PORT', CONFIG_PORT_VALUE, patches)
+                if CONCURRENCY_NUMBER_VALUE:
+                    add_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONCURRENCY_NUMBER', CONCURRENCY_NUMBER_VALUE, patches)
+            else:
+                app.logger.debug("ISTIO_CONTAINER_NAME skipping environment variable addition")
+
             patches.append({
                 "op": "add",
                 "path": "/spec/shareProcessNamespace",
@@ -681,20 +703,54 @@ def mutate():
 
             patches.append({
                 "op": "add",
-                "path": "/spec/containers/-",
-                "value": sidecar
-            })
-            app.logger.debug("Added sidecar container patch: %s", patches[-1])
-
-            # Add the volume mount to istio-proxy container (assumes istio-proxy is first container)
-            patches.append({
-                "op": "add",
                 "path": "/spec/containers/0/volumeMounts/-",
                 "value": volume_mount
             })
             app.logger.debug("Added volume mount patch to istio-proxy: %s", patches[-1])
 
-            # Add the new volume definition
+            if not init_container_exist:
+                if 'initContainers' in obj['spec']:
+                    obj['spec']['initContainers'].append(init_container)
+                else:
+                    obj['spec']['initContainers'] = [init_container]
+
+                patches.append({
+                    "op": "add",
+                    "path": "/spec/initContainers",
+                    "value": obj['spec']['initContainers']
+                })
+
+            if DEPLOY_FILTER and SELECTOR_LABEL_NAME and SELECTOR_LABEL_VALUE:
+                RELEASE_NAME = os.getenv('RELEASE_NAME', 'openappsec-waf-injected')
+                envoy_filter_name = RELEASE_NAME + "-waf-filter"
+                create_or_update_envoy_filter(envoy_filter_name, namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
+        else:
+            app.logger.debug(f"PROXY_KIND is {PROXY_KIND}, skipping Istio-specific components.")
+
+            current_spec = obj.get('spec', {})
+            if 'automountServiceAccountToken' in current_spec:
+                patches.append({
+                    "op": "replace",
+                    "path": "/spec/automountServiceAccountToken",
+                    "value": True
+                })
+                app.logger.debug("Replaced existing automountServiceAccountToken=true for kong agent")
+            else:
+                patches.append({
+                    "op": "add",
+                    "path": "/spec/automountServiceAccountToken",
+                    "value": True
+                })
+                app.logger.debug("Added automountServiceAccountToken=true for kong agent")
+
+        if not sidecar_exists:
+            patches.append({
+                "op": "add",
+                "path": "/spec/containers/-",
+                "value": sidecar
+            })
+            app.logger.debug("Added sidecar container patch: %s", patches[-1])
+
             for volume in volume_def:
                 patches.append({
                     "op": "add",
@@ -702,15 +758,9 @@ def mutate():
                     "value": volume
                 })
             app.logger.debug("Added volume definition patch: %s", patches[-1])
-
-            if DEPLOY_FILTER and SELECTOR_LABEL_NAME and SELECTOR_LABEL_VALUE:
-                RELEASE_NAME = os.getenv('RELEASE_NAME', 'openappsec-waf-injected')
-                envoy_filter_name = RELEASE_NAME + "-waf-filter"
-                create_or_update_envoy_filter(envoy_filter_name, namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
         else:
             app.logger.debug("Before else: Sidecar 'open-appsec-nano-agent' already exists. Checking for image updates.")
 
-            # Optionally, update the sidecar image and tag if necessary
             for idx, container in enumerate(containers):
                 if container['name'] == 'open-appsec-nano-agent':
                     current_image = container.get('image', '')
@@ -723,37 +773,24 @@ def mutate():
                             "value": FULL_AGENT_IMAGE
                         })
                         app.logger.debug(f"Updated sidecar image patch: {patches[-1]}")
-                    break  # Sidecar found and handled
+                    break
 
-        if not init_container_exist:
-            # Add the initContainer to the pod spec in the deployment
-            if 'initContainers' in obj['spec']:
-                obj['spec']['initContainers'].append(init_container)
-            else:
-                obj['spec']['initContainers'] = [init_container]
-
-            patches.append({
-                "op": "add",
-                "path": "/spec/initContainers",
-                "value": obj['spec']['initContainers']
-            })
-        else:
+        if is_istio_agent() and init_container_exist:
             app.logger.debug("Before else: init-container 'prepare-attachment' already exists. Checking for image updates.")
 
-            # Optionally, update the sidecar image and tag if necessary
-            for idx, container in enumerate(containers):
+            for idx, container in enumerate(init_containers):
                 if container['name'] == 'prepare-attachment':
                     current_image = container.get('image', '')
                     app.logger.debug("Current init container image: %s", current_image)
-                    app.logger.debug("Desired init container image: %s", FULL_AGENT_IMAGE)
-                    if current_image != FULL_AGENT_IMAGE:
+                    app.logger.debug("Desired init container image: %s", FULL_INIT_CONTAINER_IMAGE)
+                    if current_image != FULL_INIT_CONTAINER_IMAGE:
                         patches.append({
                             "op": "replace",
-                            "path": f"/spec/containers/{idx}/image",
-                            "value": FULL_AGENT_IMAGE
+                            "path": f"/spec/initContainers/{idx}/image",
+                            "value": FULL_INIT_CONTAINER_IMAGE
                         })
-                        app.logger.debug(f"Updated sidecar image patch: {patches[-1]}")
-                    break  # Sidecar found and handled
+                        app.logger.debug(f"Updated init container image patch: {patches[-1]}")
+                    break
 
 
     app.logger.info("Total patches: %s", json.dumps(patches, indent=2))
