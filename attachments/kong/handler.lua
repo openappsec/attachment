@@ -47,9 +47,10 @@ function NanoHandler.access(conf)
     local verdict, response = nano.send_data(session_id, session_data, meta_data, req_headers, contains_body, nano.HttpChunkType.HTTP_REQUEST_FILTER)
     if verdict == nano.AttachmentVerdict.DROP then
         nano.fini_session(session_data)
-        nano.cleanup_all()
         kong.ctx.plugin.blocked = true
-        return nano.handle_custom_response(session_data, response)
+        local result = nano.handle_custom_response(session_data, response)
+        nano.cleanup_all()
+        return result
     end
 
     if contains_body == 1 then
@@ -58,9 +59,10 @@ function NanoHandler.access(conf)
             verdict, response = nano.send_body(session_id, session_data, body, nano.HttpChunkType.HTTP_REQUEST_BODY)
             if verdict == nano.AttachmentVerdict.DROP then
                 nano.fini_session(session_data)
-                nano.cleanup_all()
                 kong.ctx.plugin.blocked = true
-                return nano.handle_custom_response(session_data, response)
+                local result = nano.handle_custom_response(session_data, response)
+                nano.cleanup_all()
+                return result
             end
         else
             -- Body might be buffered to file, try to read it using nginx variables
@@ -99,9 +101,10 @@ function NanoHandler.access(conf)
                             if verdict == nano.AttachmentVerdict.DROP then
                                 file:close()
                                 nano.fini_session(session_data)
-                                nano.cleanup_all()
                                 kong.ctx.plugin.blocked = true
-                                return nano.handle_custom_response(session_data, response)
+                                local result = nano.handle_custom_response(session_data, response)
+                                nano.cleanup_all()
+                                return result
                             end
                         end
 
@@ -137,9 +140,10 @@ function NanoHandler.access(conf)
         verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
         if verdict == nano.AttachmentVerdict.DROP then
             nano.fini_session(session_data)
-            nano.cleanup_all()
             kong.ctx.plugin.blocked = true
-            return nano.handle_custom_response(session_data, response)
+            local result = nano.handle_custom_response(session_data, response)
+            nano.cleanup_all()
+            return result
         end
     end
 
@@ -208,10 +212,11 @@ function NanoHandler.body_filter(conf)
 
         if verdict == nano.AttachmentVerdict.DROP then
             nano.fini_session(session_data)
+            ctx.session_finalized = true
+            local result = nano.handle_custom_response(session_data, response)
             -- Clean up allocated memory
             nano.cleanup_all()
-            ctx.session_finalized = true
-            return nano.handle_custom_response(session_data, response)
+            return result
         end
         return
     end
@@ -220,10 +225,11 @@ function NanoHandler.body_filter(conf)
         local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
         if verdict == nano.AttachmentVerdict.DROP then
             nano.fini_session(session_data)
+            ctx.session_finalized = true
+            local result = nano.handle_custom_response(session_data, response)
             -- Clean up allocated memory
             nano.cleanup_all()
-            ctx.session_finalized = true
-            return nano.handle_custom_response(session_data, response)
+            return result
         end
 
         nano.fini_session(session_data)

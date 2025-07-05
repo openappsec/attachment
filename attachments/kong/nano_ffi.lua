@@ -96,6 +96,12 @@ function nano.handle_custom_response(session_data, response)
 
     if response_type == nano.WebResponseType.RESPONSE_CODE_ONLY then
         local code = nano_attachment.get_response_code(response)
+        -- Validate HTTP status code
+        if not code or code < 100 or code > 599 then
+            kong.log.warn("Invalid response code received: ", code, " - using 403 instead")
+            code = 403
+        end
+        kong.log.debug("Response code only: ", code)
         return kong.response.exit(code, "")
     end
 
@@ -110,6 +116,12 @@ function nano.handle_custom_response(session_data, response)
         return kong.response.exit(500, { message = "Internal Server Error" })
     end
     local code = nano_attachment.get_response_code(response) -- Get the intended status code
+    -- Validate HTTP status code
+    if not code or code < 100 or code > 599 then
+        kong.log.warn("Invalid response code received: ", code, " - using 403 instead")
+        code = 403
+    end
+    kong.log.debug("Block page response with code: ", code)
     return kong.response.exit(code, block_page, { ["Content-Type"] = "text/html" })
 
 end
