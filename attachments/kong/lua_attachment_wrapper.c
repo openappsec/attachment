@@ -227,23 +227,6 @@ static void lua_fill_nano_str(lua_State *L, int index, nano_str_t *nano_str) {
     nano_str->len = len;
 }
 
-static int lua_free_http_metadata(lua_State *L) {
-    HttpMetaData *metadata = *(HttpMetaData **)lua_touserdata(L, 1);
-    if (!metadata) return 0;
-
-    free(metadata->http_protocol.data);
-    free(metadata->method_name.data);
-    free(metadata->host.data);
-    free(metadata->listening_ip.data);
-    free(metadata->uri.data);
-    free(metadata->client_ip.data);
-    free(metadata->parsed_host.data);
-    free(metadata->parsed_uri.data);
-    free(metadata);
-
-    return 0;
-}
-
 // Set a header element in HttpHeaderData
 static int lua_setHeaderElement(lua_State *L) {
     HttpHeaders *headers = (HttpHeaders *)lua_touserdata(L, 1);
