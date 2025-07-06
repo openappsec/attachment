@@ -264,23 +264,11 @@ function nano.handle_start_transaction()
     local listening_ip = ngx.var.server_addr or "127.0.0.1"
     local listening_port = ngx.var.server_port or 80
 
-    kong.log.err("The host is: ", host)
-    kong.log.err("The scheme is: ", scheme)
-    kong.log.err("The method is: ", method)
-    kong.log.err("The uri is: ", uri)
-    kong.log.err("The client IP is: ", client_ip)
-    kong.log.err("The client port is: ", client_port)
-    kong.log.err("The listening IP is: ", listening_ip)
-    kong.log.err("The listening port is: ", listening_port)
-
-
-    -- Call the C function with extracted metadata
     local metadata = nano_attachment.create_http_metadata(
         scheme, method, host, listening_ip, tonumber(listening_port) or 0,
         uri, client_ip, tonumber(client_port) or 0, "", ""
     )
 
-    -- Track metadata for cleanup
     table.insert(nano.allocated_metadata, metadata)
 
     collectgarbage("stop")
