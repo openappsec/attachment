@@ -27,15 +27,15 @@ function NanoHandler.access(conf)
 
     local session_data = nano.init_session(session_id)
     if not session_data then
-        kong.log.err("Failed to initialize session")
-        kong.ctx.plugin.blocked = true
-        return kong.response.exit(500, { message = "Session Initialization Failed" })
+        kong.log.err("Failed to initialize session - failing open")
+        return
     end
 
     kong.ctx.plugin.session_data = session_data
     kong.ctx.plugin.session_id = session_id
 
     local meta_data = nano.handle_start_transaction()
+    kong.log.err("Failed to handle start transaction - failing open")
     local req_headers = nano.handleHeaders(headers)
 
     local has_content_length = tonumber(ngx.var.http_content_length) and tonumber(ngx.var.http_content_length) > 0
@@ -45,7 +45,9 @@ function NanoHandler.access(conf)
     if verdict == nano.AttachmentVerdict.DROP then
         nano.fini_session(session_data)
         kong.ctx.plugin.blocked = true
-        return nano.handle_custom_response(session_data, response)
+        local result = nano.handle_custom_response(session_data, response)
+        nano.cleanup_all()
+        return result
     end
 
     if contains_body == 1 then
@@ -55,7 +57,52 @@ function NanoHandler.access(conf)
             if verdict == nano.AttachmentVerdict.DROP then
                 nano.fini_session(session_data)
                 kong.ctx.plugin.blocked = true
-                return nano.handle_custom_response(session_data, response)
+                local result = nano.handle_custom_response(session_data, response)
+                nano.cleanup_all()
+                return result
+            end
+        else
+            -- Body might be buffered to file, try to read it using nginx variables
+            kong.log.debug("Request body not in memory, attempting to read from buffer/file")
+
+            -- Try to read the request body using nginx.var
+            local body_data = ngx.var.request_body
+            if body_data and #body_data > 0 then
+                kong.log.debug("Found request body in nginx var, size: ", #body_data)
+                verdict, response = nano.send_body(session_id, session_data, body_data, nano.HttpChunkType.HTTP_REQUEST_BODY)
+                if verdict == nano.AttachmentVerdict.DROP then
+                    nano.fini_session(session_data)
+                    kong.ctx.plugin.blocked = true
+                    return nano.handle_custom_response(session_data, response)
+                end
+            else
+                -- Try to read from the temporary file if available
+                local body_file = ngx.var.request_body_file
+                if body_file then
+                    kong.log.debug("Reading request body from file: ", body_file)
+                    local file = io.open(body_file, "rb")
+                    if file then
+                        -- Read entire body at once
+                        local entire_body = file:read("*all")
+                        file:close()
+
+                        if entire_body and #entire_body > 0 then
+                            kong.log.debug("Sending entire body of size ", #entire_body, " bytes to C module")
+                            verdict, response = nano.send_body(session_id, session_data, entire_body, nano.HttpChunkType.HTTP_REQUEST_BODY)
+                            if verdict == nano.AttachmentVerdict.DROP then
+                                nano.fini_session(session_data)
+                                kong.ctx.plugin.blocked = true
+                                local result = nano.handle_custom_response(session_data, response)
+                                nano.cleanup_all()
+                                return result
+                            end
+                        else
+                            kong.log.debug("Empty body file")
+                        end
+                    end
+                else
+                    kong.log.warn("Request body expected but no body data or file available")
+                end
             end
         end
 
@@ -64,24 +111,27 @@ function NanoHandler.access(conf)
         end)
 
         if not ok then
-            kong.log.err("Error ending request inspection: ", verdict)
+            kong.log.err("Error ending request inspection: ", verdict, " - failing open")
             nano.fini_session(session_data)
-            kong.ctx.plugin.blocked = true
-            return kong.response.exit(500, { message = "Error completing request processing" })
+            nano.cleanup_all()
+            return
         end
-
 
         if verdict == nano.AttachmentVerdict.DROP then
             nano.fini_session(session_data)
             kong.ctx.plugin.blocked = true
-            return nano.handle_custom_response(session_data, response)
+            local result = nano.handle_custom_response(session_data, response)
+            nano.cleanup_all()
+            return result
         end
     else
         verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
         if verdict == nano.AttachmentVerdict.DROP then
             nano.fini_session(session_data)
             kong.ctx.plugin.blocked = true
-            return nano.handle_custom_response(session_data, response)
+            local result = nano.handle_custom_response(session_data, response)
+            nano.cleanup_all()
+            return result
         end
     end
 
@@ -111,6 +161,7 @@ function NanoHandler.header_filter(conf)
     if verdict == nano.AttachmentVerdict.DROP then
         kong.ctx.plugin.blocked = true
         nano.fini_session(session_data)
+        nano.cleanup_all()
         return nano.handle_custom_response(session_data, response)
     end
 
@@ -150,7 +201,10 @@ function NanoHandler.body_filter(conf)
         if verdict == nano.AttachmentVerdict.DROP then
             nano.fini_session(session_data)
             ctx.session_finalized = true
-            return nano.handle_custom_response(session_data, response)
+            local result = nano.handle_custom_response(session_data, response)
+            -- Clean up allocated memory
+            nano.cleanup_all()
+            return result
         end
         return
     end
@@ -160,10 +214,15 @@ function NanoHandler.body_filter(conf)
         if verdict == nano.AttachmentVerdict.DROP then
             nano.fini_session(session_data)
             ctx.session_finalized = true
-            return nano.handle_custom_response(session_data, response)
+            local result = nano.handle_custom_response(session_data, response)
+            -- Clean up allocated memory
+            nano.cleanup_all()
+            return result
         end
 
         nano.fini_session(session_data)
+        -- Clean up allocated memory
+        nano.cleanup_all()
         ctx.session_finalized = true
     end
 end
