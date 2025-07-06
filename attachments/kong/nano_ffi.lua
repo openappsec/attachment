@@ -85,10 +85,10 @@ end
 
 function nano.handle_custom_response(session_data, response)
     local worker_id = ngx.worker.id()
-    local attachment = nano.ensure_attachment()
-
+    local attachment = nano.attachments[worker_id]
+    
     if not attachment then
-        kong.log.err("Cannot handle custom response: Attachment not available for worker ", worker_id, " - failing open")
+        kong.log.warn("Cannot handle custom response: Attachment not available for worker ", worker_id, " - failing open")
         return kong.response.exit(200, "Request allowed due to attachment unavailability")
     end
 
@@ -200,11 +200,9 @@ function nano.init_attachment()
 
         kong.log.err("Worker ", worker_id, " failed to initialize attachment (attempt ", attempt, "/", retries, "): ", err)
 
-        if attempt < retries then
-            local delay = base_delay * (2 ^ (attempt - 1)) + math.random(0, 1000) / 1000
-            kong.log.info("Worker ", worker_id, " retrying attachment initialization in ", delay, " seconds...")
-            ngx.sleep(delay)
-        end
+        local delay = base_delay * (2 ^ (attempt - 1)) + math.random(0, 1000) / 1000
+        kong.log.info("Worker ", worker_id, " retrying attachment initialization in ", delay, " seconds...")
+        ngx.sleep(delay)
     end
 
     if not attachment then
@@ -221,7 +219,7 @@ end
 -- Initialize a session for a given request
 function nano.init_session(session_id)
     local worker_id = ngx.worker.id()
-    local attachment = nano.ensure_attachment()
+    local attachment = nano.attachments[worker_id]
 
     if not attachment then
         kong.log.warn("Cannot initialize session: Attachment not available for worker ", worker_id, " - failing open")
@@ -328,7 +326,7 @@ end
 -- Send data to NanoAttachment
 function nano.send_data(session_id, session_data, meta_data, header_data, contains_body, chunk_type)
     local worker_id = ngx.worker.id()
-    local attachment = nano.ensure_attachment()
+    local attachment = nano.attachments[worker_id]
 
     if not attachment then
         kong.log.warn("Attachment not available for worker ", worker_id, " - failing open")
@@ -350,7 +348,7 @@ end
 
 function nano.send_body(session_id, session_data, body_chunk, chunk_type)
     local worker_id = ngx.worker.id()
-    local attachment = nano.ensure_attachment()
+    local attachment = nano.attachments[worker_id]
 
     if not attachment then
         kong.log.warn("Attachment not available for worker ", worker_id, " - failing open")
@@ -410,7 +408,7 @@ end
 -- Finalize session cleanup
 function nano.fini_session(session_data)
     local worker_id = ngx.worker.id()
-    local attachment = nano.ensure_attachment()
+    local attachment = nano.attachments[worker_id]
 
     if not attachment or not session_data then
         kong.log.warn("Cannot finalize session: Invalid attachment or session_data for worker ", worker_id)
@@ -425,7 +423,7 @@ end
 -- Send response headers for inspection
 function nano.send_response_headers(session_id, session_data, headers, status_code, content_length)
     local worker_id = ngx.worker.id()
-    local attachment = nano.ensure_attachment()
+    local attachment = nano.attachments[worker_id]
 
     if not attachment then
         kong.log.warn("Attachment not available for worker ", worker_id, " - failing open")
@@ -499,7 +497,7 @@ end
 -- End inspection for a session
 function nano.end_inspection(session_id, session_data, chunk_type)
     local worker_id = ngx.worker.id()
-    local attachment = nano.ensure_attachment()
+    local attachment = nano.attachments[worker_id]
 
     if not attachment then
         kong.log.warn("Attachment not available for worker ", worker_id, " - failing open during end_inspection")
@@ -522,22 +520,4 @@ function nano.end_inspection(session_id, session_data, chunk_type)
 end
 
 -- Helper function to ensure attachment is available
-function nano.ensure_attachment()
-    local worker_id = ngx.worker.id()
-    local attachment = nano.attachments[worker_id]
-
-    if not attachment then
-        kong.log.warn("Attachment not found for worker ", worker_id, ", attempting to reinitialize...")
-        if nano.init_attachment() then
-            attachment = nano.attachments[worker_id]
-            kong.log.info("Successfully reinitialized attachment for worker ", worker_id)
-        else
-            kong.log.err("Failed to reinitialize attachment for worker ", worker_id)
-            return nil
-        end
-    end
-
-    return attachment
-end
-
 return nano
