@@ -399,12 +399,11 @@ static int lua_send_body(lua_State *L) {
 
         AttachmentVerdictResponse* res_ptr = malloc(sizeof(AttachmentVerdictResponse));
         *res_ptr = SendDataNanoAttachment(attachment, &attachment_data);
-        
+
         // Push verdict
         lua_pushinteger(L, res_ptr->verdict);
         lua_pushlightuserdata(L, res_ptr);
-        
-        // Push modifications if they exist
+
         if (res_ptr->modifications) {
             lua_pushlightuserdata(L, res_ptr->modifications);
         } else {
@@ -414,27 +413,22 @@ static int lua_send_body(lua_State *L) {
         return 3;
     }
 
-    // Calculate number of chunks (8KB each, like Envoy)
     const size_t CHUNK_SIZE = 8 * 1024;
     size_t num_chunks = ((body_len - 1) / CHUNK_SIZE) + 1;
 
-    // Limit number of chunks like Envoy
     if (num_chunks > 10000) {
         num_chunks = 10000;
     }
 
-    // Create HttpBody structure
     HttpBody http_chunks;
     http_chunks.bodies_count = num_chunks;
 
-    // Allocate memory for chunks array
     http_chunks.data = (nano_str_t*)malloc(num_chunks * sizeof(nano_str_t));
     if (!http_chunks.data) {
         lua_pushstring(L, "Error: Failed to allocate memory for chunks");
         return lua_error(L);
     }
 
-    // Prepare chunks using pointer arithmetic like Envoy
     for (size_t i = 0; i < num_chunks; i++) {
         nano_str_t* chunk_ptr = (nano_str_t*)((char*)http_chunks.data + (i * sizeof(nano_str_t)));
         size_t chunk_start = i * CHUNK_SIZE;
@@ -444,25 +438,20 @@ static int lua_send_body(lua_State *L) {
         chunk_ptr->len = chunk_len;
     }
 
-    // Prepare attachment data
     AttachmentData attachment_data;
     attachment_data.session_id = session_id;
     attachment_data.session_data = session_data;
     attachment_data.chunk_type = chunk_type;
     attachment_data.data = &http_chunks;
 
-    // Send all chunks at once
     AttachmentVerdictResponse* res_ptr = malloc(sizeof(AttachmentVerdictResponse));
     *res_ptr = SendDataNanoAttachment(attachment, &attachment_data);
 
-    // Free allocated memory
     free(http_chunks.data);
 
-    // Push verdict
     lua_pushinteger(L, res_ptr->verdict);
     lua_pushlightuserdata(L, res_ptr);
 
-    // Push modifications if they exist
     if (res_ptr->modifications) {
         lua_pushlightuserdata(L, res_ptr->modifications);
     } else {

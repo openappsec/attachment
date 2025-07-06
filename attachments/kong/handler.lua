@@ -40,10 +40,6 @@ function NanoHandler.access(conf)
     local has_content_length = tonumber(ngx.var.http_content_length) and tonumber(ngx.var.http_content_length) > 0
     local contains_body = has_content_length and 1 or 0
 
-    if has_content_length then
-        kong.log.debug("Request has content-length: ", ngx.var.http_content_length)
-    end
-
     local verdict, response = nano.send_data(session_id, session_data, meta_data, req_headers, contains_body, nano.HttpChunkType.HTTP_REQUEST_FILTER)
     if verdict == nano.AttachmentVerdict.DROP then
         nano.fini_session(session_data)
@@ -85,33 +81,23 @@ function NanoHandler.access(conf)
                     kong.log.debug("Reading request body from file: ", body_file)
                     local file = io.open(body_file, "rb")
                     if file then
-                        local chunk_size = 8192 -- 8KB chunks
-                        local chunks_processed = 0
-                        local total_bytes = 0
+                        -- Read entire body at once
+                        local entire_body = file:read("*all")
+                        file:close()
 
-                        while true do
-                            local chunk = file:read(chunk_size)
-                            if not chunk then break end
-
-                            chunks_processed = chunks_processed + 1
-                            total_bytes = total_bytes + #chunk
-                            kong.log.debug("Processing body chunk ", chunks_processed, " of size ", #chunk)
-
-                            verdict, response = nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_REQUEST_BODY)
+                        if entire_body and #entire_body > 0 then
+                            kong.log.debug("Sending entire body of size ", #entire_body, " bytes to C module")
+                            verdict, response = nano.send_body(session_id, session_data, entire_body, nano.HttpChunkType.HTTP_REQUEST_BODY)
                             if verdict == nano.AttachmentVerdict.DROP then
-                                file:close()
                                 nano.fini_session(session_data)
                                 kong.ctx.plugin.blocked = true
                                 local result = nano.handle_custom_response(session_data, response)
                                 nano.cleanup_all()
                                 return result
                             end
+                        else
+                            kong.log.debug("Empty body file")
                         end
-
-                        file:close()
-                        kong.log.debug("Processed ", chunks_processed, " chunks, total bytes: ", total_bytes)
-                    else
-                        kong.log.err("Failed to open request body file: ", body_file)
                     end
                 else
                     kong.log.warn("Request body expected but no body data or file available")

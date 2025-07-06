@@ -86,7 +86,7 @@ end
 function nano.handle_custom_response(session_data, response)
     local worker_id = ngx.worker.id()
     local attachment = nano.attachments[worker_id]
-    
+
     if not attachment then
         kong.log.warn("Cannot handle custom response: Attachment not available for worker ", worker_id, " - failing open")
         return kong.response.exit(200, "Request allowed due to attachment unavailability")
