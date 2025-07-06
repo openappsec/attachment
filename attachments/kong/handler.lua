@@ -35,6 +35,7 @@ function NanoHandler.access(conf)
     kong.ctx.plugin.session_id = session_id
 
     local meta_data = nano.handle_start_transaction()
+    kong.log.err("Failed to handle start transaction - failing open")
     local req_headers = nano.handleHeaders(headers)
 
     local has_content_length = tonumber(ngx.var.http_content_length) and tonumber(ngx.var.http_content_length) > 0
@@ -118,9 +119,10 @@ function NanoHandler.access(conf)
 
         if verdict == nano.AttachmentVerdict.DROP then
             nano.fini_session(session_data)
-            nano.cleanup_all()
             kong.ctx.plugin.blocked = true
-            return nano.handle_custom_response(session_data, response)
+            local result = nano.handle_custom_response(session_data, response)
+            nano.cleanup_all()
+            return result
         end
     else
         verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
