@@ -189,8 +189,7 @@ end
 function nano.init_attachment()
     local worker_id = ngx.worker.id()
     local attachment, err
-    local retries = 5  -- Increased retries
-    local base_delay = 1  -- Start with 1 second delay
+    local retries = 3  -- Reduced retries for init_worker phase
 
     for attempt = 1, retries do
         attachment, err = nano_attachment.init_nano_attachment(worker_id, nano.num_workers)
@@ -199,20 +198,13 @@ function nano.init_attachment()
         end
 
         kong.log.err("Worker ", worker_id, " failed to initialize attachment (attempt ", attempt, "/", retries, "): ", err)
-
-        local delay = base_delay * (2 ^ (attempt - 1)) + math.random(0, 1000) / 1000
-        kong.log.info("Worker ", worker_id, " retrying attachment initialization in ", delay, " seconds...")
-        ngx.sleep(delay)
     end
 
     if not attachment then
-        kong.log.crit("Worker ", worker_id, " CRITICAL: Failed to initialize attachment after ", retries, " attempts. Worker will operate in fail-open mode.")
-        -- Don't store nil attachment - let other functions handle the missing attachment gracefully
-        return false
+        kong.log.err("Worker ", worker_id, " failed to initialize attachment after ", retries, " attempts. Worker will operate in fail-open mode.")
     else
         nano.attachments[worker_id] = attachment
         kong.log.info("Worker ", worker_id, " successfully initialized nano_attachment.")
-        return true
     end
 end
 
@@ -222,8 +214,14 @@ function nano.init_session(session_id)
     local attachment = nano.attachments[worker_id]
 
     if not attachment then
-        kong.log.warn("Cannot initialize session: Attachment not available for worker ", worker_id, " - failing open")
-        return nil
+        kong.log.warn("Attachment not found for worker ", worker_id, ", attempting to reinitialize...")
+        nano.init_attachment()
+        attachment = nano.attachments[worker_id]
+
+        if not attachment then
+            kong.log.warn("Cannot initialize session: Attachment still not available for worker ", worker_id, " - failing open")
+            return nil
+        end
     end
 
     local session_data, err = nano_attachment.init_session(attachment, session_id)
