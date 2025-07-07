@@ -3,7 +3,7 @@ version = "1.0.0-1"
 
 source = {
   url = "git://github.com/openappsec/attachment.git",
-  tag = "main"
+  branch = "fix-k8s-crash"
 }
 
 description = {
