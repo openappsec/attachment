@@ -23,12 +23,12 @@ build = {
   type = "builtin",
 
   modules = {
-    ["kong.plugins.open-appsec-waf-kong-plugin.handler"] = "attachments/kong/handler.lua",
-    ["kong.plugins.open-appsec-waf-kong-plugin.nano_ffi"] = "attachments/kong/nano_ffi.lua",
-    ["kong.plugins.open-appsec-waf-kong-plugin.schema"] = "attachments/kong/schema.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/handler.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.nano_ffi"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/nano_ffi.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.schema"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/schema.lua",
     ["lua_attachment_wrapper"] = {
       sources = {
-        "attachments/kong/lua_attachment_wrapper.c",
+        "attachments/kong/plugins/open-appsec-waf-kong-plugin/lua_attachment_wrapper.c",
         "attachments/nano_attachment/nano_attachment.c",
         "attachments/nano_attachment/nano_attachment_io.c",
         "attachments/nano_attachment/nano_attachment_metric.c",
