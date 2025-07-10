@@ -254,7 +254,7 @@ function nano.handle_start_transaction()
     local host = full_host:match("([^:]+)")
 
     local method = stream_info.get_method()
-    local uri = stream_info.get_path()
+    local uri = stream_info.get_path_with_query()
     local scheme = stream_info.get_scheme()
     local client_ip = kong.client.get_ip()
     local client_port = kong.client.get_port()
