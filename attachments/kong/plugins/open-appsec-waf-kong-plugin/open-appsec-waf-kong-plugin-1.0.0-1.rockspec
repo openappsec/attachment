@@ -47,7 +47,8 @@ build = {
       },
       incdirs = {
         "core/include/attachments/",
-        "attachments/nano_attachment/"
+        "attachments/nano_attachment/",
+        "external/"
       },
       defines = { "_GNU_SOURCE", "ZLIB_CONST" },
       libraries = { "pthread", "z", "rt", "stdc++" },
