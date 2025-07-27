@@ -22,7 +22,7 @@ RUN curl -fSL https://luarocks.org/releases/luarocks-${LUAROCKS_VER}.tar.gz -o l
     cd .. && rm -rf luarocks-${LUAROCKS_VER}*
 
 # Install the plugin via LuaRocks
-RUN luarocks install https://raw.githubusercontent.com/openappsec/attachment/main/attachments/kong/open-appsec-waf-kong-plugin-1.0.0-1.rockspec --deps-mode=all
+RUN luarocks install https://raw.githubusercontent.com/openappsec/attachment/main/attachments/kong/plugins/open-appsec-waf-kong-plugin/open-appsec-waf-kong-plugin-1.0.0-1.rockspec
 
 USER kong
 
