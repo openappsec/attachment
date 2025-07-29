@@ -3,7 +3,7 @@ FROM kong/kong-gateway
 USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git curl zlib1g-dev ca-certificates && \
+    build-essential git curl zlib1g-dev ca-certificates unzip && \
     rm -rf /var/lib/apt/lists/*
 
 RUN curl -sL https://github.com/USCiLab/cereal/archive/refs/tags/v1.3.2.tar.gz | tar xz && \
