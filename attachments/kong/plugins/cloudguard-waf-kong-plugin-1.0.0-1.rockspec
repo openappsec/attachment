@@ -7,7 +7,7 @@ source = {
 }
 
 description = {
-  summary = "CloudGuard WAF Kong plugin",
+  summary = "CloudGuard WAF Kong plugin ",
   detailed = [[
     This is the CloudGuard WAF plugin for Kong API gateway.
     It integrates advanced security features into Kong.
