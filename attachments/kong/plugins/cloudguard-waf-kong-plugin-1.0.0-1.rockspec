@@ -3,14 +3,14 @@ version = "1.0.0-1"
 
 source = {
   url = "git://github.com/openappsec/attachment.git",
-  tag = "v1.0.0"
+  tag = "main"
 }
 
 description = {
   summary = "CloudGuard WAF Kong plugin",
   detailed = [[
-    This is the CloudGuard WAF plugin for Kong API gateway, built using the open-appsec engine.
-    It integrates advanced security features into Kong using CloudGuard branding while utilizing the open-appsec core.
+    This is the CloudGuard WAF plugin for Kong API gateway.
+    It integrates advanced security features into Kong.
   ]],
   homepage = "https://github.com/openappsec/attachment",
   license = "Apache"
