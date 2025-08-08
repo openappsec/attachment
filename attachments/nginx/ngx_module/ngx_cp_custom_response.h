@@ -81,7 +81,7 @@ ngx_http_cp_file_response_sender(
 ///      - #NGX_OK
 ///      - #NGX_ERROR
 ///
-ngx_int_t ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request);
+ngx_int_t ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request, int is_response_phase);
 
 ///
 /// @brief Modifies headers with the provided modifiers.

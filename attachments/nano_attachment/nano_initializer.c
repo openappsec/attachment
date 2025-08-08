@@ -385,7 +385,7 @@ set_docker_id(NanoAttachment *attachment)
     }
 
     if (!uid_read) {
-        const char *env_var_name = "OPENAPPSEC_UID"; // Replace with your environment variable name
+        const char *env_var_name = "CLOUDGUARD_UID"; // Replace with your environment variable name
         const char *env_value = getenv(env_var_name);
 
         if (env_value) {

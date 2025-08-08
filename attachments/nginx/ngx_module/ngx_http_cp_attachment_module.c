@@ -473,7 +473,7 @@ ngx_cp_attachment_fini_worker(ngx_cycle_t *cycle)
     // only worker number 0 (always exists since it is worker number 1 is allowed to create
     // the single instance of the timer and destroy it)
     if (ngx_worker != 0) return;
-    
+
     reset_attachment_registration();
 
     (void)cycle;

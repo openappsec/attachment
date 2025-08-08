@@ -73,6 +73,7 @@ decompress_body(
 /// @param[in] compression_type Compression type.
 ///      - #GZIP
 ///      - #ZLIB
+///      - #BROTLI
 ///      - #NO_COMPRESSION - Serves as a sanity check in case this function is called
 ///         on a compression type of data that isn't defined and will return NGX_ERROR. 
 /// @param[in] chunk_type Body chunk type:

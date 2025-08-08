@@ -165,6 +165,7 @@ end_req_header_handler(
     return ngx_http_cp_reply_receiver(
         &session_data_p->remaining_messages_to_reply,
         &session_data_p->verdict,
+        &session_data_p->response_data.inspect_all_response_headers,
         session_data_p->session_id,
         request,
         modifications,
@@ -189,7 +190,7 @@ ngx_http_cp_req_header_handler_thread(void *_ctx)
     ngx_uint_t num_messages_sent = 0;
     ngx_int_t send_header_result;
 
-    send_meta_data_result = ngx_http_cp_meta_data_sender(request, session_data_p->session_id, &num_messages_sent);
+    send_meta_data_result = ngx_http_cp_meta_data_sender(request, session_data_p->session_id, &num_messages_sent, &ctx->waf_tag);
     if (send_meta_data_result == inspection_irrelevant) {
         // Ignoring irrelevant requests.
         session_data_p->verdict = TRAFFIC_VERDICT_IRRELEVANT;
@@ -223,8 +224,7 @@ ngx_http_cp_req_header_handler_thread(void *_ctx)
         &(request->headers_in.headers.part),
         REQUEST_HEADER,
         session_data_p->session_id,
-        &num_messages_sent,
-        &ctx->waf_tag
+        &num_messages_sent
     );
     if (send_header_result != NGX_OK) {
         write_dbg(
@@ -281,6 +281,7 @@ ngx_http_cp_req_body_filter_thread(void *_ctx)
     ctx->res = ngx_http_cp_reply_receiver(
         &session_data_p->remaining_messages_to_reply,
         &session_data_p->verdict,
+        &session_data_p->response_data.inspect_all_response_headers,
         session_data_p->session_id,
         request,
         &ctx->modifications,
@@ -322,6 +323,7 @@ ngx_http_cp_req_end_transaction_thread(void *_ctx)
         ctx->res = ngx_http_cp_reply_receiver(
             &session_data_p->remaining_messages_to_reply,
             &session_data_p->verdict,
+            &session_data_p->response_data.inspect_all_response_headers,
             session_data_p->session_id,
             request,
             &ctx->modifications,
@@ -406,35 +408,37 @@ ngx_http_cp_res_header_filter_thread(void *_ctx)
         THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
     }
     session_data_p->response_data.new_compression_type = session_data_p->response_data.original_compression_type;
-
-    // Sends response headers to the nano service.
-    num_messages_sent = 0;
-    send_header_result = ngx_http_cp_header_sender(
-        &request->headers_out.headers.part,
-        RESPONSE_HEADER,
-        session_data_p->session_id,
-        &num_messages_sent,
-        &ctx->waf_tag
-    );
-    if (send_header_result != NGX_OK) {
-        write_dbg(
-            DBG_LEVEL_WARNING,
-            "Failed to send response headers to the nano service. Session ID: %d",
-            session_data_p->session_id
+    
+    if (session_data_p->response_data.inspect_all_response_headers) {
+        // Sends response headers to the nano service.
+        num_messages_sent = 0;
+        send_header_result = ngx_http_cp_header_sender(
+            &request->headers_out.headers.part,
+            RESPONSE_HEADER,
+            session_data_p->session_id,
+            &num_messages_sent
         );
-        handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
-        if (fail_mode_verdict == NGX_OK) {
-            THREAD_CTX_RETURN_NEXT_FILTER();
+        if (send_header_result != NGX_OK) {
+            write_dbg(
+                DBG_LEVEL_WARNING,
+                "Failed to send response headers to the nano service. Session ID: %d",
+                session_data_p->session_id
+            );
+            handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
+            if (fail_mode_verdict == NGX_OK) {
+                THREAD_CTX_RETURN_NEXT_FILTER();
+            }
+            THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
         }
-        THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
-    }
 
-    session_data_p->remaining_messages_to_reply += num_messages_sent;
+        session_data_p->remaining_messages_to_reply += num_messages_sent;
+    }
 
     // Fetch nano services' results.
     ctx->res = ngx_http_cp_reply_receiver(
         &session_data_p->remaining_messages_to_reply,
         &session_data_p->verdict,
+        &session_data_p->response_data.inspect_all_response_headers,
         session_data_p->session_id,
         request,
         &ctx->modifications,
@@ -455,7 +459,13 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
     ngx_uint_t num_messages_sent = 0;
     ngx_int_t is_last_response_part = 0;
 
-    // Send response body data to the nano service.
+    write_dbg(
+        DBG_LEVEL_DEBUG,
+        "Starting response body filter thread for session ID: %d, current verdict: %d",
+        session_data_p->session_id,
+        session_data_p->verdict
+    );
+
     send_body_result = ngx_http_cp_body_sender(
         ctx->chain,
         RESPONSE_BODY,
@@ -464,6 +474,16 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
         &num_messages_sent,
         &ctx->chain
     );
+
+    write_dbg(
+        DBG_LEVEL_DEBUG,
+        "Body sender result: %d, num_messages_sent: %d, is_last_response_part: %d for session ID: %d",
+        send_body_result,
+        num_messages_sent,
+        is_last_response_part,
+        session_data_p->session_id
+    );
+
     if (send_body_result != NGX_OK) {
         write_dbg(
             DBG_LEVEL_WARNING,
@@ -478,9 +498,48 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
     }
     session_data_p->remaining_messages_to_reply += num_messages_sent;
 
+    ctx->res = ngx_http_cp_reply_receiver(
+        &session_data_p->remaining_messages_to_reply,
+        &session_data_p->verdict,
+        &session_data_p->response_data.inspect_all_response_headers,
+        session_data_p->session_id,
+        request,
+        &ctx->modifications,
+        RESPONSE_BODY,
+        session_data_p->processed_res_body_size
+    );
+
+    write_dbg(
+        DBG_LEVEL_DEBUG,
+        "Reply receiver returned: %d, got verdict: %d, remaining messages: %d for session ID: %d",
+        ctx->res,
+        session_data_p->verdict,
+        session_data_p->remaining_messages_to_reply,
+        session_data_p->session_id
+    );
+
+
+    if (session_data_p->verdict == TRAFFIC_VERDICT_WAIT) {
+        if (!ngx_http_cp_hold_verdict(ctx)) {
+            session_data_p->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+            updateMetricField(HOLD_THREAD_TIMEOUT, 1);
+            handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
+            if (fail_mode_verdict == NGX_OK) {
+                THREAD_CTX_RETURN_NEXT_FILTER();
+            }
+            THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
+        }
+    }
+
     num_messages_sent = 0;
     if (is_last_response_part) {
         // Signals the nano service that the transaction reached the end.
+        write_dbg(
+            DBG_LEVEL_DEBUG,
+            "This is the last response part, sending RESPONSE_END signal for session ID: %d",
+            session_data_p->session_id
+        );
+
         if (ngx_http_cp_end_transaction_sender(RESPONSE_END, session_data_p->session_id, &num_messages_sent) != NGX_OK) {
             write_dbg(
                 DBG_LEVEL_WARNING,
@@ -493,19 +552,51 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
             }
             THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
         }
-        session_data_p->remaining_messages_to_reply++;
-    }
 
-    // Fetch nano services' results.
-    ctx->res = ngx_http_cp_reply_receiver(
-        &session_data_p->remaining_messages_to_reply,
-        &session_data_p->verdict,
-        session_data_p->session_id,
-        request,
-        &ctx->modifications,
-        RESPONSE_BODY,
-        session_data_p->processed_res_body_size
-    );
+        if (
+            session_data_p->verdict == TRAFFIC_VERDICT_ACCEPT ||
+            session_data_p->verdict == TRAFFIC_VERDICT_DROP
+        ) {
+            write_dbg(
+                DBG_LEVEL_DEBUG,
+                "Will not wait for verdict after RESPONSE_END as we already have verdict %d for session ID %d",
+                session_data_p->session_id,
+                session_data_p->verdict
+            );
+
+            return NULL;
+        }
+
+        session_data_p->remaining_messages_to_reply += num_messages_sent;
+        ctx->res = ngx_http_cp_reply_receiver(
+            &session_data_p->remaining_messages_to_reply,
+            &session_data_p->verdict,
+            &session_data_p->response_data.inspect_all_response_headers,
+            session_data_p->session_id,
+            request,
+            &ctx->modifications,
+            RESPONSE_END,
+            session_data_p->processed_res_body_size
+        );
+        write_dbg(
+            DBG_LEVEL_DEBUG,
+            "Received verdict %d after RESPONSE_END for session ID %d, will proceed normally",
+            session_data_p->verdict,
+            session_data_p->session_id
+        );
+
+        if (session_data_p->verdict == TRAFFIC_VERDICT_WAIT) {
+            if (!ngx_http_cp_hold_verdict(ctx)) {
+                session_data_p->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+                updateMetricField(HOLD_THREAD_TIMEOUT, 1);
+                handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
+                if (fail_mode_verdict == NGX_OK) {
+                    THREAD_CTX_RETURN_NEXT_FILTER();
+                }
+                THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
+            }
+        }
+    }
 
     return NULL;
 }
@@ -537,6 +628,7 @@ ngx_http_cp_hold_verdict_thread(void *_ctx)
     ctx->res = ngx_http_cp_reply_receiver(
         &session_data_p->remaining_messages_to_reply,
         &session_data_p->verdict,
+        &session_data_p->response_data.inspect_all_response_headers,
         session_data_p->session_id,
         request,
         &ctx->modifications,
