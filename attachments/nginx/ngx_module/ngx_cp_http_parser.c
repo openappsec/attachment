@@ -19,24 +19,31 @@
 
 static const char *gzip_encoding_string = "gzip";
 static const char *zlib_encoding_string = "deflate";
+static const char *brotli_encoding_string = "br";
 static const char *identity_encoding_string = "identity";
 
 ngx_int_t
 parse_content_encoding(CompressionType *response_encoding, const ngx_str_t *content_encoding_header_value)
 {
-    if (ngx_strcmp(content_encoding_header_value->data, gzip_encoding_string) == 0) {
+    if (ngx_strcasecmp(content_encoding_header_value->data, (u_char*)gzip_encoding_string) == 0) {
         /// Sets GZIP encoding.
         *response_encoding = GZIP;
         return NGX_OK;
     }
 
-    if (ngx_strcmp(content_encoding_header_value->data, zlib_encoding_string) == 0) {
+    if (ngx_strcasecmp(content_encoding_header_value->data, (u_char*)zlib_encoding_string) == 0) {
         /// Sets GZIP encoding.
         *response_encoding = ZLIB;
         return NGX_OK;
     }
 
-    if (ngx_strcmp(content_encoding_header_value->data, identity_encoding_string) == 0) {
+    if (ngx_strcasecmp(content_encoding_header_value->data, (u_char*)brotli_encoding_string) == 0) {
+        /// Sets Brotli encoding.
+        *response_encoding = BROTLI;
+        return NGX_OK;
+    }
+
+    if (ngx_strcasecmp(content_encoding_header_value->data, (u_char*)identity_encoding_string) == 0) {
         /// Sets NO_COMPRESSION encoding.
         *response_encoding = NO_COMPRESSION;
         return NGX_OK;

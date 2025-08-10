@@ -78,6 +78,7 @@ init_cp_session_data(ngx_http_request_t *request)
     session_data->response_data.response_data_status = NGX_OK;
     session_data->response_data.original_compressed_body = NULL;
     session_data->response_data.request_pool = NULL;
+    session_data->response_data.inspect_all_response_headers = 1;
     if (!metric_timeout.tv_sec) {
         metric_timeout = get_timeout_val_sec(METRIC_TIMEOUT_VAL);
     }
@@ -86,6 +87,7 @@ init_cp_session_data(ngx_http_request_t *request)
     session_data->res_proccesing_time = 0;
     session_data->processed_req_body_size = 0;
     session_data->processed_res_body_size = 0;
+    session_data->is_res_body_inspected = 0;
 
     ngx_http_set_ctx(request, session_data, ngx_http_cp_attachment_module);
 
@@ -334,7 +336,7 @@ ngx_http_cp_finalize_request_headers_hook(
 
     if (final_res == NGX_HTTP_FORBIDDEN) {
         handle_inspection_success(session_data_p);
-        return ngx_http_cp_finalize_rejected_request(request);
+        return ngx_http_cp_finalize_rejected_request(request, 0);
     }
 
     if (final_res != NGX_OK) {
@@ -715,6 +717,15 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
                 return fail_mode_verdict == NGX_OK ? ngx_http_next_request_body_filter(request, request_body_chain) : NGX_HTTP_FORBIDDEN;
             }
 
+            if (session_data_p->verdict == TRAFFIC_VERDICT_WAIT) {
+                write_dbg(DBG_LEVEL_DEBUG, "spawn ngx_http_cp_hold_verdict");
+                res = ngx_http_cp_hold_verdict(&ctx);
+                if (!res) {
+                    write_dbg(DBG_LEVEL_DEBUG, "ngx_http_cp_hold_verdict failed");
+                    updateMetricField(HOLD_THREAD_TIMEOUT, 1);
+                }
+            }
+
             write_dbg(
                 DBG_LEVEL_DEBUG,
                 "finished ngx_http_cp_req_end_transaction_thread successfully. return=%d next_filter=%d res=%d",
@@ -754,7 +765,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
 
     if (final_res == NGX_HTTP_FORBIDDEN) {
         handle_inspection_success(session_data_p);
-        return ngx_http_cp_finalize_rejected_request(request);
+        return ngx_http_cp_finalize_rejected_request(request, 0);
     }
 
     if (final_res != NGX_OK) {
@@ -799,7 +810,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
 
 ///
 /// @brief Removes the "Server" header from the HTTP response.
-/// 
+///
 /// This function modifies the `headers_out` structure of the given HTTP request
 /// to remove the "Server" header. If the header is already removed, it returns `NGX_OK`.
 /// Otherwise, it allocates a new header entry, sets its key to "Server" and its value to an
@@ -845,7 +856,7 @@ ngx_http_cp_res_header_filter(ngx_http_request_t *request)
     set_current_session_id(0);
 
     session_data_p = recover_cp_session_data(request);
-    
+
     if (remove_res_server_header) remove_server_header(request);
 
     if (session_data_p == NULL) return ngx_http_next_response_header_filter(request);
@@ -934,7 +945,7 @@ ngx_http_cp_res_header_filter(ngx_http_request_t *request)
 
     if (final_res == NGX_HTTP_FORBIDDEN) {
         handle_inspection_success(session_data_p);
-        return ngx_http_cp_finalize_rejected_request(request);
+        return ngx_http_cp_finalize_rejected_request(request, 0);
     }
 
     if (final_res != NGX_OK) {
@@ -961,7 +972,7 @@ ngx_http_cp_res_header_filter(ngx_http_request_t *request)
             return NGX_ERROR;
         }
     }
-    
+
     handle_inspection_success(session_data_p);
     return ngx_http_next_response_header_filter(request);
 }
@@ -1005,23 +1016,48 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
     if (session_data_p->response_data.response_data_status != NGX_OK) {
         write_dbg(DBG_LEVEL_WARNING, "skipping session with corrupted compression");
         updateMetricField(CORRUPTED_ZIP_SKIPPED_SESSION_COUNT, 1);
-        if (session_data_p->verdict == TRAFFIC_VERDICT_DROP) request->keepalive = 0;
+        if (session_data_p->verdict == TRAFFIC_VERDICT_DROP) {
+            request->keepalive = 0;
+        }
+
+        if (session_data_p->verdict == TRAFFIC_VERDICT_DROP && session_data_p->is_res_body_inspected) {
+            write_dbg(
+                DBG_LEVEL_DEBUG,
+                "Session with corrupted compression has DROP verdict, returning HTTP_FORBIDDEN. Session ID: %d",
+                session_data_p->session_id
+            );
+            return NGX_HTTP_FORBIDDEN;
+        }
         return ngx_http_next_response_body_filter(request, body_chain);
     }
 
     if (
         session_data_p->verdict != TRAFFIC_VERDICT_INSPECT &&
+        session_data_p->verdict != TRAFFIC_VERDICT_WAIT &&
         (
             session_data_p->verdict != TRAFFIC_VERDICT_ACCEPT ||
             session_data_p->response_data.new_compression_type == NO_COMPRESSION ||
+            session_data_p->response_data.new_compression_type == BROTLI ||
             session_data_p->response_data.num_body_chunk == 0
         )
     ) {
         write_dbg(DBG_LEVEL_TRACE, "skipping already inspected session");
-        if (session_data_p->verdict == TRAFFIC_VERDICT_DROP) request->keepalive = 0;
+        if (session_data_p->verdict == TRAFFIC_VERDICT_DROP) {
+            request->keepalive = 0;
+        }
+
+        if (session_data_p->verdict == TRAFFIC_VERDICT_DROP && session_data_p->is_res_body_inspected) {
+            write_dbg(
+                DBG_LEVEL_DEBUG,
+                "Session has DROP verdict, returning HTTP_FORBIDDEN instead of streaming. Session ID: %d",
+                session_data_p->session_id
+            );
+            return NGX_HTTP_FORBIDDEN;
+        }
         return ngx_http_next_response_body_filter(request, body_chain);
     }
 
+    session_data_p->is_res_body_inspected = 1;
     session_data_p->response_data.num_body_chunk++;
 
     if (body_chain == NULL) {
@@ -1033,7 +1069,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
        return ngx_http_next_response_body_filter(request, body_chain);
     }
 
-    if (body_chain->buf->pos != NULL && session_data_p->response_data.new_compression_type != NO_COMPRESSION) {
+    if (body_chain->buf->pos != NULL && session_data_p->response_data.new_compression_type != NO_COMPRESSION && session_data_p->response_data.new_compression_type != BROTLI) {
         write_dbg(DBG_LEVEL_TRACE, "Decompressing response body");
         if (init_cp_session_original_body(session_data_p, request->pool) == NGX_OK) {
             if (session_data_p->response_data.decompression_stream == NULL) {
@@ -1208,7 +1244,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
 
     if (final_res == NGX_HTTP_FORBIDDEN) {
         handle_inspection_success(session_data_p);
-        return ngx_http_cp_finalize_rejected_request(request);
+        return ngx_http_cp_finalize_rejected_request(request, 1);
     }
 
     if (final_res != NGX_OK) {
@@ -1224,7 +1260,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
         return NGX_HTTP_FORBIDDEN;
     }
 
-    if (ctx.modifications) {
+    if (ctx.modifications && session_data_p->response_data.new_compression_type != BROTLI) {
         write_dbg(DBG_LEVEL_TRACE, "Handling response body modification");
         if (ngx_http_cp_body_modifier(body_chain, ctx.modifications, request->pool) != NGX_OK) {
             write_dbg(DBG_LEVEL_WARNING, "Failed to modify response body");
@@ -1235,6 +1271,16 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
             }
             return NGX_HTTP_FORBIDDEN;
         }
+    }
+    
+    if (ctx.modifications && session_data_p->response_data.new_compression_type == BROTLI) {
+        ngx_http_cp_modification_list *mod = ctx.modifications;
+        while (mod != NULL) {
+            ngx_http_cp_modification_list *next_mod = mod->next;
+            ngx_pfree(request->pool, mod);
+            mod = next_mod;
+        }
+        ctx.modifications = NULL;
     }
 
     if (
@@ -1249,7 +1295,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
         return ngx_http_next_response_body_filter(request, body_chain);
     }
 
-    if (session_data_p->response_data.new_compression_type != NO_COMPRESSION) {
+    if (session_data_p->response_data.new_compression_type != NO_COMPRESSION && session_data_p->response_data.new_compression_type != BROTLI) {
         if (session_data_p->response_data.compression_stream == NULL) {
             session_data_p->response_data.compression_stream = initCompressionStream();
         }
@@ -1274,6 +1320,24 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
     }
 
     print_buffer_chain(body_chain, "outgoing", 32, DBG_LEVEL_TRACE);
+
+    // Check final verdict before streaming data to client
+    // This prevents malicious data from reaching client when verdict is DROP
+    if (session_data_p->verdict == TRAFFIC_VERDICT_DROP) {
+        write_dbg(
+            DBG_LEVEL_DEBUG,
+            "Final verdict is DROP, blocking stream to client. Session ID: %d",
+            session_data_p->session_id
+        );
+        return NGX_HTTP_FORBIDDEN;
+    }
+
+    write_dbg(
+        DBG_LEVEL_DEBUG,
+        "Final verdict is %d, streaming to client. Session ID: %d",
+        session_data_p->verdict,
+        session_data_p->session_id
+    );
 
     return ngx_http_next_response_body_filter(request, body_chain);
 }

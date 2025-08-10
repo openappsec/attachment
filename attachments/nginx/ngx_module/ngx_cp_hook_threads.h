@@ -47,23 +47,23 @@ struct ngx_http_cp_event_thread_ctx_t
     ngx_str_t waf_tag; ///< WAF tag value for the location block.
 };
 
-/// 
+///
 /// @brief Modifies already_registered value.
 /// already_registered is a value that symbolize a successful registeration of the thread context with the nano service.
 /// @param[in] value set registration with the nano service:
 ///         - #0 Thread is not registered with the nano service.
 ///         - #1 Thread is registered with the nano service.
 /// @returns current registration status.
-/// 
+///
 void set_already_registered(ngx_int_t value);
 
-/// 
+///
 /// @brief Returns already_registered value.
 /// already_registered is a value that symbolize a successful registeration of the thread context with the nano service.
 /// @returns ngx_in_t get registration value with the nano service:
 ///         - #0 Thread is not registered with the nano service.
 ///         - #1 Thread is registered with the nano service.
-/// 
+///
 ngx_int_t get_already_registered(void);
 
 ///
@@ -86,17 +86,17 @@ void reset_registration_timeout(void);
 ///
 ngx_int_t is_registration_timeout_reached(void);
 
-/// 
+///
 /// @brief Initates ngx_http_cp_event_thread_ctx_t struct.
 /// @param[in, out] ctx  struct to initiate.
 /// @param[in] request
 /// @param[in] session_data_p
 /// @param[in] chain
-/// Modifies _ctx res to the following values: 
+/// Modifies _ctx res to the following values:
 ///      - #NGX_OK
 ///      - #NGX_ERROR
 /// @return NULL.
-/// 
+///
 void
 init_thread_ctx(
     struct ngx_http_cp_event_thread_ctx_t *ctx,
@@ -105,102 +105,102 @@ init_thread_ctx(
     ngx_chain_t *chain
 );
 
-/// 
+///
 /// @brief Registers the context against the nano agent.
 /// @note _ctx needs to be properly initialized by init_thread_ctx().
 /// @param[in, out] _ctx is of type ngx_http_cp_event_thread_ctx_t.
-/// Modifies _ctx res to the following values: 
+/// Modifies _ctx res to the following values:
 ///      - #NGX_OK
 ///      - #NGX_ERROR
 /// @return NULL.
-/// 
+///
 void * ngx_http_cp_registration_thread(void *_ctx);
 
-/// 
+///
 /// @brief Sends request headers to the attachment's service.
 /// @details Communicates with the attachment service by sending request headers to the attachment's service
 /// and modifies _ctx by the received response.
 /// @note _ctx needs to be properly initialized by init_thread_ctx().
 /// @param[in, out] _ctx is of type ngx_http_cp_event_thread_ctx_t.
-/// Modifies _ctx res to the following values: 
+/// Modifies _ctx res to the following values:
 ///      - #NGX_OK
 ///      - #NGX_ERROR
 /// @return NULL.
-/// 
+///
 void * ngx_http_cp_req_header_handler_thread(void *_ctx);
 
-/// 
+///
 /// @brief Sends request body to the attachment's service.
 /// @details Communicates with the attachment service by sending request body to the attachment's service
 /// and modifies _ctx by the received response.
 /// @note _ctx needs to be properly initialized by init_thread_ctx() and ngx_chain_t needs of not NULL.
 /// @param[in, out] _ctx is of type ngx_http_cp_event_thread_ctx_t.
-/// Modifies _ctx res to the following values: 
+/// Modifies _ctx res to the following values:
 ///      - #NGX_OK
 ///      - #NGX_ERROR
 /// @return NULL.
-/// 
+///
 void * ngx_http_cp_req_body_filter_thread(void *_ctx);
 
-/// 
+///
 /// @brief Sends end request transmission to the attachment's service.
 /// @details Communicates with the attachment service by sending request body to the attachment's service
 /// and modifies _ctx by the received response.
 /// @note _ctx needs to be properly initialized by init_thread_ctx() and ngx_chain_t needs of not NULL.
 /// @param[in, out] _ctx is of type ngx_http_cp_event_thread_ctx_t.
-/// Modifies _ctx res to the following values: 
+/// Modifies _ctx res to the following values:
 ///      - #NGX_OK
 ///      - #NGX_ERROR
 /// @return NULL.
-/// 
+///
 void * ngx_http_cp_req_end_transaction_thread(void *_ctx);
 
-/// 
+///
 /// @brief Sends response headers to the attachment's service.
 /// @details Communicates with the attachment service by sending response headers to the attachment's service
 /// and modifies _ctx by the received response.
 /// @note _ctx needs to be properly initialized by init_thread_ctx().
 /// @param[in, out] _ctx is of type ngx_http_cp_event_thread_ctx_t.
-/// Modifies _ctx res to the following values: 
+/// Modifies _ctx res to the following values:
 ///      - #NGX_OK
 ///      - #NGX_ERROR
 /// @return NULL.
-/// 
+///
 void * ngx_http_cp_res_header_filter_thread(void *_ctx);
 
-/// 
+///
 /// @brief Sends response body to the attachment's service.
 /// @details Communicates with the attachment service by sending response bodies to the attachment's service
 /// and modifies _ctx by the received response.
 /// @note _ctx needs to be properly initialized by init_thread_ctx() and ngx_chain_t needs to be defined.
 /// @param[in, out] _ctx is of type ngx_http_cp_event_thread_ctx_t.
-/// Modifies _ctx res to the following values: 
+/// Modifies _ctx res to the following values:
 ///      - #NGX_OK
 ///      - #NGX_ERROR
 /// @return NULL.
-/// 
+///
 void * ngx_http_cp_res_body_filter_thread(void *_ctx);
 
-/// 
+///
 /// @brief Sends a request to the attachment's service to update the earlier provided "WAIT" verdict.
 /// @details Communicates with the attachment service by sending a HOLD_DATA request to the attachment's service
 /// and modifies _ctx by the received response.
-/// @note _ctx needs to be properly initialized by init_thread_ctx() and 
+/// @note _ctx needs to be properly initialized by init_thread_ctx() and
 /// be called after another call returned wait verdict.
 /// @param[in, out] _ctx is of type ngx_http_cp_event_thread_ctx_t.
-/// Modifies _ctx res to the following values: 
+/// Modifies _ctx res to the following values:
 ///      - #NGX_OK
 ///      - #NGX_ERROR
 /// Modifies _ctx session data with an updated verdict.
 /// @return NULL.
-/// 
+///
 void * ngx_http_cp_hold_verdict_thread(void *_ctx);
 
-/// 
+///
 /// @brief Check if transaction contains headers.
 /// @param[in] headers ngx_http_headers_in_t struct.
 /// @returns 1 if the transaction contains headers, otherwise 0.
-/// 
+///
 ngx_int_t does_contain_body(ngx_http_headers_in_t *headers);
 
 #endif // __NGX_CP_HOOK_THREADS_H__

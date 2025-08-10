@@ -154,6 +154,47 @@ set_buffer_data(ngx_buf_t *buffer, const ngx_str_t *data)
 }
 
 ///
+/// @brief Removes empty chunks from the specified NGINX chain.
+/// @param[in,out] chain Pointer to the start of the chain to modify.
+/// @param[in] pool NGINX pool used for allocating and freeing chain links.
+/// @returns ngx_int_t
+///      - #NGX_OK
+///      - #NGX_ERROR
+///
+static ngx_int_t
+ngx_chain_remove_empty_chunks(ngx_chain_t **chain, ngx_pool_t *pool)
+{
+    ngx_chain_t *prev = NULL;
+    ngx_chain_t *curr = *chain;
+    size_t chunk_num = 0;
+
+    while (curr != NULL) {
+        size_t size = curr->buf->last - curr->buf->pos;
+        if (size == 0) {
+            write_dbg(DBG_LEVEL_WARNING, "Removing empty chunk from the chain, chunk number: %d", chunk_num);
+            if (prev == NULL) {
+                *chain = curr->next;
+            } else {
+                prev->next = curr->next;
+            }
+            ngx_chain_t *tmp = curr;
+            curr = curr->next;
+            ngx_free_chain(pool, tmp);
+            continue;
+        }
+        prev = curr;
+        curr = curr->next;
+        chunk_num++;
+    }
+
+    if (chunk_num == 0) {
+        write_dbg(DBG_LEVEL_WARNING, "Empty chain after removing empty chunks");
+        return NGX_ERROR;
+    }
+    return NGX_OK;
+}
+
+///
 /// @brief Decompresses or compresses the provided data.
 /// @param[in] should_compress Checks if buffer is used for compression or decompression.
 ///      - #0 - Function will decompression.
@@ -432,11 +473,17 @@ compress_chain(
     ngx_pool_t *pool
 )
 {
+    ngx_int_t compression_result;
     ngx_cp_http_compression_params params;
     params.compression_type = compression_type;
     params.is_last_part = is_last_part;
 
-    return compression_chain_filter(1, compression_stream, NULL, body, original_body_contents, pool, &params);
+    compression_result = compression_chain_filter(1, compression_stream, NULL, body, original_body_contents, pool, &params);
+    // remove empty chunks from the chain to prevent getting nginx alert: "zero size buf in writer" down the line
+    if (compression_result == NGX_OK) {
+        compression_result = ngx_chain_remove_empty_chunks(body, pool);
+    }
+    return compression_result;
 }
 
 ///
@@ -531,6 +578,14 @@ compress_body(
         // This if statement serves a case that somewhere throughout the code the data
         // is set to be compressed but the compression type is wrongly set. 
         write_dbg(DBG_LEVEL_WARNING, "Invalid compression type: NO_COMPRESSION");
+        return NGX_ERROR;
+    }
+
+    if (compression_type == BROTLI) {
+        // Brotli compression is not supported.
+        // This if statement serves a case that the compression type is set to BROTLI
+        // For now, we should not reach inside this function with a compression type of BROTLI.
+        write_dbg(DBG_LEVEL_WARNING, "Brotli compression is not supported");
         return NGX_ERROR;
     }
 

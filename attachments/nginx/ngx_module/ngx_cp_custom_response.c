@@ -205,11 +205,11 @@ ngx_add_event_id_to_header(ngx_http_request_t *request)
 }
 
 ngx_int_t
-ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request)
+ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request, int is_response_phase)
 {
     static u_char text_html[] = {'t', 'e', 'x', 't', '/', 'h', 't', 'm', 'l'};
     static size_t size_of_text_html = sizeof(text_html);
-    ngx_int_t http_res_code, rc;
+    ngx_int_t http_res_code, rc = NGX_OK;
     ngx_table_elt_t *location_header;
     ngx_chain_t out_chain[7]; // http://lxr.nginx.org/source/src/http/ngx_http_special_response.c#0772
     int send_response_custom_body = 1;
@@ -232,6 +232,12 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request)
         request->headers_out.status = NGX_HTTP_CLOSE;
         rc = NGX_HTTP_CLOSE;
 
+        goto CUSTOM_RES_OUT;
+    }
+
+    if (is_response_phase) {
+        write_dbg(DBG_LEVEL_DEBUG, "Closing connection in response phase");
+        rc = NGX_HTTP_CLOSE;
         goto CUSTOM_RES_OUT;
     }
 
@@ -791,7 +797,7 @@ ngx_http_cp_body_modifier(
         if (curr_modification == NULL) return NGX_OK;
         if (curr_modification->modification.orig_buff_index != cur_body_chunk) continue;
 
-        cur_chunk_size = body_chain->buf->last - body_chain->buf->pos;
+        cur_chunk_size = chain_iter->buf->last - chain_iter->buf->pos;
         if (cur_chunk_size == 0) {
             write_dbg(DBG_LEVEL_TRACE, "No need to modify body chunk of size 0. Chunk index: %d", cur_body_chunk);
             continue;

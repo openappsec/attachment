@@ -21,6 +21,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <arpa/inet.h>
+#include <limits.h>
 
 #include "ngx_cp_utils.h"
 #include "ngx_cp_initializer.h"
@@ -452,6 +453,7 @@ ngx_int_t
 ngx_http_cp_reply_receiver(
     ngx_int_t *expected_replies,
     ngx_http_cp_verdict_e *verdict,
+    ngx_int_t *inspect_all_response_headers,
     uint32_t cur_session_id,
     ngx_http_request_t *request,
     ngx_http_cp_modification_list **modification_list,
@@ -492,7 +494,7 @@ ngx_http_cp_reply_receiver(
             return NGX_ERROR;
         }
 
-        if (reply_p->verdict != TRAFFIC_VERDICT_RECONF) {
+        if (reply_p->verdict != TRAFFIC_VERDICT_RECONF && reply_p->verdict != LIMIT_RESPONSE_HEADERS) {
             // Handling reconfiguration verdict.
             if (reply_p->session_id != cur_session_id) {
                 write_dbg(DBG_LEVEL_DEBUG, "Ignoring verdict to an already handled request %d", reply_p->session_id);
@@ -600,6 +602,12 @@ ngx_http_cp_reply_receiver(
                 updateMetricField(HOLD_VERDICTS_COUNT, 1);
                 break;
             }
+
+            case LIMIT_RESPONSE_HEADERS: {
+                write_dbg(DBG_LEVEL_DEBUG, "Verdict ignore response headers received from the nano service");
+                *inspect_all_response_headers = 0;
+                break;
+            }
         }
 
         free_data_from_service();
@@ -662,7 +670,7 @@ convert_sock_addr_to_string(const struct sockaddr *sa, char *ip_addr)
 }
 
 ngx_int_t
-ngx_http_cp_meta_data_sender(ngx_http_request_t *request, uint32_t cur_request_id, ngx_uint_t *num_messages_sent)
+ngx_http_cp_meta_data_sender(ngx_http_request_t *request, uint32_t cur_request_id, ngx_uint_t *num_messages_sent, ngx_str_t *waf_tag)
 {
     char client_ip[INET6_ADDRSTRLEN];
     char listening_ip[INET6_ADDRSTRLEN];
@@ -787,6 +795,16 @@ ngx_http_cp_meta_data_sender(ngx_http_request_t *request, uint32_t cur_request_i
     // Add parsed URI data.
     set_fragment_elem(fragments, fragments_sizes, &parsed_uri.len, sizeof(uint16_t), PARSED_URI_SIZE + 2);
     set_fragment_elem(fragments, fragments_sizes, parsed_uri.data, parsed_uri.len, PARSED_URI_DATA + 2);
+
+    // Add WAF tag data if provided
+    if (waf_tag != NULL && waf_tag->len > 0) {
+        set_fragment_elem(fragments, fragments_sizes, &waf_tag->len, sizeof(uint16_t), WAF_TAG_SIZE + 2);
+        set_fragment_elem(fragments, fragments_sizes, waf_tag->data, waf_tag->len, WAF_TAG_DATA + 2);
+    } else {
+        uint16_t zero = 0;
+        set_fragment_elem(fragments, fragments_sizes, &zero, sizeof(uint16_t), WAF_TAG_SIZE + 2);
+        set_fragment_elem(fragments, fragments_sizes, "", 0, WAF_TAG_DATA + 2);
+    }
 
     // Sends all the data to the nano service.
     res = ngx_http_cp_send_data_to_service(fragments, fragments_sizes, META_DATA_COUNT + 2, cur_request_id, NULL, fail_open_timeout, min_retries_for_verdict);
@@ -1008,8 +1026,7 @@ ngx_http_cp_header_sender(
     ngx_list_part_t *headers_list,
     ngx_http_chunk_type_e header_type,
     uint32_t cur_request_id,
-    ngx_uint_t *num_messages_sent,
-    ngx_str_t *waf_tag
+    ngx_uint_t *num_messages_sent
 )
 {
     ngx_uint_t header_idx = 0;
@@ -1025,7 +1042,6 @@ ngx_http_cp_header_sender(
     const ngx_uint_t max_bulk_size = 10;
     char *fragments[HEADER_DATA_COUNT * max_bulk_size + 4];
     uint16_t fragments_sizes[HEADER_DATA_COUNT * max_bulk_size + 4];
-    ngx_flag_t waf_tag_found = 0;
 
     write_dbg(
         DBG_LEVEL_TRACE,
@@ -1035,38 +1051,6 @@ ngx_http_cp_header_sender(
 
     // Sets fragments identifier to the provided body type.
     set_fragments_identifiers(fragments, fragments_sizes, (uint16_t *)&header_type, &cur_request_id);
-
-    // If waf_tag is provided and valid, check for existing x-waf-tag headers
-    if (waf_tag != NULL && waf_tag->len > 0) {
-        for (headers_iter = headers_list; headers_iter; headers_iter = headers_iter->next) {
-            headers_to_inspect = headers_iter->elts;
-            for (header_idx = 0; header_idx < headers_iter->nelts; ++header_idx) {
-                header = headers_to_inspect + header_idx;
-                if (header->key.len == 9 && ngx_strncasecmp(header->key.data, (u_char *)"x-waf-tag", 9) == 0) {
-                    // Found existing x-waf-tag header, override its value
-                    // header->value = *waf_tag;
-                    waf_tag_found = 1;
-                    write_dbg(DBG_LEVEL_DEBUG, "Overriding existing x-waf-tag header with value: %.*s", waf_tag->len, waf_tag->data);
-                    break;
-                }
-            }
-            if (waf_tag_found) break;
-        }
-
-        // If no existing x-waf-tag header found, add a new one
-        if (!waf_tag_found) {
-            ngx_table_elt_t waf_header;
-            waf_header.hash = 1;
-            ngx_str_set(&waf_header.key, "x-waf-tag");
-            waf_header.value = *waf_tag;
-            waf_header.lowcase_key = NULL;  // Not needed for sending to agent
-
-            add_header_to_bulk(fragments, fragments_sizes, &waf_header, idx_in_bulk);
-            idx_in_bulk++;
-            part_count++;
-            write_dbg(DBG_LEVEL_DEBUG, "Adding new x-waf-tag header with value: %.*s", waf_tag->len, waf_tag->data);
-        }
-    }
 
     for (headers_iter = headers_list;  headers_iter ; headers_iter = headers_iter->next) {
         // Going over the header list.
@@ -1085,16 +1069,7 @@ ngx_http_cp_header_sender(
 
             is_last_part = (headers_iter->next == NULL && header_idx + 1 == headers_iter->nelts) ? 1 : 0;
             // Create a header bulk to send.
-            if (waf_tag_found && header->key.len == 9 && ngx_strncasecmp(header->key.data, (u_char *)"x-waf-tag", 9) == 0) {
-                ngx_table_elt_t waf_header;
-                waf_header.hash = 1;
-                ngx_str_set(&waf_header.key, "x-waf-tag");
-                waf_header.value = *waf_tag;
-                waf_header.lowcase_key = NULL;
-                add_header_to_bulk(fragments, fragments_sizes, &waf_header, idx_in_bulk);
-            } else {
-            add_header_to_bulk(fragments, fragments_sizes, header, idx_in_bulk);
-            }
+                add_header_to_bulk(fragments, fragments_sizes, header, idx_in_bulk);
 
             idx_in_bulk++;
             part_count++;
@@ -1152,16 +1127,20 @@ ngx_http_cp_body_sender(
     ngx_int_t res = NGX_ERROR;
     uint8_t is_last_chunk;
     uint8_t part_count;
+    size_t buf_size;
     ngx_int_t tout_retries = min_retries_for_verdict;
     char *fragments[num_body_chunk_fragments];
     uint16_t fragments_sizes[num_body_chunk_fragments];
     int was_waiting = 0;
-
+    int max_chunks_to_process = (body_type == RESPONSE_BODY) ? 1 : INT_MAX;
+    int chunks_processed = 0;
+    
     write_dbg(
-        DBG_LEVEL_TRACE,
-        "Sending %s body chunk from session id %d for inspection",
+        DBG_LEVEL_DEBUG,
+        "Started %s body sender for session ID %d, max_chunks_to_process: %d",
         body_type == REQUEST_BODY ? "request" : "response",
-        session_data->session_id
+        session_data->session_id,
+        max_chunks_to_process
     );
 
     // Sets fragments identifier to the provided body type.
@@ -1169,13 +1148,24 @@ ngx_http_cp_body_sender(
 
     num_parts_sent = 0;
     part_count = 0;
-    for (chain_iter = input; chain_iter; chain_iter = chain_iter->next) {
+    
+    for (chain_iter = input; chain_iter && chunks_processed < max_chunks_to_process; chain_iter = chain_iter->next) {
         // For each NGINX buffer, fragment the buffer and then send the fragments to the nano service.
         buf = chain_iter->buf;
         is_last_chunk = buf->last_buf ? 1 : 0;
-        write_dbg(DBG_LEVEL_TRACE, "Sending last_buf: %d, part_count: %d", buf->last_buf ? 1: 0, part_count);
+        buf_size = buf->last - buf->pos;
+        
+        write_dbg(
+            DBG_LEVEL_DEBUG,
+            "Processing %s body chunk %d of size: %d, last_chunk: %d for session ID: %d",
+            body_type == REQUEST_BODY ? "request" : "response",
+            part_count,
+            buf_size,
+            is_last_chunk,
+            session_data->session_id
+        );
 
-        if (buf->last - buf->pos > 0 || is_last_chunk) {
+        if (buf_size > 0 || is_last_chunk) {
             // Setting the fragments, including in the case of the last chunk.
             set_fragment_elem(fragments, fragments_sizes, &is_last_chunk, sizeof(is_last_chunk), 2);
             set_fragment_elem(fragments, fragments_sizes, &part_count, sizeof(part_count), 3);
@@ -1191,16 +1181,32 @@ ngx_http_cp_body_sender(
                     tout_retries = max_retries_for_verdict;
             }
             // Sending the data to the nano service.
-            res = ngx_http_cp_send_data_to_service(fragments, fragments_sizes, num_body_chunk_fragments, session_data->session_id,
-                &was_waiting, fail_open_timeout, tout_retries);
+            res = ngx_http_cp_send_data_to_service(
+                fragments, 
+                fragments_sizes, 
+                num_body_chunk_fragments, 
+                session_data->session_id,
+                &was_waiting, 
+                fail_open_timeout, 
+                tout_retries
+            );
 
             if (res != NGX_OK) {
                 // Failed to send the fragments to the nano service.
                 return NGX_ERROR;
             }
 
+            write_dbg(
+                DBG_LEVEL_DEBUG,
+                "Successfully sent %s body chunk %d to service for session ID: %d",
+                body_type == REQUEST_BODY ? "request" : "response",
+                part_count,
+                session_data->session_id
+            );
+            
             num_parts_sent++;
             is_empty_chain = 0;
+            chunks_processed++;
         }
 
         part_count++;
@@ -1213,7 +1219,7 @@ ngx_http_cp_body_sender(
     *is_last_part = is_last_chunk;
     *num_messages_sent = num_parts_sent;
 
-    *next_elem_to_inspect = chain_iter;
+        *next_elem_to_inspect = chain_iter;
 
     return (!is_empty_chain && num_parts_sent == 0) ? NGX_ERROR : NGX_OK;
 }
@@ -1239,3 +1245,4 @@ ngx_http_cp_metric_data_sender()
     reset_metric_data();
     return res;
 }
+

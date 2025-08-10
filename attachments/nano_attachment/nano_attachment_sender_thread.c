@@ -14,7 +14,7 @@ static HttpHeaderData *
 get_http_header(HttpHeaders *http_headers, const char *header_name) {
     size_t i;
     for (i = 0; i < http_headers->headers_count; ++i) {
-        if (strcmp((char*)http_headers->data[i].key.data, header_name) == 0) {
+        if (strcasecmp((char*)http_headers->data[i].key.data, header_name) == 0) {
             return &http_headers->data[i];
         }
     }
@@ -42,11 +42,11 @@ set_response_content_encoding(
         return;
     }
 
-    if (strcmp((char*)content_encoding->value.data, "gzip") == 0) {
+    if (strcasecmp((char*)content_encoding->value.data, "gzip") == 0) {
         session_data_p->response_data.compression_type = GZIP;
-    } else if (strcmp((char*)content_encoding->value.data, "deflate") == 0) {
+    } else if (strcasecmp((char*)content_encoding->value.data, "deflate") == 0) {
         session_data_p->response_data.compression_type = ZLIB;
-    } else if (strcmp((char*)content_encoding->value.data, "identity") == 0) {
+    } else if (strcasecmp((char*)content_encoding->value.data, "identity") == 0) {
         session_data_p->response_data.compression_type = NO_COMPRESSION;
     } else {
         write_dbg(

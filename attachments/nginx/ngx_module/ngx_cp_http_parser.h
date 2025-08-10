@@ -30,6 +30,11 @@ typedef struct {
     ///     - #NGX_ERROR
     ngx_int_t         response_data_status;
 
+    /// This flag determines whether all response headers should be sent to a service for inspection.
+    /// - If set to 1, all response headers will be sent.
+    /// - If set to 0, only the Content-Length, response code, and encoding checks for the response body will be sent.
+    ngx_int_t         inspect_all_response_headers;
+
     /// Original compression type, can hold the following values:
     /// - #GZIP
     /// - #ZLIB
@@ -58,6 +63,7 @@ typedef struct {
 /// @param[in, out] response_encoding Returns value of one of the supported encoding:
 ///     - #GZIP
 ///     - #ZLIB
+///     - #BROTLI
 ///     - #NO_COMPRESSION
 /// @param[in, out] content_encoding_header_value Encoded value.
 /// @return ngx_int_t
@@ -75,6 +81,7 @@ parse_content_encoding(
 /// @param[in, out] content_encoding Returns variable of one of the supported encoding:
 ///     - #GZIP
 ///     - #ZLIB
+///     - #BROTLI
 ///     - #NO_COMPRESSION
 /// @param[in, out] content_encoding_header NGINX table Encoding header.
 /// @return ngx_int_t

@@ -45,6 +45,7 @@ typedef struct ngx_http_cp_session_data {
     double                 res_proccesing_time; ///< Holds session's response processing time.
     uint64_t               processed_req_body_size; ///< Holds session's request body's size.
     uint64_t               processed_res_body_size; ///< Holds session's response body's size'.
+    ngx_int_t              is_res_body_inspected; ///< Holds if the response body was inspected
 } ngx_http_cp_session_data;
 
 ///
