@@ -184,7 +184,6 @@ function nano.init_attachment()
     for attempt = 1, retries do
         attachment, err = nano_attachment.init_nano_attachment(worker_id, nano.num_workers)
         if attachment then
-            kong.log.info("Worker ", worker_id, " successfully initialized attachment on attempt ", attempt)
             break
         end
 
@@ -277,11 +276,19 @@ function nano.handleHeaders(headers)
             goto continue
         end
 
-        -- Convert ":authority" to "Host"
         if key == ":authority" then key = "Host" end
 
-        -- Store header data in C memory
-        nano_attachment.setHeaderElement(header_data, index, key, value)
+        -- Handle multiple header values (Kong represents them as tables)
+        local header_value = value
+        if type(value) == "table" then
+            kong.log.debug("Header '", key, "' has multiple values: ", table.concat(value, ", "))
+            header_value = table.concat(value, ", ")
+        elseif type(value) ~= "string" then
+            kong.log.warn("Header '", key, "' has unexpected type: ", type(value), " - converting to string")
+            header_value = tostring(value)
+        end
+
+        nano_attachment.setHeaderElement(header_data, index, key, header_value)
         index = index + 1
 
         ::continue::
