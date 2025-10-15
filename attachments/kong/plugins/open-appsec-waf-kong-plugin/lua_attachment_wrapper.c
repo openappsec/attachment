@@ -8,7 +8,6 @@
 
 #define MAX_HEADERS 10000
 
-// Initialize NanoAttachment for worker
 static int lua_init_nano_attachment(lua_State *L) {
     int worker_id = luaL_checkinteger(L, 1);
     int num_workers = luaL_checkinteger(L, 2);
@@ -70,13 +69,20 @@ static int lua_get_block_page(lua_State *L) {
     }
 
     int offset = 0;
-    memcpy(result + offset, page.title_prefix.data, page.title_prefix.len); offset += page.title_prefix.len;
-    memcpy(result + offset, page.title.data, page.title.len); offset += page.title.len;
-    memcpy(result + offset, page.body_prefix.data, page.body_prefix.len); offset += page.body_prefix.len;
-    memcpy(result + offset, page.body.data, page.body.len); offset += page.body.len;
-    memcpy(result + offset, page.uuid_prefix.data, page.uuid_prefix.len); offset += page.uuid_prefix.len;
-    memcpy(result + offset, page.uuid.data, page.uuid.len); offset += page.uuid.len;
-    memcpy(result + offset, page.uuid_suffix.data, page.uuid_suffix.len); offset += page.uuid_suffix.len;
+    memcpy(result + offset, page.title_prefix.data, page.title_prefix.len);
+    offset += page.title_prefix.len;
+    memcpy(result + offset, page.title.data, page.title.len);
+    offset += page.title.len;
+    memcpy(result + offset, page.body_prefix.data, page.body_prefix.len);
+    offset += page.body_prefix.len;
+    memcpy(result + offset, page.body.data, page.body.len);
+    offset += page.body.len;
+    memcpy(result + offset, page.uuid_prefix.data, page.uuid_prefix.len);
+    offset += page.uuid_prefix.len;
+    memcpy(result + offset, page.uuid.data, page.uuid.len);
+    offset += page.uuid.len;
+    memcpy(result + offset, page.uuid_suffix.data, page.uuid_suffix.len);
+    offset += page.uuid_suffix.len;
     result[size] = '\0';
 
     lua_pushlstring(L, result, size);
@@ -98,7 +104,6 @@ static int lua_get_redirect_page(lua_State *L) {
     return 1;
 }
 
-// Free HttpMetaData memory
 static int lua_free_http_metadata(lua_State *L) {
     HttpMetaData *metadata = (HttpMetaData *)lua_touserdata(L, 1);
     if (!metadata) return 0;
@@ -117,7 +122,6 @@ static int lua_free_http_metadata(lua_State *L) {
 }
 
 
-// Allocate memory for nano_str_t (long-lived, must be freed later)
 static int lua_createNanoStrAlloc(lua_State *L) {
     const char* str = luaL_checkstring(L, 1);
     if (!str) {
@@ -131,11 +135,11 @@ static int lua_createNanoStrAlloc(lua_State *L) {
         lua_pushnil(L);
         lua_pushstring(L, "Failed to allocate memory for string");
         return 2;
-}
+    }
 
     nano_str_t* nanoStr = (nano_str_t*)malloc(sizeof(nano_str_t));
     if (!nanoStr) {
-        free(c_str); // Clean up already allocated string
+        free(c_str);
         lua_pushnil(L);
         lua_pushstring(L, "Failed to allocate memory for nano_str_t");
         return 2;
@@ -148,7 +152,6 @@ static int lua_createNanoStrAlloc(lua_State *L) {
     return 1;
 }
 
-// Free nano_str_t (Memory cleanup)
 static int lua_freeNanoStr(lua_State *L) {
     nano_str_t* nanoStr = (nano_str_t*)lua_touserdata(L, 1);
     if (nanoStr) {
@@ -158,8 +161,6 @@ static int lua_freeNanoStr(lua_State *L) {
     return 0;
 }
 
-// Allocate memory for HttpHeaders
-// Allocate memory for HttpHeaders
 static int lua_allocHttpHeaders(lua_State *L) {
     size_t max_headers = 10000;
 
@@ -180,7 +181,6 @@ static int lua_allocHttpHeaders(lua_State *L) {
     return 1;
 }
 
-// Free HttpHeaders memory
 static int lua_freeHttpHeaders(lua_State *L) {
     HttpHeaders* headers = (HttpHeaders*)lua_touserdata(L, 1);
     if (headers) {
@@ -190,7 +190,6 @@ static int lua_freeHttpHeaders(lua_State *L) {
     return 0;
 }
 
-// Set the headers_count in HttpHeaders
 static int lua_setHeaderCount(lua_State *L) {
     HttpHeaders* headers = (HttpHeaders*)lua_touserdata(L, 1);
     int count = luaL_checkinteger(L, 2);
@@ -203,7 +202,6 @@ static int lua_setHeaderCount(lua_State *L) {
     return 0;
 }
 
-// Helper function to convert Lua string to nano_str_t
 static void lua_fill_nano_str(lua_State *L, int index, nano_str_t *nano_str) {
     size_t len;
     const char *str = luaL_checklstring(L, index, &len);
@@ -214,20 +212,18 @@ static void lua_fill_nano_str(lua_State *L, int index, nano_str_t *nano_str) {
         return;
     }
 
-    // Allocate memory + 1 for null termination
     nano_str->data = (char *)malloc(len + 1);
 
-    if (!nano_str->data) {  // Check if allocation failed
+    if (!nano_str->data) {
         nano_str->len = 0;
         return;
     }
 
-    memcpy(nano_str->data, str, len);  // Copy exact `len` bytes
-    nano_str->data[len] = '\0';  // Manually null-terminate
+    memcpy(nano_str->data, str, len);
+    nano_str->data[len] = '\0';
     nano_str->len = len;
 }
 
-// Set a header element in HttpHeaderData
 static int lua_setHeaderElement(lua_State *L) {
     HttpHeaders *headers = (HttpHeaders *)lua_touserdata(L, 1);
     int index = luaL_checkinteger(L, 2);
@@ -237,7 +233,6 @@ static int lua_setHeaderElement(lua_State *L) {
         return 1;
     }
 
-    // Safely allocate and set header key/value
     lua_fill_nano_str(L, 3, &headers->data[index].key);
     lua_fill_nano_str(L, 4, &headers->data[index].value);
 
@@ -245,7 +240,6 @@ static int lua_setHeaderElement(lua_State *L) {
     return 1;
 }
 
-// Initialize session
 static int lua_init_session(lua_State *L) {
     NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
     SessionID session_id = luaL_checkinteger(L, 2);
@@ -267,7 +261,6 @@ static int lua_init_session(lua_State *L) {
     return 1;
 }
 
-// Finalize session
 static int lua_fini_session(lua_State *L) {
     NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
     HttpSessionData* session_data = lua_touserdata(L, 2);
@@ -283,7 +276,6 @@ static int lua_fini_session(lua_State *L) {
     return 1;
 }
 
-// Check if session is finalized
 static int lua_is_session_finalized(lua_State *L) {
     NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
     HttpSessionData* session_data = (HttpSessionData*) lua_touserdata(L, 2);
@@ -298,7 +290,6 @@ static int lua_is_session_finalized(lua_State *L) {
     return 1;
 }
 
-// Function to extract request metadata and create HttpMetaData struct
 static int lua_create_http_metadata(lua_State *L) {
     HttpMetaData *metadata = (HttpMetaData *)malloc(sizeof(HttpMetaData));
     if (!metadata) {
@@ -316,41 +307,33 @@ static int lua_create_http_metadata(lua_State *L) {
     lua_fill_nano_str(L, 9, &metadata->parsed_host);
     lua_fill_nano_str(L, 10, &metadata->parsed_uri);
 
-    // Store pointer in Lua
     lua_pushlightuserdata(L, metadata);
-    return 1;  // Return userdata
+    return 1;
 }
 
-// Send data to NanoAttachment
 static int lua_send_data(lua_State *L) {
-    // Retrieve function arguments from Lua
     NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
     SessionID session_id = luaL_checkinteger(L, 2);
     HttpSessionData *session_data = (HttpSessionData*) lua_touserdata(L, 3);
     HttpChunkType chunk_type = luaL_checkinteger(L, 4);
     HttpMetaData* meta_data = (HttpMetaData*) lua_touserdata(L, 5);
     HttpHeaders* req_headers = (HttpHeaders*) lua_touserdata(L, 6);
-    int contains_body = luaL_checkinteger(L, 7);  // Convert Lua boolean to C int
-    //int contains_body = 0;
+    int contains_body = luaL_checkinteger(L, 7);
 
-    // Validate inputs
     if (!attachment || !session_data || !meta_data || !req_headers) {
         lua_pushstring(L, "Error: received NULL data in lua_send_data");
         return lua_error(L);
     }
 
-    // Allocate memory for HttpRequestFilterData
     HttpRequestFilterData *filter_data = (HttpRequestFilterData *)malloc(sizeof(HttpRequestFilterData));
     if (!filter_data) {
         return luaL_error(L, "Memory allocation failed for HttpRequestFilterData");
     }
 
-    // Populate HttpRequestFilterData struct
     filter_data->meta_data = meta_data;
     filter_data->req_headers = req_headers;
     filter_data->contains_body = contains_body;
 
-    // Create attachment data
     AttachmentData attachment_data;
     attachment_data.session_id = session_id;
     attachment_data.session_data = session_data;
@@ -360,7 +343,6 @@ static int lua_send_data(lua_State *L) {
     AttachmentVerdictResponse* res_ptr = malloc(sizeof(AttachmentVerdictResponse));
     *res_ptr = SendDataNanoAttachment(attachment, &attachment_data);
 
-    // Free allocated memory
     free(filter_data);
 
     lua_pushinteger(L, res_ptr->verdict);
@@ -381,7 +363,6 @@ static int lua_send_body(lua_State *L) {
         return lua_error(L);
     }
 
-    // For small bodies, send as a single chunk
     if (body_len <= 8 * 1024) {
         HttpBody http_chunks;
         http_chunks.bodies_count = 1;
@@ -400,7 +381,6 @@ static int lua_send_body(lua_State *L) {
         AttachmentVerdictResponse* res_ptr = malloc(sizeof(AttachmentVerdictResponse));
         *res_ptr = SendDataNanoAttachment(attachment, &attachment_data);
 
-        // Push verdict
         lua_pushinteger(L, res_ptr->verdict);
         lua_pushlightuserdata(L, res_ptr);
 
@@ -478,7 +458,6 @@ static int lua_end_inspection(lua_State *L) {
     attachment_data.chunk_type = chunk_type;
     attachment_data.data = NULL;
 
-    // Send NULL to indicate end of data
     AttachmentVerdictResponse* res_ptr = malloc(sizeof(AttachmentVerdictResponse));
     *res_ptr = SendDataNanoAttachment(attachment, &attachment_data);
 
@@ -488,7 +467,6 @@ static int lua_end_inspection(lua_State *L) {
     return 2;
 }
 
-// Send response headers to NanoAttachment
 static int lua_send_response_headers(lua_State *L) {
     NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
     SessionID session_id = luaL_checkinteger(L, 2);
@@ -502,7 +480,6 @@ static int lua_send_response_headers(lua_State *L) {
         return lua_error(L);
     }
 
-    // Create ResHttpHeaders structure exactly as in filter.go
     ResHttpHeaders res_headers;
     res_headers.headers = headers;
     res_headers.response_code = status_code;
@@ -521,18 +498,15 @@ static int lua_send_response_headers(lua_State *L) {
     return 2;
 }
 
-// Free verdict response memory
 static int lua_free_verdict_response(lua_State *L) {
     AttachmentVerdictResponse *response = (AttachmentVerdictResponse *)lua_touserdata(L, 1);
     if (!response) return 0;
 
-    // Free the AttachmentVerdictResponse structure
     free(response);
 
     return 0;
 }
 
-// Register functions in Lua
 static const struct luaL_Reg nano_attachment_lib[] = {
     {"init_nano_attachment", lua_init_nano_attachment},
     {"get_web_response_type", lua_get_web_response_type},
@@ -558,7 +532,6 @@ static const struct luaL_Reg nano_attachment_lib[] = {
     {NULL, NULL}
 };
 
-// Load library
 int luaopen_lua_attachment_wrapper(lua_State *L) {
     luaL_newlib(L, nano_attachment_lib);
     return 1;
