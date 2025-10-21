@@ -4,16 +4,16 @@ local kong = kong
 local nano = {}
 
 nano.session_counter = 0
-nano.attachments = {} -- Store attachments per worker
-nano.num_workers = ngx.worker.count() or 1 -- Detect number of workers
+nano.attachments = {}
+nano.num_workers = ngx.worker.count() or 1
 nano.allocated_strings = {}
 nano.allocate_headers = {}
-nano.allocated_metadata = {} -- Track metadata allocations
-nano.allocated_responses = {} -- Track response allocations
+nano.allocated_metadata = {}
+nano.allocated_responses = {}
 nano.AttachmentVerdict = {
     INSPECT = 0,
     ACCEPT = 1,
-    DROP = 2,     -- Matches `ATTACHMENT_VERDICT_DROP`
+    DROP = 2,
     INJECT = 3
 }
 nano.HttpChunkType = {
@@ -63,8 +63,8 @@ typedef struct __attribute__((__packed__)) HttpInjectData {
 } HttpInjectData;
 
 typedef struct NanoHttpModificationList {
-    struct NanoHttpModificationList *next; ///< Next node.
-    HttpInjectData modification; ///< Modification data.
+    struct NanoHttpModificationList *next;
+    HttpInjectData modification;
     char *modification_buffer;
 } NanoHttpModificationList;
 ]]
@@ -79,7 +79,6 @@ local NanoHttpModificationListPtr = ffi.typeof("NanoHttpModificationList*")
 function nano.generate_session_id()
     nano.session_counter = nano.session_counter + 1
     local worker_id = ngx.worker.id()
-    -- Compose session_id as "<worker_id><counter>", e.g. "20001"
     return tonumber(string.format("%d%05d", worker_id, nano.session_counter))
 end
 
@@ -96,7 +95,6 @@ function nano.handle_custom_response(session_data, response)
 
     if response_type == nano.WebResponseType.RESPONSE_CODE_ONLY then
         local code = nano_attachment.get_response_code(response)
-        -- Validate HTTP status code
         if not code or code < 100 or code > 599 then
             kong.log.warn("Invalid response code received: ", code, " - using 403 instead")
             code = 403
@@ -115,8 +113,7 @@ function nano.handle_custom_response(session_data, response)
         kong.log.err("Failed to retrieve custom block page for session ", session_data)
         return kong.response.exit(500, { message = "Internal Server Error" })
     end
-    local code = nano_attachment.get_response_code(response) -- Get the intended status code
-    -- Validate HTTP status code
+    local code = nano_attachment.get_response_code(response)
     if not code or code < 100 or code > 599 then
         kong.log.warn("Invalid response code received: ", code, " - using 403 instead")
         code = 403
@@ -128,40 +125,36 @@ end
 
 
 
--- Allocates memory (must be freed later)
 function nano.create_nano_str_alloc(str)
     if not str then return nil end
 
     local nano_str = nano_attachment.createNanoStrAlloc(str)
-    table.insert(nano.allocated_strings, nano_str) -- Track allocation
+    table.insert(nano.allocated_strings, nano_str)
     return nano_str
 end
 
--- Free nano_str_t to prevent memory leaks
 function nano.free_nano_str(nano_str)
     if nano_str then
         nano_attachment.freeNanoStr(nano_str)
     end
 end
 
--- Free all allocated nano_str_t to prevent memory leaks
 function nano.free_all_nano_str()
     for _, nano_str in ipairs(nano.allocated_strings) do
-        nano_attachment.freeNanoStr(nano_str) -- Free memory in C
+        nano_attachment.freeNanoStr(nano_str)
     end
 
-    nano.allocated_strings = {} -- Reset the list
+    nano.allocated_strings = {}
 end
 
 function nano.free_http_headers(header_data)
     for _, nano_header in ipairs(nano.allocate_headers) do
-        nano_attachment.freeHttpHeaders(nano_header) -- Free memory in C
+        nano_attachment.freeHttpHeaders(nano_header)
     end
 
-    nano.allocate_headers = {} -- Reset the list
+    nano.allocate_headers = {}
 end
 
--- Free all allocated metadata
 function nano.free_all_metadata()
     for _, metadata in ipairs(nano.allocated_metadata) do
         nano_attachment.free_http_metadata(metadata)
@@ -169,7 +162,6 @@ function nano.free_all_metadata()
     nano.allocated_metadata = {}
 end
 
--- Free all allocated responses
 function nano.free_all_responses()
     for _, response in ipairs(nano.allocated_responses) do
         nano_attachment.free_verdict_response(response)
@@ -177,7 +169,6 @@ function nano.free_all_responses()
     nano.allocated_responses = {}
 end
 
--- Free all allocations (call this on cleanup)
 function nano.cleanup_all()
     nano.free_all_nano_str()
     nano.free_all_metadata()
@@ -185,7 +176,6 @@ function nano.cleanup_all()
     nano.free_http_headers()
 end
 
--- Initialize worker attachment
 function nano.init_attachment()
     local worker_id = ngx.worker.id()
     local attachment, err
@@ -205,10 +195,10 @@ function nano.init_attachment()
     else
         nano.attachments[worker_id] = attachment
         kong.log.info("Worker ", worker_id, " successfully initialized nano_attachment.")
+        return true
     end
 end
 
--- Initialize a session for a given request
 function nano.init_session(session_id)
     local worker_id = ngx.worker.id()
     local attachment = nano.attachments[worker_id]
@@ -233,7 +223,6 @@ function nano.init_session(session_id)
     return session_data
 end
 
--- Check if session is finalized
 function nano.is_session_finalized(session_data)
     local worker_id = ngx.worker.id()
     local attachment = nano.attachments[worker_id]
@@ -246,7 +235,6 @@ function nano.is_session_finalized(session_data)
     return nano_attachment.is_session_finalized(attachment, session_data)
 end
 
--- Extract metadata for request
 function nano.handle_start_transaction()
     local stream_info = kong.request
 
@@ -274,42 +262,43 @@ function nano.handle_start_transaction()
     return metadata
 end
 
--- Handle request headers and convert them to nano_str_t
 function nano.handleHeaders(headers)
-    local envoy_headers_prefix = "x-envoy"
-
-    -- Allocate memory for headers in C
     local header_data = nano_attachment.allocHttpHeaders()
-    table.insert(nano.allocate_headers, header_data) -- Track allocation
+    table.insert(nano.allocate_headers, header_data)
     local index = 0
 
     for key, value in pairs(headers) do
         if index > 10000 then break end
 
-        -- Filter out unwanted headers
-        if key:find("^" .. envoy_headers_prefix) or key == "x-request-id" or
+        if key == "x-request-id" or
            key == ":method" or key == ":path" or key == ":scheme" or
            key == "x-forwarded-proto" then
             goto continue
         end
 
-        -- Convert ":authority" to "Host"
         if key == ":authority" then key = "Host" end
 
-        -- Store header data in C memory
-        nano_attachment.setHeaderElement(header_data, index, key, value)
+        -- Handle multiple header values (Kong represents them as tables)
+        local header_value = value
+        if type(value) == "table" then
+            kong.log.debug("Header '", key, "' has multiple values: ", table.concat(value, ", "))
+            header_value = table.concat(value, ", ")
+        elseif type(value) ~= "string" then
+            kong.log.warn("Header '", key, "' has unexpected type: ", type(value), " - converting to string")
+            header_value = tostring(value)
+        end
+
+        nano_attachment.setHeaderElement(header_data, index, key, header_value)
         index = index + 1
 
         ::continue::
     end
 
-    -- Store the count
     nano_attachment.setHeaderCount(header_data, index)
 
     return header_data
 end
 
--- Send data to NanoAttachment
 function nano.send_data(session_id, session_data, meta_data, header_data, contains_body, chunk_type)
     local worker_id = ngx.worker.id()
     local attachment = nano.attachments[worker_id]
@@ -319,12 +308,11 @@ function nano.send_data(session_id, session_data, meta_data, header_data, contai
         return nano.AttachmentVerdict.INSPECT
     end
 
-    contains_body = tonumber(contains_body) or 0  -- Ensure it's a number
-    contains_body = (contains_body > 0) and 1 or 0  -- Force strict 0 or 1
+    contains_body = tonumber(contains_body) or 0
+    contains_body = (contains_body > 0) and 1 or 0
 
     local verdict, response = nano_attachment.send_data(attachment, session_id, session_data, chunk_type, meta_data, header_data, contains_body)
 
-    -- Track response for cleanup
     if response then
         table.insert(nano.allocated_responses, response)
     end
@@ -341,10 +329,8 @@ function nano.send_body(session_id, session_data, body_chunk, chunk_type)
         return nano.AttachmentVerdict.INSPECT
     end
 
-    -- Send the body chunk directly as a string
     local verdict, response, modifications = nano_attachment.send_body(attachment, session_id, session_data, body_chunk, chunk_type)
 
-    -- Track response for cleanup
     if response then
         table.insert(nano.allocated_responses, response)
     end
@@ -352,7 +338,6 @@ function nano.send_body(session_id, session_data, body_chunk, chunk_type)
     return verdict, response, modifications
 end
 
--- Function to inject content into a string at a specific position
 function nano.inject_at_position(buffer, injection, pos)
     if pos < 0 or pos > #buffer then
         kong.log.err("Invalid injection position: ", pos, ", buffer length: ", #buffer)
@@ -361,12 +346,10 @@ function nano.inject_at_position(buffer, injection, pos)
     return buffer:sub(1, pos) .. injection .. buffer:sub(pos + 1)
 end
 
--- Function to handle body modifications
 function nano.handle_body_modifications(body, modifications, body_buffer_chunk)
     if modifications == nil then
         return body
     end
-    -- cast the userdata to a pointer
     local curr_modification = ffi.cast(NanoHttpModificationListPtr, modifications)
 
     while curr_modification ~= nil do
@@ -385,13 +368,11 @@ function nano.handle_body_modifications(body, modifications, body_buffer_chunk)
     return body
 end
 
--- Add a new function for handling response bodies
 function nano.send_response_body(session_id, session_data, body_chunk)
     local verdict, response, modifications = nano.send_body(session_id, session_data, body_chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
     return verdict, response, modifications
 end
 
--- Finalize session cleanup
 function nano.fini_session(session_data)
     local worker_id = ngx.worker.id()
     local attachment = nano.attachments[worker_id]
@@ -406,7 +387,6 @@ function nano.fini_session(session_data)
     return true
 end
 
--- Send response headers for inspection
 function nano.send_response_headers(session_id, session_data, headers, status_code, content_length)
     local worker_id = ngx.worker.id()
     local attachment = nano.attachments[worker_id]
@@ -425,7 +405,6 @@ function nano.send_response_headers(session_id, session_data, headers, status_co
         content_length
     )
 
-    -- Track response for cleanup
     if response then
         table.insert(nano.allocated_responses, response)
     end
@@ -433,7 +412,6 @@ function nano.send_response_headers(session_id, session_data, headers, status_co
     return verdict, response
 end
 
--- Function to handle header modifications
 function nano.handle_header_modifications(headers, modifications)
     if not modifications then
         return headers
@@ -469,7 +447,7 @@ function nano.handle_header_modifications(headers, modifications)
                     kong.log.debug("Injecting into header: ", header_name)
                     modified_headers[header_name] = nano.inject_at_position(header_value, value, mod.injection_pos)
                 end
-            elseif type == 2 then -- REPLACE
+            elseif type == 2 then 
                 kong.log.debug("Replacing header: ", key)
                 modified_headers[key] = value
             end
@@ -480,7 +458,6 @@ function nano.handle_header_modifications(headers, modifications)
     return modified_headers
 end
 
--- End inspection for a session
 function nano.end_inspection(session_id, session_data, chunk_type)
     local worker_id = ngx.worker.id()
     local attachment = nano.attachments[worker_id]
@@ -497,7 +474,6 @@ function nano.end_inspection(session_id, session_data, chunk_type)
 
     local verdict, response = nano_attachment.end_inspection(attachment, session_id, session_data, chunk_type)
 
-    -- Track response for cleanup if allocated
     if response then
         table.insert(nano.allocated_responses, response)
     end
@@ -505,5 +481,4 @@ function nano.end_inspection(session_id, session_data, chunk_type)
     return verdict, response
 end
 
--- Helper function to ensure attachment is available
 return nano

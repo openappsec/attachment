@@ -7,9 +7,8 @@ NanoHandler.PRIORITY = 3000
 NanoHandler.VERSION = "1.0.0"
 
 NanoHandler.sessions = {}
-NanoHandler.processed_requests = {} -- Track processed requests
+NanoHandler.processed_requests = {}
 
--- **Handles worker initialization**
 function NanoHandler.init_worker()
     nano.init_attachment()
 end
@@ -35,7 +34,11 @@ function NanoHandler.access(conf)
     kong.ctx.plugin.session_id = session_id
 
     local meta_data = nano.handle_start_transaction()
+    if not meta_data then
     kong.log.err("Failed to handle start transaction - failing open")
+        return
+    end
+    
     local req_headers = nano.handleHeaders(headers)
 
     local has_content_length = tonumber(ngx.var.http_content_length) and tonumber(ngx.var.http_content_length) > 0
@@ -62,10 +65,8 @@ function NanoHandler.access(conf)
                 return result
             end
         else
-            -- Body might be buffered to file, try to read it using nginx variables
             kong.log.debug("Request body not in memory, attempting to read from buffer/file")
 
-            -- Try to read the request body using nginx.var
             local body_data = ngx.var.request_body
             if body_data and #body_data > 0 then
                 kong.log.debug("Found request body in nginx var, size: ", #body_data)
@@ -76,13 +77,11 @@ function NanoHandler.access(conf)
                     return nano.handle_custom_response(session_data, response)
                 end
             else
-                -- Try to read from the temporary file if available
                 local body_file = ngx.var.request_body_file
                 if body_file then
                     kong.log.debug("Reading request body from file: ", body_file)
                     local file = io.open(body_file, "rb")
                     if file then
-                        -- Read entire body at once
                         local entire_body = file:read("*all")
                         file:close()
 
