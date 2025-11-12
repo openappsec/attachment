@@ -182,14 +182,12 @@ function NanoHandler.body_filter(conf)
 
     local body = kong.response.get_raw_body()
 
-    if body then
+    if body and #body > 0 then
         ctx.body_seen = true
         local verdict, response, modifications = nano.send_body(session_id, session_data, body, nano.HttpChunkType.HTTP_RESPONSE_BODY)
 
-        -- Initialize if not exists
         ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
 
-        -- Handle body modifications if any
         if modifications then
             body = nano.handle_body_modifications(body, modifications, ctx.body_buffer_chunk)
             kong.response.set_raw_body(body)
@@ -201,11 +199,76 @@ function NanoHandler.body_filter(conf)
             nano.fini_session(session_data)
             ctx.session_finalized = true
             local result = nano.handle_custom_response(session_data, response)
-            -- Clean up allocated memory
             nano.cleanup_all()
             return result
         end
         return
+    elseif ctx.expect_body then
+        kong.log.debug("Response body not in memory, attempting to read from buffer/file")
+
+        local body_data = ngx.var.response_body
+        if body_data and #body_data > 0 then
+            kong.log.debug("Found response body in nginx var, size: ", #body_data)
+            ctx.body_seen = true
+            local verdict, response, modifications = nano.send_body(session_id, session_data, body_data, nano.HttpChunkType.HTTP_RESPONSE_BODY)
+
+            ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
+
+            if modifications then
+                body_data = nano.handle_body_modifications(body_data, modifications, ctx.body_buffer_chunk)
+                kong.response.set_raw_body(body_data)
+            end
+
+            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
+
+            if verdict == nano.AttachmentVerdict.DROP then
+                nano.fini_session(session_data)
+                ctx.session_finalized = true
+                local result = nano.handle_custom_response(session_data, response)
+                nano.cleanup_all()
+                return result
+            end
+            return
+        else
+            -- Try to read from response body file
+            local body_file = ngx.var.response_body_file
+            if body_file then
+                kong.log.debug("Reading response body from file: ", body_file)
+                local file = io.open(body_file, "rb")
+                if file then
+                    local entire_body = file:read("*all")
+                    file:close()
+
+                    if entire_body and #entire_body > 0 then
+                        kong.log.debug("Sending entire response body of size ", #entire_body, " bytes to C module")
+                        ctx.body_seen = true
+                        local verdict, response, modifications = nano.send_body(session_id, session_data, entire_body, nano.HttpChunkType.HTTP_RESPONSE_BODY)
+
+                        ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
+
+                        if modifications then
+                            entire_body = nano.handle_body_modifications(entire_body, modifications, ctx.body_buffer_chunk)
+                            kong.response.set_raw_body(entire_body)
+                        end
+
+                        ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
+
+                        if verdict == nano.AttachmentVerdict.DROP then
+                            nano.fini_session(session_data)
+                            ctx.session_finalized = true
+                            local result = nano.handle_custom_response(session_data, response)
+                            nano.cleanup_all()
+                            return result
+                        end
+                        return
+                    end
+                else
+                    kong.log.warn("Failed to open response body file: ", body_file)
+                end
+            else
+                kong.log.debug("Response body expected but no body data or file available")
+            end
+        end
     end
 
     if ctx.body_seen or ctx.expect_body == false then
