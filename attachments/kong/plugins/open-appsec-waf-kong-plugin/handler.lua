@@ -193,54 +193,46 @@ function NanoHandler.body_filter(conf)
         return
     end
 
-    -- Collect response body chunks
+    -- Process response body chunks incrementally
     local chunk = ngx.arg[1]
     local eof = ngx.arg[2]
 
     kong.log.debug("[body_filter] Session: ", session_id, " | Chunk size: ", chunk and #chunk or 0, " | EOF: ", tostring(eof))
 
-    -- Initialize buffer on first call
-    if not ctx.response_body_buffer then
-        ctx.response_body_buffer = {}
-        kong.log.debug("[body_filter] Session: ", session_id, " | Initialized response body buffer")
-    end
-
-    -- Collect chunks
+    -- Send each chunk to nano service as it arrives
     if chunk and #chunk > 0 then
-        table.insert(ctx.response_body_buffer, chunk)
-        kong.log.debug("[body_filter] Session: ", session_id, " | Buffered chunk, total chunks: ", #ctx.response_body_buffer)
-    end
-
-    -- Process complete body at EOF
-    if eof then
-        kong.log.debug("[body_filter] Session: ", session_id, " | EOF reached, buffer has ", #ctx.response_body_buffer, " chunks")
+        kong.log.debug("[body_filter] Session: ", session_id, " | Sending chunk to nano, size: ", #chunk, " bytes")
         
-        -- Send body to nano service if we collected chunks
-        if #ctx.response_body_buffer > 0 then
-            local complete_body = table.concat(ctx.response_body_buffer)
-            kong.log.debug("[body_filter] Session: ", session_id, " | Sending complete body, size: ", #complete_body, " bytes")
-            
-            local verdict, response, modifications = nano.send_body(session_id, session_data, complete_body, nano.HttpChunkType.HTTP_RESPONSE_BODY)
+        -- Initialize chunk counter
+        ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
+        
+        local verdict, response, modifications = nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
 
-            if modifications then
-                kong.log.debug("[body_filter] Session: ", session_id, " | Applying body modifications")
-                complete_body = nano.handle_body_modifications(complete_body, modifications, 0)
-                ngx.arg[1] = complete_body
-            end
+        kong.log.debug("[body_filter] Session: ", session_id, " | Verdict after chunk #", ctx.body_buffer_chunk, ": ", verdict)
 
-            if verdict == nano.AttachmentVerdict.DROP then
-                kong.log.warn("[body_filter] Body verdict DROP for session: ", session_id)
-                nano.fini_session(session_data)
-                ctx.session_finalized = true
-                local result = nano.handle_custom_response(session_data, response)
-                nano.cleanup_all()
-                return result
-            end
-        else
-            kong.log.debug("[body_filter] Session: ", session_id, " | No body chunks collected (empty response or no body)")
+        if modifications then
+            kong.log.debug("[body_filter] Session: ", session_id, " | Applying body modifications to chunk")
+            chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
+            ngx.arg[1] = chunk
         end
 
-        -- End inspection
+        ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
+        ctx.body_seen = true
+
+        if verdict == nano.AttachmentVerdict.DROP then
+            kong.log.warn("[body_filter] Body chunk verdict DROP for session: ", session_id)
+            nano.fini_session(session_data)
+            ctx.session_finalized = true
+            local result = nano.handle_custom_response(session_data, response)
+            nano.cleanup_all()
+            return result
+        end
+    end
+
+    -- End inspection at EOF
+    if eof then
+        kong.log.debug("[body_filter] Session: ", session_id, " | EOF reached, body_seen: ", tostring(ctx.body_seen))
+        
         kong.log.debug("[body_filter] Session: ", session_id, " | Ending inspection")
         local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
         
