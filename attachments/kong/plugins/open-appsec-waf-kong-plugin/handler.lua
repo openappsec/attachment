@@ -135,6 +135,9 @@ function NanoHandler.access(conf)
     end
 
     NanoHandler.processed_requests[session_id] = true
+    
+    -- Enable response body buffering for inspection
+    kong.service.request.enable_buffering()
 end
 
 function NanoHandler.header_filter(conf)
@@ -169,13 +172,6 @@ function NanoHandler.header_filter(conf)
     end
 
     ctx.expect_body = not (status_code == 204 or status_code == 304 or (100 <= status_code and status_code < 200) or content_length == 0)
-    
-    -- Enable response body buffering for inspection
-    if ctx.expect_body then
-        kong.log.debug("[header_filter] Session: ", session_id, " | Enabling response body buffering")
-        kong.service.request.enable_buffering()
-        ngx.ctx.buffer_body = true
-    end
     
     kong.log.debug("[header_filter] Session: ", session_id, " | Expect body: ", ctx.expect_body)
 end
