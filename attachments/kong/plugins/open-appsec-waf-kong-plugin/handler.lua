@@ -169,6 +169,14 @@ function NanoHandler.header_filter(conf)
     end
 
     ctx.expect_body = not (status_code == 204 or status_code == 304 or (100 <= status_code and status_code < 200) or content_length == 0)
+    
+    -- Enable response body buffering for inspection
+    if ctx.expect_body then
+        kong.log.debug("[header_filter] Session: ", session_id, " | Enabling response body buffering")
+        kong.service.request.enable_buffering()
+        ngx.ctx.buffer_body = true
+    end
+    
     kong.log.debug("[header_filter] Session: ", session_id, " | Expect body: ", ctx.expect_body)
 end
 
@@ -192,37 +200,54 @@ function NanoHandler.body_filter(conf)
         return
     end
 
-    -- Buffer chunks until we have the complete body
-    local chunk = ngx.arg[1]
-    local eof = ngx.arg[2]
-
-    kong.log.debug("[body_filter] Session: ", session_id, " | Chunk size: ", chunk and #chunk or 0, " | EOF: ", tostring(eof))
-
-    -- Accumulate body chunks
-    if chunk and #chunk > 0 then
-        if not ctx.response_body_buffer then
+    -- On first call, try to get the complete buffered body
+    if not ctx.body_processed and not ctx.response_body_buffer then
+        local body = kong.response.get_raw_body()
+        
+        if body and #body > 0 then
+            kong.log.debug("[body_filter] Session: ", session_id, " | Got complete buffered body, size: ", #body, " bytes")
+            ctx.complete_body = body
+            ctx.body_processed = true
+        else
+            kong.log.debug("[body_filter] Session: ", session_id, " | No buffered body available, will collect chunks")
             ctx.response_body_buffer = {}
         end
-        table.insert(ctx.response_body_buffer, chunk)
-        kong.log.debug("[body_filter] Session: ", session_id, " | Buffered chunk, total chunks: ", #ctx.response_body_buffer)
     end
 
-    -- Process the complete body when we reach EOF
-    if eof then
+    -- If we're collecting chunks, buffer them
+    if ctx.response_body_buffer then
+        local chunk = ngx.arg[1]
+        local eof = ngx.arg[2]
+
+        kong.log.debug("[body_filter] Session: ", session_id, " | Chunk size: ", chunk and #chunk or 0, " | EOF: ", tostring(eof))
+
+        if chunk and #chunk > 0 then
+            table.insert(ctx.response_body_buffer, chunk)
+            kong.log.debug("[body_filter] Session: ", session_id, " | Buffered chunk, total chunks: ", #ctx.response_body_buffer)
+        end
+
+        -- When we reach EOF, concatenate chunks
+        if eof and #ctx.response_body_buffer > 0 then
+            ctx.complete_body = table.concat(ctx.response_body_buffer)
+            kong.log.debug("[body_filter] Session: ", session_id, " | Concatenated chunks, total size: ", #ctx.complete_body, " bytes")
+        end
+    end
+
+    -- Process the complete body at EOF
+    local eof = ngx.arg[2]
+    if eof and not ctx.session_finalized then
         kong.log.debug("[body_filter] Session: ", session_id, " | EOF reached")
         
-        -- Process buffered body if we have it
-        if ctx.response_body_buffer and #ctx.response_body_buffer > 0 then
-            local complete_body = table.concat(ctx.response_body_buffer)
-            kong.log.debug("[body_filter] Session: ", session_id, " | Processing complete body, size: ", #complete_body, " bytes")
+        -- Send body to nano service if we have it
+        if ctx.complete_body and #ctx.complete_body > 0 then
+            kong.log.debug("[body_filter] Session: ", session_id, " | Processing complete body, size: ", #ctx.complete_body, " bytes")
             
-            local verdict, response, modifications = nano.send_body(session_id, session_data, complete_body, nano.HttpChunkType.HTTP_RESPONSE_BODY)
+            local verdict, response, modifications = nano.send_body(session_id, session_data, ctx.complete_body, nano.HttpChunkType.HTTP_RESPONSE_BODY)
 
             if modifications then
                 kong.log.debug("[body_filter] Session: ", session_id, " | Applying body modifications")
-                complete_body = nano.handle_body_modifications(complete_body, modifications, 0)
-                -- Update the buffered body with modifications
-                ngx.arg[1] = complete_body
+                ctx.complete_body = nano.handle_body_modifications(ctx.complete_body, modifications, 0)
+                ngx.arg[1] = ctx.complete_body
             end
 
             if verdict == nano.AttachmentVerdict.DROP then
@@ -233,29 +258,29 @@ function NanoHandler.body_filter(conf)
                 nano.cleanup_all()
                 return result
             end
+        else
+            kong.log.debug("[body_filter] Session: ", session_id, " | No body to process (empty response or no body expected)")
         end
 
         -- End inspection
-        if ctx.response_body_buffer or ctx.expect_body == false then
-            kong.log.debug("[body_filter] Session: ", session_id, " | Ending inspection")
-            local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
-            
-            kong.log.debug("[body_filter] Session: ", session_id, " | End inspection verdict: ", verdict)
-            
-            if verdict == nano.AttachmentVerdict.DROP then
-                kong.log.warn("[body_filter] End inspection verdict DROP for session: ", session_id)
-                nano.fini_session(session_data)
-                ctx.session_finalized = true
-                local result = nano.handle_custom_response(session_data, response)
-                nano.cleanup_all()
-                return result
-            end
-
-            kong.log.debug("[body_filter] Session: ", session_id, " | Finalizing session normally")
+        kong.log.debug("[body_filter] Session: ", session_id, " | Ending inspection")
+        local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
+        
+        kong.log.debug("[body_filter] Session: ", session_id, " | End inspection verdict: ", verdict)
+        
+        if verdict == nano.AttachmentVerdict.DROP then
+            kong.log.warn("[body_filter] End inspection verdict DROP for session: ", session_id)
             nano.fini_session(session_data)
-            nano.cleanup_all()
             ctx.session_finalized = true
+            local result = nano.handle_custom_response(session_data, response)
+            nano.cleanup_all()
+            return result
         end
+
+        kong.log.debug("[body_filter] Session: ", session_id, " | Finalizing session normally")
+        nano.fini_session(session_data)
+        nano.cleanup_all()
+        ctx.session_finalized = true
     end
 end
 
