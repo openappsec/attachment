@@ -140,6 +140,7 @@ end
 function NanoHandler.header_filter(conf)
     local ctx = kong.ctx.plugin
     if ctx.blocked then
+        kong.log.debug("[header_filter] Blocked context, returning early")
         return
     end
 
@@ -147,7 +148,7 @@ function NanoHandler.header_filter(conf)
     local session_data = ctx.session_data
 
     if not session_id or not session_data then
-        kong.log.err("No session data found in header_filter")
+        kong.log.err("[header_filter] No session data found in header_filter")
         return
     end
 
@@ -156,8 +157,11 @@ function NanoHandler.header_filter(conf)
     local status_code = kong.response.get_status()
     local content_length = tonumber(headers["content-length"]) or 0
 
+    kong.log.debug("[header_filter] Session: ", session_id, " | Status: ", status_code, " | Content-Length: ", content_length)
+
     local verdict, response = nano.send_response_headers(session_id, session_data, header_data, status_code, content_length)
     if verdict == nano.AttachmentVerdict.DROP then
+        kong.log.warn("[header_filter] Response headers verdict DROP for session: ", session_id)
         kong.ctx.plugin.blocked = true
         nano.fini_session(session_data)
         nano.cleanup_all()
@@ -165,18 +169,26 @@ function NanoHandler.header_filter(conf)
     end
 
     ctx.expect_body = not (status_code == 204 or status_code == 304 or (100 <= status_code and status_code < 200) or content_length == 0)
+    kong.log.debug("[header_filter] Session: ", session_id, " | Expect body: ", ctx.expect_body)
 end
 
 function NanoHandler.body_filter(conf)
     local ctx = kong.ctx.plugin
     if ctx.blocked then
+        kong.log.debug("[body_filter] Blocked context, returning early")
         return
     end
 
     local session_id = ctx.session_id
     local session_data = ctx.session_data
 
-    if not session_id or not session_data or ctx.session_finalized then
+    if not session_id or not session_data then
+        kong.log.debug("[body_filter] No session_id or session_data, returning early")
+        return
+    end
+
+    if ctx.session_finalized then
+        kong.log.debug("[body_filter] Session already finalized for session: ", session_id, ", returning early")
         return
     end
 
@@ -184,16 +196,21 @@ function NanoHandler.body_filter(conf)
     local chunk = ngx.arg[1]
     local eof = ngx.arg[2]
 
+    kong.log.debug("[body_filter] Session: ", session_id, " | Chunk size: ", chunk and #chunk or 0, " | EOF: ", tostring(eof), " | body_seen: ", tostring(ctx.body_seen), " | expect_body: ", tostring(ctx.expect_body))
+
     -- Process body chunk if present
     if chunk and #chunk > 0 then
         ctx.body_seen = true
-        kong.log.debug("Processing response body chunk, size: ", #chunk, " bytes, EOF: ", eof)
+        kong.log.debug("[body_filter] Processing response body chunk for session: ", session_id, ", size: ", #chunk, " bytes, EOF: ", tostring(eof))
         
         local verdict, response, modifications = nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
 
         ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
 
+        kong.log.debug("[body_filter] Session: ", session_id, " | Verdict after send_body: ", verdict, " | Chunk #: ", ctx.body_buffer_chunk)
+
         if modifications then
+            kong.log.debug("[body_filter] Session: ", session_id, " | Applying body modifications")
             chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
             ngx.arg[1] = chunk
         end
@@ -201,21 +218,29 @@ function NanoHandler.body_filter(conf)
         ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
 
         if verdict == nano.AttachmentVerdict.DROP then
+            kong.log.warn("[body_filter] Body chunk verdict DROP for session: ", session_id)
             nano.fini_session(session_data)
             ctx.session_finalized = true
             local result = nano.handle_custom_response(session_data, response)
             nano.cleanup_all()
             return result
         end
+    else
+        kong.log.debug("[body_filter] Session: ", session_id, " | Empty or no chunk, EOF: ", tostring(eof))
     end
 
     -- Handle end of response
     if eof then
-        kong.log.debug("Response body end of stream reached")
+        kong.log.debug("[body_filter] Session: ", session_id, " | EOF reached, body_seen: ", tostring(ctx.body_seen), " | expect_body: ", tostring(ctx.expect_body))
         
         if ctx.body_seen or ctx.expect_body == false then
+            kong.log.debug("[body_filter] Session: ", session_id, " | Ending inspection")
             local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
+            
+            kong.log.debug("[body_filter] Session: ", session_id, " | End inspection verdict: ", verdict)
+            
             if verdict == nano.AttachmentVerdict.DROP then
+                kong.log.warn("[body_filter] End inspection verdict DROP for session: ", session_id)
                 nano.fini_session(session_data)
                 ctx.session_finalized = true
                 local result = nano.handle_custom_response(session_data, response)
@@ -223,9 +248,12 @@ function NanoHandler.body_filter(conf)
                 return result
             end
 
+            kong.log.debug("[body_filter] Session: ", session_id, " | Finalizing session normally")
             nano.fini_session(session_data)
             nano.cleanup_all()
             ctx.session_finalized = true
+        else
+            kong.log.debug("[body_filter] Session: ", session_id, " | EOF but not finalizing (body_seen: ", tostring(ctx.body_seen), ", expect_body: ", tostring(ctx.expect_body), ")")
         end
     end
 end
