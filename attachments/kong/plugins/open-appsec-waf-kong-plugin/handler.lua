@@ -193,18 +193,19 @@ function NanoHandler.body_filter(conf)
         return
     end
 
-    -- Process response body chunks incrementally
     local chunk = ngx.arg[1]
     local eof = ngx.arg[2]
 
     kong.log.debug("[body_filter] Session: ", session_id, " | Chunk size: ", chunk and #chunk or 0, " | EOF: ", tostring(eof))
 
-    -- Send each chunk to nano service as it arrives
-    if chunk and #chunk > 0 then
-        kong.log.debug("[body_filter] Session: ", session_id, " | Sending chunk to nano, size: ", #chunk, " bytes")
-        
-        -- Initialize chunk counter
-        ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
+    -- Initialize chunk counter
+    if not ctx.body_buffer_chunk then
+        ctx.body_buffer_chunk = 0
+    end
+
+    -- Process ONE chunk at a time (matching nginx module behavior for response bodies)
+    if chunk and #chunk > 0 and not ctx.chunk_sent_this_call then
+        kong.log.debug("[body_filter] Session: ", session_id, " | Sending chunk #", ctx.body_buffer_chunk, ", size: ", #chunk, " bytes")
         
         local verdict, response, modifications = nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
 
@@ -218,6 +219,7 @@ function NanoHandler.body_filter(conf)
 
         ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
         ctx.body_seen = true
+        ctx.chunk_sent_this_call = true
 
         if verdict == nano.AttachmentVerdict.DROP then
             kong.log.warn("[body_filter] Body chunk verdict DROP for session: ", session_id)
@@ -229,9 +231,12 @@ function NanoHandler.body_filter(conf)
         end
     end
 
+    -- Reset flag for next body_filter call
+    ctx.chunk_sent_this_call = false
+
     -- End inspection at EOF
     if eof then
-        kong.log.debug("[body_filter] Session: ", session_id, " | EOF reached, body_seen: ", tostring(ctx.body_seen))
+        kong.log.debug("[body_filter] Session: ", session_id, " | EOF reached, body_seen: ", tostring(ctx.body_seen), ", chunks processed: ", ctx.body_buffer_chunk)
         
         kong.log.debug("[body_filter] Session: ", session_id, " | Ending inspection")
         local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
