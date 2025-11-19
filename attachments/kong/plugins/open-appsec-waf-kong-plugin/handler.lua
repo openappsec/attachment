@@ -210,24 +210,37 @@ function NanoHandler.body_filter(conf)
         return
     end
     
+    local chunk = ngx.arg[1]
     local eof = ngx.arg[2]
     
     -- If nano service already accepted the response in header_filter, skip body inspection
-    -- Just let chunks pass through and finalize at EOF
+    -- Just let chunks pass through immediately and finalize at EOF
     if ctx.skip_body_filter then
-        kong.log.debug("[body_filter] Session: ", session_id, " | Skipping inspection, passing chunk through (EOF: ", tostring(eof), ")")
+        kong.log.debug("[body_filter] Session: ", session_id, " | Skipping inspection, chunk size: ", chunk and #chunk or 0, ", EOF: ", tostring(eof))
+        
+        -- If there were any buffered chunks from before skip was set, flush them first
+        if ctx.chunk_buffer and #ctx.chunk_buffer > 0 then
+            kong.log.info("[body_filter] Session: ", session_id, " | Flushing ", #ctx.chunk_buffer, " buffered chunks before skipping")
+            local combined = table.concat(ctx.chunk_buffer)
+            ctx.chunk_buffer = {}
+            ctx.chunk_buffer_size = 0
+            -- Send the buffered data followed by current chunk
+            if chunk and #chunk > 0 then
+                ngx.arg[1] = combined .. chunk
+            else
+                ngx.arg[1] = combined
+            end
+        end
+        -- else: chunk passes through as-is via ngx.arg[1]
+        
         if eof then
             kong.log.info("[body_filter] Session: ", session_id, " | EOF reached with skip_body_filter - finalizing session")
             nano.fini_session(session_data)
             nano.cleanup_all()
             ctx.session_finalized = true
         end
-        -- Let the chunk pass through unchanged by not modifying ngx.arg[1]
         return
     end
-
-    local chunk = ngx.arg[1]
-    local eof = ngx.arg[2]
 
     kong.log.debug("[body_filter] Session: ", session_id, " | Chunk size: ", chunk and #chunk or 0, " | EOF: ", tostring(eof))
 
