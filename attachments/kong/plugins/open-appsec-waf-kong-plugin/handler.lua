@@ -157,9 +157,13 @@ function NanoHandler.header_filter(conf)
     local status_code = kong.response.get_status()
     local content_length = tonumber(headers["content-length"]) or 0
 
-    kong.log.debug("[header_filter] Session: ", session_id, " | Status: ", status_code, " | Content-Length: ", content_length)
+    -- For responses that will be streamed in chunks via body_filter, pass 0 content_length
+    -- to prevent nano service from trying to read the entire body at once
+    local nano_content_length = 0
 
-    local verdict, response = nano.send_response_headers(session_id, session_data, header_data, status_code, content_length)
+    kong.log.debug("[header_filter] Session: ", session_id, " | Status: ", status_code, " | Content-Length: ", content_length, " | Nano Content-Length: ", nano_content_length)
+
+    local verdict, response = nano.send_response_headers(session_id, session_data, header_data, status_code, nano_content_length)
     if verdict == nano.AttachmentVerdict.DROP then
         kong.log.warn("[header_filter] Response headers verdict DROP for session: ", session_id)
         kong.ctx.plugin.blocked = true
