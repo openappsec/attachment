@@ -179,11 +179,10 @@ function NanoHandler.header_filter(conf)
     -- If nano service returned ACCEPT verdict, it means it's done inspecting and doesn't want response body
     -- Skip body_filter to avoid timeout cascades from sending unwanted data
     if verdict == nano.AttachmentVerdict.ACCEPT then
-        kong.log.info("[header_filter] Session: ", session_id, " | Verdict ACCEPT - skipping response body inspection")
+        kong.log.info("[header_filter] Session: ", session_id, " | Verdict ACCEPT - will skip response body inspection")
         ctx.skip_body_filter = true
-        -- Finalize session immediately since inspection is complete
-        nano.fini_session(session_data)
-        ctx.session_finalized = true
+        -- DON'T finalize session here - let body_filter handle it at EOF
+        -- Finalizing here may block the body data flow
     end
     
     ctx.expect_body = not (status_code == 204 or status_code == 304 or (100 <= status_code and status_code < 200) or content_length == 0)
@@ -197,12 +196,6 @@ function NanoHandler.body_filter(conf)
         kong.log.debug("[body_filter] Blocked context, returning early")
         return
     end
-    
-    -- If nano service already accepted the response in header_filter, skip body inspection
-    if ctx.skip_body_filter then
-        kong.log.debug("[body_filter] Skipping body filter as nano service already accepted response")
-        return
-    end
 
     local session_id = ctx.session_id
     local session_data = ctx.session_data
@@ -214,6 +207,22 @@ function NanoHandler.body_filter(conf)
 
     if ctx.session_finalized then
         kong.log.debug("[body_filter] Session already finalized for session: ", session_id, ", returning early")
+        return
+    end
+    
+    local eof = ngx.arg[2]
+    
+    -- If nano service already accepted the response in header_filter, skip body inspection
+    -- Just let chunks pass through and finalize at EOF
+    if ctx.skip_body_filter then
+        kong.log.debug("[body_filter] Session: ", session_id, " | Skipping inspection, passing chunk through (EOF: ", tostring(eof), ")")
+        if eof then
+            kong.log.info("[body_filter] Session: ", session_id, " | EOF reached with skip_body_filter - finalizing session")
+            nano.fini_session(session_data)
+            nano.cleanup_all()
+            ctx.session_finalized = true
+        end
+        -- Let the chunk pass through unchanged by not modifying ngx.arg[1]
         return
     end
 
