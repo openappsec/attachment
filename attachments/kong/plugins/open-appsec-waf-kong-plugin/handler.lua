@@ -140,7 +140,6 @@ end
 function NanoHandler.header_filter(conf)
     local ctx = kong.ctx.plugin
     if ctx.blocked then
-        kong.log.debug("[header_filter] Blocked context, returning early")
         return
     end
 
@@ -148,7 +147,7 @@ function NanoHandler.header_filter(conf)
     local session_data = ctx.session_data
 
     if not session_id or not session_data then
-        kong.log.err("[header_filter] No session data found in header_filter")
+        kong.log.err("No session data found in header_filter")
         return
     end
 
@@ -157,205 +156,83 @@ function NanoHandler.header_filter(conf)
     local status_code = kong.response.get_status()
     local content_length = tonumber(headers["content-length"]) or 0
 
-    kong.log.debug("[header_filter] Session: ", session_id, " | Status: ", status_code, " | Content-Length: ", content_length)
-
-    -- Send response headers WITHOUT content_length  
-    -- Pass 0 to indicate we'll send body in chunks via body_filter
-    local verdict, response = nano.send_response_headers(session_id, session_data, header_data, status_code, 0)
-    
-    kong.log.debug("[header_filter] Session: ", session_id, " | Response headers verdict: ", verdict)
-    
+    local verdict, response = nano.send_response_headers(session_id, session_data, header_data, status_code, content_length)
     if verdict == nano.AttachmentVerdict.DROP then
-        kong.log.warn("[header_filter] Response headers verdict DROP for session: ", session_id)
         kong.ctx.plugin.blocked = true
         nano.fini_session(session_data)
         nano.cleanup_all()
         return nano.handle_custom_response(session_data, response)
     end
 
-    -- DO NOT send content_length separately - it causes nano service to block waiting for that many bytes
-    -- Instead, let body_filter send chunks progressively without pre-declaring the total size
-    
-    -- If nano service returned ACCEPT verdict, it means it's done inspecting and doesn't want response body
-    -- Skip body_filter to avoid timeout cascades from sending unwanted data
-    if verdict == nano.AttachmentVerdict.ACCEPT then
-        kong.log.info("[header_filter] Session: ", session_id, " | Verdict ACCEPT - will skip response body inspection")
-        ctx.skip_body_filter = true
-        
-        -- Disable proxy buffering to stream the response directly to client without temp files
-        -- This prevents "out of memory" issues with large response bodies
-        ngx.var.upstream_no_cache = "1"  -- Disable caching
-        kong.response.set_header("X-Accel-Buffering", "no")  -- Disable nginx buffering
-        
-        -- DON'T finalize session here - let body_filter handle it at EOF
-        -- Finalizing here may block the body data flow
-    end
-    
     ctx.expect_body = not (status_code == 204 or status_code == 304 or (100 <= status_code and status_code < 200) or content_length == 0)
-    
-    kong.log.debug("[header_filter] Session: ", session_id, " | Expect body: ", ctx.expect_body)
 end
 
 function NanoHandler.body_filter(conf)
     local ctx = kong.ctx.plugin
-    if ctx.blocked then
-        kong.log.debug("[body_filter] Blocked context, returning early")
+    if not ctx or ctx.blocked then
         return
     end
 
-    local session_id = ctx.session_id
+    local session_id   = ctx.session_id
     local session_data = ctx.session_data
 
-    if not session_id or not session_data then
-        kong.log.debug("[body_filter] No session_id or session_data, returning early")
+    if not session_id or not session_data or ctx.session_finalized then
         return
     end
 
-    if ctx.session_finalized then
-        kong.log.debug("[body_filter] Session already finalized for session: ", session_id, ", returning early")
-        return
-    end
-    
     local chunk = ngx.arg[1]
-    local eof = ngx.arg[2]
-    
-    -- If nano service already accepted the response in header_filter, skip body inspection
-    -- Just let chunks pass through immediately and finalize at EOF
-    if ctx.skip_body_filter then
-        -- Initialize counter on first skip
-        if not ctx.skipped_chunks then
-            ctx.skipped_chunks = 0
-            ctx.skipped_bytes = 0
-        end
-        
-        ctx.skipped_chunks = ctx.skipped_chunks + 1
-        ctx.skipped_bytes = ctx.skipped_bytes + (chunk and #chunk or 0)
-        
-        if ctx.skipped_chunks % 100 == 1 then  -- Log every 100 chunks
-            kong.log.info("[body_filter] Session: ", session_id, " | Skipped ", ctx.skipped_chunks, " chunks (", ctx.skipped_bytes, " bytes), EOF: ", tostring(eof))
-        end
-        
-        -- If there were any buffered chunks from before skip was set, flush them first
-        if ctx.chunk_buffer and #ctx.chunk_buffer > 0 then
-            kong.log.info("[body_filter] Session: ", session_id, " | Flushing ", #ctx.chunk_buffer, " buffered chunks before skipping")
-            local combined = table.concat(ctx.chunk_buffer)
-            ctx.chunk_buffer = {}
-            ctx.chunk_buffer_size = 0
-            -- Send the buffered data followed by current chunk
-            if chunk and #chunk > 0 then
-                ngx.arg[1] = combined .. chunk
-            else
-                ngx.arg[1] = combined
-            end
-        end
-        -- Chunk passes through as-is via ngx.arg[1] - don't modify it
-        
-        if eof then
-            kong.log.info("[body_filter] Session: ", session_id, " | EOF reached after skipping ", ctx.skipped_chunks, " chunks (", ctx.skipped_bytes, " bytes total)")
-            nano.fini_session(session_data)
-            nano.cleanup_all()
-            ctx.session_finalized = true
-        end
-        return
-    end
+    local eof   = ngx.arg[2]
 
-    kong.log.debug("[body_filter] Session: ", session_id, " | Chunk size: ", chunk and #chunk or 0, " | EOF: ", tostring(eof))
-
-    -- Initialize on first call
-    if not ctx.chunk_buffer then
-        ctx.body_buffer_chunk = 0
-        ctx.chunk_buffer = {}
-        ctx.chunk_buffer_size = 0
-        ctx.consecutive_inspect_verdicts = 0  -- Track if nano service is actually processing
-    end
-
-    -- Batch configuration: combine small chunks to reduce nano service calls
-    local MAX_BATCH_SIZE = 64 * 1024 -- 64KB batches
-    local MAX_CONSECUTIVE_INSPECTS = 10 -- If we get 10 INSPECT verdicts in a row, assume nano wants full inspection
-
-    -- Process current chunk if present
+    -- Handle body chunks
     if chunk and #chunk > 0 then
-        -- Add chunk to buffer
-        table.insert(ctx.chunk_buffer, chunk)
-        ctx.chunk_buffer_size = ctx.chunk_buffer_size + #chunk
-        
-        local should_send = false
-        
-        -- Send if: batch full or EOF coming
-        if ctx.chunk_buffer_size >= MAX_BATCH_SIZE or eof then
-            should_send = true
+        ctx.body_seen = true
+
+        -- Initialize chunk index if not exists
+        if not ctx.body_buffer_chunk then
+            ctx.body_buffer_chunk = 0
         end
-        
-        if should_send and #ctx.chunk_buffer > 0 then
-            -- Combine buffered chunks
-            local combined_chunk = table.concat(ctx.chunk_buffer)
-            
-            kong.log.debug("[body_filter] Session: ", session_id, " | Sending batched chunk #", ctx.body_buffer_chunk, 
-                ", size: ", #combined_chunk, " bytes (", #ctx.chunk_buffer, " chunks combined)")
-            
-            local verdict, response, modifications = nano.send_body(session_id, session_data, combined_chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
 
-            kong.log.debug("[body_filter] Session: ", session_id, " | Verdict after chunk #", ctx.body_buffer_chunk, ": ", verdict)
+        local verdict, response, modifications =
+            nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
 
-            if modifications then
-                kong.log.debug("[body_filter] Session: ", session_id, " | Applying body modifications to chunk")
-                combined_chunk = nano.handle_body_modifications(combined_chunk, modifications, ctx.body_buffer_chunk)
-                ngx.arg[1] = combined_chunk
-            else
-                ngx.arg[1] = combined_chunk
-            end
-
-            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
-            ctx.body_seen = true
-            
-            -- Clear buffer
-            ctx.chunk_buffer = {}
-            ctx.chunk_buffer_size = 0
-
-            if verdict == nano.AttachmentVerdict.DROP then
-                kong.log.warn("[body_filter] Body chunk verdict DROP for session: ", session_id)
-                nano.fini_session(session_data)
-                ctx.session_finalized = true
-                local result = nano.handle_custom_response(session_data, response)
-                nano.cleanup_all()
-                return result
-            elseif verdict == nano.AttachmentVerdict.ACCEPT then
-                -- Nano service is done inspecting, stop sending more chunks
-                kong.log.info("[body_filter] Session: ", session_id, " | Verdict ACCEPT after chunk #", ctx.body_buffer_chunk - 1, " - stopping body inspection")
-                ctx.skip_body_filter = true
-                nano.fini_session(session_data)
-                ctx.session_finalized = true
-                -- Let remaining chunks pass through without inspection
-            end
-        else
-            -- Buffering chunk, don't send to client yet
-            kong.log.debug("[body_filter] Session: ", session_id, " | Buffering chunk (", #chunk, " bytes), total buffered: ", ctx.chunk_buffer_size)
-            ngx.arg[1] = nil -- Don't send this chunk to client yet
+        -- Handle body modifications if any
+        if modifications then
+            chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
+            ngx.arg[1] = chunk
         end
-    end
 
-    -- End inspection at EOF
-    if eof then
-        kong.log.debug("[body_filter] Session: ", session_id, " | EOF reached, body_seen: ", tostring(ctx.body_seen), ", chunks processed: ", ctx.body_buffer_chunk)
-        
-        kong.log.debug("[body_filter] Session: ", session_id, " | Ending inspection")
-        local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
-        
-        kong.log.debug("[body_filter] Session: ", session_id, " | End inspection verdict: ", verdict)
-        
+        ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
+
         if verdict == nano.AttachmentVerdict.DROP then
-            kong.log.warn("[body_filter] End inspection verdict DROP for session: ", session_id)
             nano.fini_session(session_data)
             ctx.session_finalized = true
             local result = nano.handle_custom_response(session_data, response)
             nano.cleanup_all()
+            -- Stop current streaming
+            ngx.arg[1] = ""
+            ngx.arg[2] = true
             return result
         end
+    end
 
-        kong.log.debug("[body_filter] Session: ", session_id, " | Finalizing session normally")
-        nano.fini_session(session_data)
-        nano.cleanup_all()
-        ctx.session_finalized = true
+    -- Handle end of response
+    if eof then
+        if ctx.body_seen or ctx.expect_body == false then
+            local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
+            if verdict == nano.AttachmentVerdict.DROP then
+                nano.fini_session(session_data)
+                ctx.session_finalized = true
+                local result = nano.handle_custom_response(session_data, response)
+                nano.cleanup_all()
+                ngx.arg[1] = ""
+                ngx.arg[2] = true
+                return result
+            end
+
+            nano.fini_session(session_data)
+            nano.cleanup_all()
+            ctx.session_finalized = true
+        end
     end
 end
 
