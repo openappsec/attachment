@@ -198,41 +198,69 @@ function NanoHandler.body_filter(conf)
 
     kong.log.debug("[body_filter] Session: ", session_id, " | Chunk size: ", chunk and #chunk or 0, " | EOF: ", tostring(eof))
 
-    -- Initialize chunk counter
-    if not ctx.body_buffer_chunk then
+    -- Initialize on first call
+    if not ctx.chunk_buffer then
         ctx.body_buffer_chunk = 0
+        ctx.chunk_buffer = {}
+        ctx.chunk_buffer_size = 0
     end
 
-    -- Process ONE chunk at a time (matching nginx module behavior for response bodies)
-    if chunk and #chunk > 0 and not ctx.chunk_sent_this_call then
-        kong.log.debug("[body_filter] Session: ", session_id, " | Sending chunk #", ctx.body_buffer_chunk, ", size: ", #chunk, " bytes")
+    -- Batch configuration: combine small chunks to reduce nano service calls
+    local MAX_BATCH_SIZE = 64 * 1024 -- 64KB batches
+
+    -- Process current chunk if present
+    if chunk and #chunk > 0 then
+        -- Add chunk to buffer
+        table.insert(ctx.chunk_buffer, chunk)
+        ctx.chunk_buffer_size = ctx.chunk_buffer_size + #chunk
         
-        local verdict, response, modifications = nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
-
-        kong.log.debug("[body_filter] Session: ", session_id, " | Verdict after chunk #", ctx.body_buffer_chunk, ": ", verdict)
-
-        if modifications then
-            kong.log.debug("[body_filter] Session: ", session_id, " | Applying body modifications to chunk")
-            chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
-            ngx.arg[1] = chunk
+        local should_send = false
+        
+        -- Send if: batch full or EOF coming
+        if ctx.chunk_buffer_size >= MAX_BATCH_SIZE or eof then
+            should_send = true
         end
+        
+        if should_send and #ctx.chunk_buffer > 0 then
+            -- Combine buffered chunks
+            local combined_chunk = table.concat(ctx.chunk_buffer)
+            
+            kong.log.debug("[body_filter] Session: ", session_id, " | Sending batched chunk #", ctx.body_buffer_chunk, 
+                ", size: ", #combined_chunk, " bytes (", #ctx.chunk_buffer, " chunks combined)")
+            
+            local verdict, response, modifications = nano.send_body(session_id, session_data, combined_chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
 
-        ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
-        ctx.body_seen = true
-        ctx.chunk_sent_this_call = true
+            kong.log.debug("[body_filter] Session: ", session_id, " | Verdict after chunk #", ctx.body_buffer_chunk, ": ", verdict)
 
-        if verdict == nano.AttachmentVerdict.DROP then
-            kong.log.warn("[body_filter] Body chunk verdict DROP for session: ", session_id)
-            nano.fini_session(session_data)
-            ctx.session_finalized = true
-            local result = nano.handle_custom_response(session_data, response)
-            nano.cleanup_all()
-            return result
+            if modifications then
+                kong.log.debug("[body_filter] Session: ", session_id, " | Applying body modifications to chunk")
+                combined_chunk = nano.handle_body_modifications(combined_chunk, modifications, ctx.body_buffer_chunk)
+                ngx.arg[1] = combined_chunk
+            else
+                ngx.arg[1] = combined_chunk
+            end
+
+            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
+            ctx.body_seen = true
+            
+            -- Clear buffer
+            ctx.chunk_buffer = {}
+            ctx.chunk_buffer_size = 0
+
+            if verdict == nano.AttachmentVerdict.DROP then
+                kong.log.warn("[body_filter] Body chunk verdict DROP for session: ", session_id)
+                nano.fini_session(session_data)
+                ctx.session_finalized = true
+                local result = nano.handle_custom_response(session_data, response)
+                nano.cleanup_all()
+                return result
+            end
+        else
+            -- Buffering chunk, don't send to client yet
+            kong.log.debug("[body_filter] Session: ", session_id, " | Buffering chunk (", #chunk, " bytes), total buffered: ", ctx.chunk_buffer_size)
+            ngx.arg[1] = nil -- Don't send this chunk to client yet
         end
     end
-
-    -- Reset flag for next body_filter call
-    ctx.chunk_sent_this_call = false
 
     -- End inspection at EOF
     if eof then
