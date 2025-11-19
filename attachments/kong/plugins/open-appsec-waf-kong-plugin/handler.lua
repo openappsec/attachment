@@ -159,8 +159,12 @@ function NanoHandler.header_filter(conf)
 
     kong.log.debug("[header_filter] Session: ", session_id, " | Status: ", status_code, " | Content-Length: ", content_length)
 
-    -- Send response headers WITHOUT content_length (like nginx does)
+    -- Send response headers WITHOUT content_length  
+    -- Pass 0 to indicate we'll send body in chunks via body_filter
     local verdict, response = nano.send_response_headers(session_id, session_data, header_data, status_code, 0)
+    
+    kong.log.debug("[header_filter] Session: ", session_id, " | Response headers verdict: ", verdict)
+    
     if verdict == nano.AttachmentVerdict.DROP then
         kong.log.warn("[header_filter] Response headers verdict DROP for session: ", session_id)
         kong.ctx.plugin.blocked = true
@@ -169,16 +173,19 @@ function NanoHandler.header_filter(conf)
         return nano.handle_custom_response(session_data, response)
     end
 
-    -- Send content_length separately (like nginx does)
-    verdict, response = nano.send_content_length(session_id, session_data, content_length)
-    if verdict == nano.AttachmentVerdict.DROP then
-        kong.log.warn("[header_filter] Content length verdict DROP for session: ", session_id)
-        kong.ctx.plugin.blocked = true
+    -- DO NOT send content_length separately - it causes nano service to block waiting for that many bytes
+    -- Instead, let body_filter send chunks progressively without pre-declaring the total size
+    
+    -- If nano service returned ACCEPT verdict, it means it's done inspecting and doesn't want response body
+    -- Skip body_filter to avoid timeout cascades from sending unwanted data
+    if verdict == nano.AttachmentVerdict.ACCEPT then
+        kong.log.info("[header_filter] Session: ", session_id, " | Verdict ACCEPT - skipping response body inspection")
+        ctx.skip_body_filter = true
+        -- Finalize session immediately since inspection is complete
         nano.fini_session(session_data)
-        nano.cleanup_all()
-        return nano.handle_custom_response(session_data, response)
+        ctx.session_finalized = true
     end
-
+    
     ctx.expect_body = not (status_code == 204 or status_code == 304 or (100 <= status_code and status_code < 200) or content_length == 0)
     
     kong.log.debug("[header_filter] Session: ", session_id, " | Expect body: ", ctx.expect_body)
@@ -188,6 +195,12 @@ function NanoHandler.body_filter(conf)
     local ctx = kong.ctx.plugin
     if ctx.blocked then
         kong.log.debug("[body_filter] Blocked context, returning early")
+        return
+    end
+    
+    -- If nano service already accepted the response in header_filter, skip body inspection
+    if ctx.skip_body_filter then
+        kong.log.debug("[body_filter] Skipping body filter as nano service already accepted response")
         return
     end
 
@@ -214,10 +227,12 @@ function NanoHandler.body_filter(conf)
         ctx.body_buffer_chunk = 0
         ctx.chunk_buffer = {}
         ctx.chunk_buffer_size = 0
+        ctx.consecutive_inspect_verdicts = 0  -- Track if nano service is actually processing
     end
 
     -- Batch configuration: combine small chunks to reduce nano service calls
     local MAX_BATCH_SIZE = 64 * 1024 -- 64KB batches
+    local MAX_CONSECUTIVE_INSPECTS = 10 -- If we get 10 INSPECT verdicts in a row, assume nano wants full inspection
 
     -- Process current chunk if present
     if chunk and #chunk > 0 then
@@ -265,6 +280,13 @@ function NanoHandler.body_filter(conf)
                 local result = nano.handle_custom_response(session_data, response)
                 nano.cleanup_all()
                 return result
+            elseif verdict == nano.AttachmentVerdict.ACCEPT then
+                -- Nano service is done inspecting, stop sending more chunks
+                kong.log.info("[body_filter] Session: ", session_id, " | Verdict ACCEPT after chunk #", ctx.body_buffer_chunk - 1, " - stopping body inspection")
+                ctx.skip_body_filter = true
+                nano.fini_session(session_data)
+                ctx.session_finalized = true
+                -- Let remaining chunks pass through without inspection
             end
         else
             -- Buffering chunk, don't send to client yet
