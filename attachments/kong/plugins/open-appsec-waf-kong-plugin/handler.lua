@@ -181,6 +181,12 @@ function NanoHandler.header_filter(conf)
     if verdict == nano.AttachmentVerdict.ACCEPT then
         kong.log.info("[header_filter] Session: ", session_id, " | Verdict ACCEPT - will skip response body inspection")
         ctx.skip_body_filter = true
+        
+        -- Disable proxy buffering to stream the response directly to client without temp files
+        -- This prevents "out of memory" issues with large response bodies
+        ngx.var.upstream_no_cache = "1"  -- Disable caching
+        kong.response.set_header("X-Accel-Buffering", "no")  -- Disable nginx buffering
+        
         -- DON'T finalize session here - let body_filter handle it at EOF
         -- Finalizing here may block the body data flow
     end
@@ -216,7 +222,18 @@ function NanoHandler.body_filter(conf)
     -- If nano service already accepted the response in header_filter, skip body inspection
     -- Just let chunks pass through immediately and finalize at EOF
     if ctx.skip_body_filter then
-        kong.log.debug("[body_filter] Session: ", session_id, " | Skipping inspection, chunk size: ", chunk and #chunk or 0, ", EOF: ", tostring(eof))
+        -- Initialize counter on first skip
+        if not ctx.skipped_chunks then
+            ctx.skipped_chunks = 0
+            ctx.skipped_bytes = 0
+        end
+        
+        ctx.skipped_chunks = ctx.skipped_chunks + 1
+        ctx.skipped_bytes = ctx.skipped_bytes + (chunk and #chunk or 0)
+        
+        if ctx.skipped_chunks % 100 == 1 then  -- Log every 100 chunks
+            kong.log.info("[body_filter] Session: ", session_id, " | Skipped ", ctx.skipped_chunks, " chunks (", ctx.skipped_bytes, " bytes), EOF: ", tostring(eof))
+        end
         
         -- If there were any buffered chunks from before skip was set, flush them first
         if ctx.chunk_buffer and #ctx.chunk_buffer > 0 then
@@ -231,10 +248,10 @@ function NanoHandler.body_filter(conf)
                 ngx.arg[1] = combined
             end
         end
-        -- else: chunk passes through as-is via ngx.arg[1]
+        -- Chunk passes through as-is via ngx.arg[1] - don't modify it
         
         if eof then
-            kong.log.info("[body_filter] Session: ", session_id, " | EOF reached with skip_body_filter - finalizing session")
+            kong.log.info("[body_filter] Session: ", session_id, " | EOF reached after skipping ", ctx.skipped_chunks, " chunks (", ctx.skipped_bytes, " bytes total)")
             nano.fini_session(session_data)
             nano.cleanup_all()
             ctx.session_finalized = true
