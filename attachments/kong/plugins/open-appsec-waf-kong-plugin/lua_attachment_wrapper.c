@@ -498,6 +498,30 @@ static int lua_send_response_headers(lua_State *L) {
     return 2;
 }
 
+static int lua_send_content_length(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
+    SessionID session_id = luaL_checkinteger(L, 2);
+    HttpSessionData *session_data = (HttpSessionData*) lua_touserdata(L, 3);
+    uint64_t content_length = luaL_checkinteger(L, 4);
+
+    if (!attachment || !session_data) {
+        lua_pushstring(L, "Error: Invalid attachment or session_data");
+        return lua_error(L);
+    }
+
+    AttachmentData attachment_data;
+    attachment_data.session_id = session_id;
+    attachment_data.session_data = session_data;
+    attachment_data.chunk_type = CONTENT_LENGTH;
+    attachment_data.data = &content_length;
+
+    AttachmentVerdictResponse* res_ptr = malloc(sizeof(AttachmentVerdictResponse));
+    *res_ptr = SendDataNanoAttachment(attachment, &attachment_data);
+    lua_pushinteger(L, res_ptr->verdict);
+    lua_pushlightuserdata(L, res_ptr);
+    return 2;
+}
+
 static int lua_free_verdict_response(lua_State *L) {
     AttachmentVerdictResponse *response = (AttachmentVerdictResponse *)lua_touserdata(L, 1);
     if (!response) return 0;
@@ -518,6 +542,7 @@ static const struct luaL_Reg nano_attachment_lib[] = {
     {"setHeaderElement", lua_setHeaderElement},
     {"send_data", lua_send_data},
     {"send_response_headers", lua_send_response_headers},
+    {"send_content_length", lua_send_content_length},
     {"fini_session", lua_fini_session},
     {"is_session_finalized", lua_is_session_finalized},
     {"init_session", lua_init_session},

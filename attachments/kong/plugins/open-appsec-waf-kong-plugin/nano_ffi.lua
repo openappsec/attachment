@@ -412,6 +412,29 @@ function nano.send_response_headers(session_id, session_data, headers, status_co
     return verdict, response
 end
 
+function nano.send_content_length(session_id, session_data, content_length)
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.warn("Attachment not available for worker ", worker_id, " - failing open")
+        return nano.AttachmentVerdict.INSPECT
+    end
+
+    local verdict, response = nano_attachment.send_content_length(
+        attachment,
+        session_id,
+        session_data,
+        content_length
+    )
+
+    if response then
+        table.insert(nano.allocated_responses, response)
+    end
+
+    return verdict, response
+end
+
 function nano.handle_header_modifications(headers, modifications)
     if not modifications then
         return headers
