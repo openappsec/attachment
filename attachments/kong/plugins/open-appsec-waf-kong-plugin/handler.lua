@@ -1,4 +1,5 @@
-local nano = require "kong.plugins.open-appsec-waf-kong-plugin.nano_ffi"
+local plugin_name = kong.plugin.get_name()
+local nano = require("kong.plugins." .. plugin_name .. ".nano_ffi")
 local kong = kong
 
 local NanoHandler = {}
