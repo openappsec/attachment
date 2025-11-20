@@ -1,5 +1,6 @@
-local plugin_name = kong.plugin.get_name()
-local nano = require("kong.plugins." .. plugin_name .. ".nano_ffi")
+local module_name = ...
+local prefix = module_name:match("^(.-)handler$")
+local nano = require(prefix .. "nano_ffi")
 local kong = kong
 
 local NanoHandler = {}
