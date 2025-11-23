@@ -40,6 +40,7 @@ typedef enum NanoWebResponseType
 #endif
 {
     CUSTOM_WEB_RESPONSE,
+    CUSTOM_WEB_BLOCK_PAGE_RESPONSE,
     RESPONSE_CODE_ONLY,
     REDIRECT_WEB_RESPONSE,
 
