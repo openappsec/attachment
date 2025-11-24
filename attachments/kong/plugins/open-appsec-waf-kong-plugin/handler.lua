@@ -165,6 +165,11 @@ function NanoHandler.header_filter(conf)
     end
 
     ctx.expect_body = not (status_code == 204 or status_code == 304 or (100 <= status_code and status_code < 200) or content_length == 0)
+    
+    -- Initialize response body processing start time for timeout tracking
+    if ctx.expect_body then
+        ctx.res_body_start_time = ngx.now() * 1000  -- Convert to milliseconds
+    end
 end
 
 function NanoHandler.body_filter(conf)
@@ -183,9 +188,26 @@ function NanoHandler.body_filter(conf)
     local chunk = ngx.arg[1]
     local eof   = ngx.arg[2]
 
+    -- Check if response body processing has timed out
+    if ctx.res_body_start_time and not ctx.res_body_timeout_triggered then
+        local elapsed_time = (ngx.now() * 1000) - ctx.res_body_start_time
+        local timeout = conf.res_body_thread_timeout_msec or 150
+        
+        if elapsed_time > timeout then
+            ctx.res_body_timeout_triggered = true
+            kong.log.warn("Response body processing timeout exceeded (", elapsed_time, "ms > ", timeout, "ms). Failing open - skipping body inspection.")
+        end
+    end
+
     -- Handle body chunks
     if chunk and #chunk > 0 then
         ctx.body_seen = true
+
+        -- If timeout triggered, skip nano inspection and just pass through
+        if ctx.res_body_timeout_triggered then
+            -- Just pass the chunk through without inspection
+            return
+        end
 
         -- Initialize chunk index if not exists
         if not ctx.body_buffer_chunk then
@@ -218,6 +240,15 @@ function NanoHandler.body_filter(conf)
     -- Handle end of response
     if eof then
         if ctx.body_seen or ctx.expect_body == false then
+            -- If timeout was triggered, finalize without sending end inspection
+            if ctx.res_body_timeout_triggered then
+                nano.fini_session(session_data)
+                nano.cleanup_all()
+                ctx.session_finalized = true
+                kong.log.debug("Response body inspection skipped due to timeout. Session finalized.")
+                return
+            end
+            
             local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
             if verdict == nano.AttachmentVerdict.DROP then
                 nano.fini_session(session_data)
