@@ -190,12 +190,15 @@ function NanoHandler.body_filter(conf)
 
     -- Check if response body processing has timed out
     if ctx.res_body_start_time and not ctx.res_body_timeout_triggered then
-        local elapsed_time = (ngx.now() * 1000) - ctx.res_body_start_time
+        local current_time = ngx.now() * 1000
+        local elapsed_time = current_time - ctx.res_body_start_time
         local timeout = conf.res_body_thread_timeout_msec or 150
         
         if elapsed_time > timeout then
             ctx.res_body_timeout_triggered = true
-            kong.log.warn("Response body processing timeout exceeded (", elapsed_time, "ms > ", timeout, "ms). Failing open - skipping body inspection.")
+            kong.log.warn("[OpenAppSec] Response body processing timeout exceeded (", 
+                         string.format("%.2f", elapsed_time), "ms > ", timeout, 
+                         "ms). Failing open - skipping body inspection for session ", session_id)
         end
     end
 
@@ -203,19 +206,51 @@ function NanoHandler.body_filter(conf)
     if chunk and #chunk > 0 then
         ctx.body_seen = true
 
-        -- If timeout triggered, skip nano inspection and just pass through
-        if ctx.res_body_timeout_triggered then
-            -- Just pass the chunk through without inspection
-            return
-        end
-
         -- Initialize chunk index if not exists
         if not ctx.body_buffer_chunk then
             ctx.body_buffer_chunk = 0
         end
 
-        local verdict, response, modifications =
-            nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
+        -- If timeout triggered in a previous chunk, skip nano inspection and just pass through
+        if ctx.res_body_timeout_triggered then
+            kong.log.debug("[OpenAppSec] Skipping body chunk ", ctx.body_buffer_chunk, " inspection due to timeout")
+            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
+            -- Just pass the chunk through without inspection
+            return
+        end
+
+        -- Check time before calling nano.send_body
+        local before_send = ngx.now() * 1000
+        
+        -- Use pcall to catch any errors from nano.send_body
+        local ok, verdict, response, modifications = pcall(function()
+            return nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
+        end)
+        
+        local after_send = ngx.now() * 1000
+        local send_duration = after_send - before_send
+        
+        -- Check if the call failed or took too long
+        if not ok then
+            kong.log.err("[OpenAppSec] nano.send_body failed: ", verdict, ". Failing open.")
+            ctx.res_body_timeout_triggered = true
+            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
+            return
+        end
+        
+        -- Log if the send_body call took a long time and trigger fail-open
+        local timeout = conf.res_body_thread_timeout_msec or 150
+        if send_duration > timeout then
+            kong.log.warn("[OpenAppSec] nano.send_body took ", string.format("%.2f", send_duration), 
+                         "ms (> ", timeout, "ms) for chunk ", ctx.body_buffer_chunk, 
+                         ". Triggering fail-open for remaining chunks.")
+            ctx.res_body_timeout_triggered = true
+            -- Still process this chunk's verdict since we already have it
+        elseif send_duration > (timeout * 0.5) then
+            -- Warning if approaching timeout
+            kong.log.info("[OpenAppSec] nano.send_body took ", string.format("%.2f", send_duration), 
+                         "ms for chunk ", ctx.body_buffer_chunk, " (approaching timeout threshold)")
+        end
 
         -- Handle body modifications if any
         if modifications then
@@ -242,10 +277,11 @@ function NanoHandler.body_filter(conf)
         if ctx.body_seen or ctx.expect_body == false then
             -- If timeout was triggered, finalize without sending end inspection
             if ctx.res_body_timeout_triggered then
+                kong.log.warn("[OpenAppSec] Response body inspection skipped due to timeout. Session ", 
+                             session_id, " finalized without end_inspection.")
                 nano.fini_session(session_data)
                 nano.cleanup_all()
                 ctx.session_finalized = true
-                kong.log.debug("Response body inspection skipped due to timeout. Session finalized.")
                 return
             end
             

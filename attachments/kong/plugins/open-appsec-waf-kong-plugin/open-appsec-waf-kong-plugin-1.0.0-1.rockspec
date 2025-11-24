@@ -3,7 +3,7 @@ version = "1.0.0-1"
 
 source = {
   url = "git://github.com/openappsec/attachment.git",
-  branch = "fix-kong-response-body"
+  tag = "main"
 }
 
 description = {
