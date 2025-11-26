@@ -1,4 +1,6 @@
-local nano = require "kong.plugins.open-appsec-waf-kong-plugin.nano_ffi"
+local module_name = ...
+local prefix = module_name:match("^(.-)handler$")
+local nano = require(prefix .. "nano_ffi")
 local kong = kong
 
 local NanoHandler = {}
@@ -165,141 +167,146 @@ function NanoHandler.header_filter(conf)
     end
 
     ctx.expect_body = not (status_code == 204 or status_code == 304 or (100 <= status_code and status_code < 200) or content_length == 0)
-    
-    -- Initialize response body processing start time for timeout tracking
-    if ctx.expect_body then
-        ctx.res_body_start_time = ngx.now() * 1000  -- Convert to milliseconds
-    end
 end
 
 function NanoHandler.body_filter(conf)
     local ctx = kong.ctx.plugin
-    if not ctx or ctx.blocked then
+    if ctx.blocked then
         return
     end
 
-    local session_id   = ctx.session_id
+    local session_id = ctx.session_id
     local session_data = ctx.session_data
 
     if not session_id or not session_data or ctx.session_finalized then
         return
     end
 
+    -- Initialize chunk counter on first call
+    ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
+
+    -- Get the current chunk from ngx.arg[1] (this is how Kong streams body data)
     local chunk = ngx.arg[1]
-    local eof   = ngx.arg[2]
-
-    -- Check if response body processing has timed out
-    if ctx.res_body_start_time and not ctx.res_body_timeout_triggered then
-        local current_time = ngx.now() * 1000
-        local elapsed_time = current_time - ctx.res_body_start_time
-        local timeout = conf.res_body_thread_timeout_msec or 150
-        
-        if elapsed_time > timeout then
-            ctx.res_body_timeout_triggered = true
-            kong.log.warn("[OpenAppSec] Response body processing timeout exceeded (", 
-                         string.format("%.2f", elapsed_time), "ms > ", timeout, 
-                         "ms). Failing open - skipping body inspection for session ", session_id)
-        end
-    end
-
-    -- Handle body chunks
-    if chunk and #chunk > 0 then
+    local eof = ngx.arg[2]  -- true on last chunk
+    
+    -- Try Kong API for small in-memory bodies (backward compatibility)
+    local full_body = kong.response.get_raw_body()
+    
+    -- Determine if we're dealing with a full body or streaming chunks
+    local is_streaming = (full_body == nil and chunk ~= nil)
+    
+    if full_body and not ctx.body_seen then
+        -- Small response body - use Kong API (original behavior)
         ctx.body_seen = true
-
-        -- Initialize chunk index if not exists
-        if not ctx.body_buffer_chunk then
-            ctx.body_buffer_chunk = 0
-        end
-
-        -- If timeout triggered in a previous chunk, skip nano inspection and just pass through
-        if ctx.res_body_timeout_triggered then
-            kong.log.debug("[OpenAppSec] Skipping body chunk ", ctx.body_buffer_chunk, " inspection due to timeout")
-            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
-            -- Just pass the chunk through without inspection
-            return
-        end
-
-        -- Check time before calling nano.send_body
-        local before_send = ngx.now() * 1000
+        kong.log.debug("Processing in-memory response body, size: ", #full_body)
         
-        -- Use pcall to catch any errors from nano.send_body
-        local ok, verdict, response, modifications = pcall(function()
-            return nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
+        local ok, result = pcall(function()
+            return {nano.send_body(session_id, session_data, full_body, nano.HttpChunkType.HTTP_RESPONSE_BODY)}
         end)
         
-        local after_send = ngx.now() * 1000
-        local send_duration = after_send - before_send
-        
-        -- Check if the call failed or took too long
-        if not ok then
-            kong.log.err("[OpenAppSec] nano.send_body failed: ", verdict, ". Failing open.")
-            ctx.res_body_timeout_triggered = true
-            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
-            return
-        end
-        
-        -- Log if the send_body call took a long time and trigger fail-open
-        local timeout = conf.res_body_thread_timeout_msec or 150
-        if send_duration > timeout then
-            kong.log.warn("[OpenAppSec] nano.send_body took ", string.format("%.2f", send_duration), 
-                         "ms (> ", timeout, "ms) for chunk ", ctx.body_buffer_chunk, 
-                         ". Triggering fail-open for remaining chunks.")
-            ctx.res_body_timeout_triggered = true
-            -- Still process this chunk's verdict since we already have it
-        elseif send_duration > (timeout * 0.5) then
-            -- Warning if approaching timeout
-            kong.log.info("[OpenAppSec] nano.send_body took ", string.format("%.2f", send_duration), 
-                         "ms for chunk ", ctx.body_buffer_chunk, " (approaching timeout threshold)")
-        end
+        if ok and result and result[1] then
+            local verdict = result[1]
+            local response = result[2]
+            local modifications = result[3]
 
-        -- Handle body modifications if any
-        if modifications then
-            chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
-            ngx.arg[1] = chunk
-        end
-
-        ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
-
-        if verdict == nano.AttachmentVerdict.DROP then
-            nano.fini_session(session_data)
-            ctx.session_finalized = true
-            local result = nano.handle_custom_response(session_data, response)
-            nano.cleanup_all()
-            -- Stop current streaming
-            ngx.arg[1] = ""
-            ngx.arg[2] = true
-            return result
-        end
-    end
-
-    -- Handle end of response
-    if eof then
-        if ctx.body_seen or ctx.expect_body == false then
-            -- If timeout was triggered, finalize without sending end inspection
-            if ctx.res_body_timeout_triggered then
-                kong.log.warn("[OpenAppSec] Response body inspection skipped due to timeout. Session ", 
-                             session_id, " finalized without end_inspection.")
-                nano.fini_session(session_data)
-                nano.cleanup_all()
-                ctx.session_finalized = true
-                return
+            if modifications then
+                full_body = nano.handle_body_modifications(full_body, modifications, ctx.body_buffer_chunk)
+                kong.response.set_raw_body(full_body)
             end
-            
-            local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
+
+            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
+
             if verdict == nano.AttachmentVerdict.DROP then
                 nano.fini_session(session_data)
                 ctx.session_finalized = true
-                local result = nano.handle_custom_response(session_data, response)
+                local custom_result = nano.handle_custom_response(session_data, response)
                 nano.cleanup_all()
-                ngx.arg[1] = ""
-                ngx.arg[2] = true
-                return result
+                return custom_result
             end
-
-            nano.fini_session(session_data)
-            nano.cleanup_all()
-            ctx.session_finalized = true
+        else
+            kong.log.warn("nano.send_body failed for in-memory body: ", result)
+            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
         end
+        
+    elseif is_streaming and chunk then
+        -- Large response body - streaming chunks (file-buffered or large in-memory)
+        ctx.body_seen = true
+        
+        -- Process chunk even if empty (empty chunks are valid in streaming responses)
+        local chunk_size = (type(chunk) == "string") and #chunk or 0
+        
+        if chunk_size > 0 then
+            kong.log.debug("Processing response body chunk #", ctx.body_buffer_chunk, ", size: ", chunk_size, ", eof: ", eof)
+            
+            local ok, result = pcall(function()
+                return {nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)}
+            end)
+            
+            if ok and result and result[1] then
+                local verdict = result[1]
+                local response = result[2]
+                local modifications = result[3]
+
+                -- Apply modifications to this chunk
+                if modifications then
+                    chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
+                end
+
+                ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
+
+                if verdict == nano.AttachmentVerdict.DROP then
+                    nano.fini_session(session_data)
+                    ctx.session_finalized = true
+                    ngx.arg[1] = nil  -- Clear the output
+                    ngx.arg[2] = true  -- Force EOF
+                    local custom_result = nano.handle_custom_response(session_data, response)
+                    nano.cleanup_all()
+                    return custom_result
+                end
+                
+                -- Update the chunk that will be sent to client (CRITICAL for streaming)
+                ngx.arg[1] = chunk
+            else
+                kong.log.warn("nano.send_body failed for chunk #", ctx.body_buffer_chunk, ": ", result)
+                ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
+                -- Fail-open: pass chunk through unmodified
+                -- ngx.arg[1] is already set to the original chunk
+            end
+        else
+            -- Empty chunk - just track it, don't send to nano
+            kong.log.debug("Empty chunk #", ctx.body_buffer_chunk, ", eof: ", eof)
+            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
+        end
+    end
+
+    -- Finalize session on last chunk (EOF) or when no body expected
+    if eof or (ctx.expect_body == false and not ctx.body_seen) then
+        kong.log.debug("Finalizing response inspection, body_seen: ", ctx.body_seen, ", eof: ", eof)
+        
+        local ok, result = pcall(function()
+            return {nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)}
+        end)
+        
+        if ok and result and result[1] then
+            local verdict = result[1]
+            local response = result[2]
+            
+            if verdict == nano.AttachmentVerdict.DROP then
+                nano.fini_session(session_data)
+                ctx.session_finalized = true
+                ngx.arg[1] = nil  -- Clear any remaining output
+                ngx.arg[2] = true  -- Force EOF
+                local custom_result = nano.handle_custom_response(session_data, response)
+                nano.cleanup_all()
+                return custom_result
+            end
+        else
+            kong.log.warn("nano.end_inspection failed: ", result)
+        end
+
+        nano.fini_session(session_data)
+        nano.cleanup_all()
+        ctx.session_finalized = true
     end
 end
 
