@@ -363,9 +363,6 @@ static int lua_send_body(lua_State *L) {
         return lua_error(L);
     }
 
-    // Send the chunk as-is without re-splitting
-    // Kong/Nginx already provides properly sized chunks from ngx.arg[1]
-    // Re-splitting causes memory issues and unnecessary overhead
     HttpBody http_chunks;
     http_chunks.bodies_count = 1;
     
