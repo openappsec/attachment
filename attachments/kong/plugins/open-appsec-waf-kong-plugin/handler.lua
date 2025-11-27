@@ -167,26 +167,6 @@ function NanoHandler.header_filter(conf)
     end
 
     ctx.expect_body = not (status_code == 204 or status_code == 304 or (100 <= status_code and status_code < 200) or content_length == 0)
-    
-    -- If no body is expected, finalize the session here
-    if not ctx.expect_body then
-        local ok, result = pcall(function()
-            return {nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)}
-        end)
-        
-        if ok and result and result[1] then
-            if result[1] == nano.AttachmentVerdict.DROP then
-                kong.ctx.plugin.blocked = true
-                nano.fini_session(session_data)
-                nano.cleanup_all()
-                return nano.handle_custom_response(session_data, result[2])
-            end
-        end
-        
-        nano.fini_session(session_data)
-        nano.cleanup_all()
-        ctx.session_finalized = true
-    end
 end
 
 function NanoHandler.body_filter(conf)
@@ -195,20 +175,10 @@ function NanoHandler.body_filter(conf)
         return
     end
 
-    -- If no session was created (timeout in earlier phases), skip body inspection entirely
-    if not ctx.session_id or not ctx.session_data then
-        return
-    end
-
-    -- If expect_body is explicitly false, don't process body at all
-    if ctx.expect_body == false then
-        return
-    end
-
     local session_id = ctx.session_id
     local session_data = ctx.session_data
 
-    if ctx.session_finalized then
+    if not session_id or not session_data or ctx.session_finalized then
         return
     end
 
@@ -221,7 +191,7 @@ function NanoHandler.body_filter(conf)
 
     -- Check if we've exceeded 150ms timeout
     local elapsed_time = (ngx.now() * 1000) - ctx.body_filter_start_time
-    if elapsed_time > 1500 then
+    if elapsed_time > 150000 then
         if not ctx.body_filter_timeout then
             ctx.body_filter_timeout = true
             kong.log.warn("body_filter timeout exceeded (150ms), failing open - no more chunks sent to nano-agent")
@@ -322,8 +292,8 @@ function NanoHandler.body_filter(conf)
         end
     end
 
-    -- Finalize session only on EOF
-    if eof then
+    -- Finalize session on last chunk (EOF) or when no body expected
+    if eof or (ctx.expect_body == false and not ctx.body_seen) then
         kong.log.debug("Finalizing response inspection, body_seen: ", ctx.body_seen, ", eof: ", eof, ", timeout: ", ctx.body_filter_timeout)
         
         -- Only send end_inspection if we haven't timed out
