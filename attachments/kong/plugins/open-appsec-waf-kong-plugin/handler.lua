@@ -196,9 +196,14 @@ function NanoHandler.body_filter(conf)
     if current_time - ctx.body_filter_start_time > 150000 then
         kong.log.warn("body_filter timeout exceeded (2.5 minutes), failing open")
         if not ctx.session_finalized then
+            -- Invalidate session references BEFORE finalization to prevent lingering IPC signals
+            ctx.session_id = nil
+            ctx.session_data = nil
+            ctx.session_finalized = true
+            
+            -- Now finalize and cleanup
             nano.fini_session(session_data)
             nano.cleanup_all()
-            ctx.session_finalized = true
         end
         return
     end
@@ -224,9 +229,14 @@ function NanoHandler.body_filter(conf)
             ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
 
             if verdict == nano.AttachmentVerdict.DROP then
-                nano.fini_session(session_data)
+                -- Invalidate session references BEFORE finalization
+                local temp_session_data = session_data
+                ctx.session_id = nil
+                ctx.session_data = nil
                 ctx.session_finalized = true
-                local custom_result = nano.handle_custom_response(session_data, response)
+                
+                nano.fini_session(temp_session_data)
+                local custom_result = nano.handle_custom_response(temp_session_data, response)
                 nano.cleanup_all()
                 return custom_result
             end
@@ -234,9 +244,14 @@ function NanoHandler.body_filter(conf)
             -- Nano failed - finalize session and pass through
             kong.log.warn("nano.send_body failed, failing open: ", tostring(result))
             if not ctx.session_finalized then
-                nano.fini_session(session_data)
-                nano.cleanup_all()
+                -- Invalidate session references BEFORE finalization
+                local temp_session_data = session_data
+                ctx.session_id = nil
+                ctx.session_data = nil
                 ctx.session_finalized = true
+                
+                nano.fini_session(temp_session_data)
+                nano.cleanup_all()
             end
         end
         return
@@ -253,17 +268,27 @@ function NanoHandler.body_filter(conf)
                 local response = result[2]
 
                 if verdict == nano.AttachmentVerdict.DROP then
-                    nano.fini_session(session_data)
+                    -- Invalidate session references BEFORE finalization
+                    local temp_session_data = session_data
+                    ctx.session_id = nil
+                    ctx.session_data = nil
                     ctx.session_finalized = true
-                    local custom_result = nano.handle_custom_response(session_data, response)
+                    
+                    nano.fini_session(temp_session_data)
+                    local custom_result = nano.handle_custom_response(temp_session_data, response)
                     nano.cleanup_all()
                     return custom_result
                 end
             end
 
-            nano.fini_session(session_data)
-            nano.cleanup_all()
+            -- Invalidate session references BEFORE finalization
+            local temp_session_data = session_data
+            ctx.session_id = nil
+            ctx.session_data = nil
             ctx.session_finalized = true
+            
+            nano.fini_session(temp_session_data)
+            nano.cleanup_all()
         end
     end
 end
