@@ -186,32 +186,22 @@ function NanoHandler.body_filter(conf)
     if not ctx.body_buffer_chunk then
         ctx.body_buffer_chunk = 0
         ctx.body_filter_start_time = ngx.now() * 1000
-        ctx.body_filter_timeout = false
-        ctx.failed_nano_send = false
         ctx.num_body_filter_calls = 0
         ctx.last_chunk_hash = nil
     end
     
     ctx.num_body_filter_calls = ctx.num_body_filter_calls + 1
 
-    if ctx.failed_nano_send then
-        return
-    end
-
     local current_time = ngx.now() * 1000
     if current_time - ctx.body_filter_start_time > 150000 then
-        if not ctx.body_filter_timeout then
-            ctx.body_filter_timeout = true
-            ctx.failed_nano_send = true
-            kong.log.warn("body_filter timeout exceeded (2.5 minutes), failing open")
-            
-            -- Finalize session on timeout
-            if not ctx.session_finalized then
-                nano.fini_session(session_data)
-                nano.cleanup_all()
-                ctx.session_finalized = true
-            end
+        kong.log.warn("body_filter timeout exceeded (2.5 minutes), failing open")
+        
+        if not ctx.session_finalized then
+            nano.fini_session(session_data)
+            nano.cleanup_all()
+            ctx.session_finalized = true
         end
+        
         return
     end
 
@@ -296,18 +286,22 @@ function NanoHandler.body_filter(conf)
                 return custom_result
             end
         else
-            -- Nano send failed - fail open, pass chunk through uninspected
-            kong.log.warn("nano.send_body failed, failing open: ", result)
-            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
-            ctx.failed_nano_send = true
-            ctx.last_chunk_hash = chunk_hash
-            -- CRITICAL: Pass chunk through to client
-            -- ngx.arg[1] is already set to chunk by Kong, don't need to modify
+            -- Nano send failed - finalize session immediately and fail open
+            kong.log.warn("nano.send_body failed, finalizing session and failing open: ", result)
+            
+            if not ctx.session_finalized then
+                nano.fini_session(session_data)
+                nano.cleanup_all()
+                ctx.session_finalized = true
+            end
+            
+            -- Pass chunk through uninspected
+            return
         end
     end
 
     if eof or (ctx.expect_body == false and not ctx.body_seen) then
-        if not ctx.body_filter_timeout and not ctx.failed_nano_send then
+        if not ctx.session_finalized then
             local ok, result = pcall(function()
                 return {nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)}
             end)
