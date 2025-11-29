@@ -220,7 +220,8 @@ function NanoHandler.body_filter(conf)
     local full_body = kong.response.get_raw_body()
     local is_streaming = (full_body == nil and chunk ~= nil)
     
-    if not full_body and not chunk and not eof then
+    -- Return early for empty/nil chunks that aren't EOF
+    if not eof and (not chunk or (type(chunk) == "string" and #chunk == 0)) and not full_body then
         return
     end
     
