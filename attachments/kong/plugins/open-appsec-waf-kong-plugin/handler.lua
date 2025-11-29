@@ -222,10 +222,12 @@ function NanoHandler.body_filter(conf)
     
     -- Return early for empty/nil chunks that aren't EOF
     if not eof and (not chunk or (type(chunk) == "string" and #chunk == 0)) and not full_body then
+        kong.log.debug("Skipping empty chunk, call #", ctx.num_body_filter_calls)
         return
     end
     
-    kong.log.debug("body_filter call #", ctx.num_body_filter_calls, ", sent: ", ctx.body_buffer_chunk, " chunks")
+    local chunk_size = chunk and type(chunk) == "string" and #chunk or 0
+    kong.log.debug("body_filter call #", ctx.num_body_filter_calls, ", chunk size: ", chunk_size, ", eof: ", eof, ", sent: ", ctx.body_buffer_chunk, " chunks")
     
     if full_body and not ctx.body_seen then
         ctx.body_seen = true
@@ -294,9 +296,13 @@ function NanoHandler.body_filter(conf)
                 return custom_result
             end
         else
-            kong.log.warn("nano.send_body failed: ", result)
+            -- Nano send failed - fail open, pass chunk through uninspected
+            kong.log.warn("nano.send_body failed, failing open: ", result)
             ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
             ctx.failed_nano_send = true
+            ctx.last_chunk_hash = chunk_hash
+            -- CRITICAL: Pass chunk through to client
+            -- ngx.arg[1] is already set to chunk by Kong, don't need to modify
         end
     end
 
