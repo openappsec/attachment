@@ -182,93 +182,36 @@ function NanoHandler.body_filter(conf)
         return
     end
 
-    -- Initialize chunk counter and timeout tracking on first call
+    local chunk = ngx.arg[1]
+    local eof = ngx.arg[2]
+
+    -- Initialize on first call
     if not ctx.body_buffer_chunk then
         ctx.body_buffer_chunk = 0
         ctx.body_filter_start_time = ngx.now() * 1000
-        ctx.num_body_filter_calls = 0
-        ctx.last_chunk_hash = nil
     end
     
-    ctx.num_body_filter_calls = ctx.num_body_filter_calls + 1
-
+    -- Check timeout (2.5 minutes)
     local current_time = ngx.now() * 1000
     if current_time - ctx.body_filter_start_time > 150000 then
         kong.log.warn("body_filter timeout exceeded (2.5 minutes), failing open")
-        
         if not ctx.session_finalized then
             nano.fini_session(session_data)
             nano.cleanup_all()
             ctx.session_finalized = true
         end
-        
         return
     end
 
-    local chunk = ngx.arg[1]
-    local eof = ngx.arg[2]
-    local full_body = kong.response.get_raw_body()
-    local is_streaming = (full_body == nil and chunk ~= nil)
-    
-    -- Return early for empty/nil chunks that aren't EOF
-    if not eof and (not chunk or (type(chunk) == "string" and #chunk == 0)) and not full_body then
-        kong.log.debug("Skipping empty chunk, call #", ctx.num_body_filter_calls)
-        return
-    end
-    
-    local chunk_size = chunk and type(chunk) == "string" and #chunk or 0
-    kong.log.debug("body_filter call #", ctx.num_body_filter_calls, ", chunk size: ", chunk_size, ", eof: ", eof, ", sent: ", ctx.body_buffer_chunk, " chunks")
-    
-    if full_body and not ctx.body_seen then
+    if chunk and #chunk > 0 then
         ctx.body_seen = true
         
-        local ok, result = pcall(function()
-            return {nano.send_body(session_id, session_data, full_body, nano.HttpChunkType.HTTP_RESPONSE_BODY)}
-        end)
-        
-        if ok and result and result[1] then
-            local verdict = result[1]
-            local response = result[2]
-            local modifications = result[3]
-
-            if modifications then
-                full_body = nano.handle_body_modifications(full_body, modifications, ctx.body_buffer_chunk)
-                kong.response.set_raw_body(full_body)
-            end
-
-            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
-
-            if verdict == nano.AttachmentVerdict.DROP then
-                nano.fini_session(session_data)
-                ctx.session_finalized = true
-                local custom_result = nano.handle_custom_response(session_data, response)
-                nano.cleanup_all()
-                return custom_result
-            end
-        else
-            kong.log.warn("nano.send_body failed for in-memory body: ", result)
-            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
-            ctx.failed_nano_send = true
-        end
-        
-    elseif is_streaming and chunk and type(chunk) == "string" and #chunk > 0 then
-        ctx.body_seen = true
-        
-        local chunk_hash = ngx.crc32_long(chunk)
-        
-        if chunk_hash == ctx.last_chunk_hash then
-            kong.log.debug("Duplicate chunk detected (same hash as previous), skipping")
-            return
-        end
-            
+        -- Wrap in pcall for fail-open behavior
         local ok, result = pcall(function()
             return {nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)}
         end)
-        
+
         if ok and result and result[1] then
-            ctx.last_chunk_hash = chunk_hash
-            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
-            
             local verdict = result[1]
             local response = result[2]
             local modifications = result[3]
@@ -278,6 +221,8 @@ function NanoHandler.body_filter(conf)
                 ngx.arg[1] = chunk
             end
 
+            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
+
             if verdict == nano.AttachmentVerdict.DROP then
                 nano.fini_session(session_data)
                 ctx.session_finalized = true
@@ -286,18 +231,15 @@ function NanoHandler.body_filter(conf)
                 return custom_result
             end
         else
-            -- Nano send failed - finalize session immediately and fail open
-            kong.log.warn("nano.send_body failed, finalizing session and failing open: ", result)
-            
+            -- Nano failed - finalize session and pass through
+            kong.log.warn("nano.send_body failed, failing open: ", tostring(result))
             if not ctx.session_finalized then
                 nano.fini_session(session_data)
                 nano.cleanup_all()
                 ctx.session_finalized = true
             end
-            
-            -- Pass chunk through uninspected
-            return
         end
+        return
     end
 
     if eof or (ctx.expect_body == false and not ctx.body_seen) then
@@ -305,24 +247,20 @@ function NanoHandler.body_filter(conf)
             local ok, result = pcall(function()
                 return {nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)}
             end)
-            
+
             if ok and result and result[1] then
                 local verdict = result[1]
                 local response = result[2]
-                
+
                 if verdict == nano.AttachmentVerdict.DROP then
                     nano.fini_session(session_data)
                     ctx.session_finalized = true
-                    ngx.arg[1] = nil
-                    ngx.arg[2] = true
                     local custom_result = nano.handle_custom_response(session_data, response)
                     nano.cleanup_all()
                     return custom_result
                 end
-            else
-                kong.log.warn("nano.end_inspection failed: ", result)
             end
-            
+
             nano.fini_session(session_data)
             nano.cleanup_all()
             ctx.session_finalized = true
