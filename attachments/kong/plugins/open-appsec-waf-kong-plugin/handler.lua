@@ -204,6 +204,13 @@ function NanoHandler.body_filter(conf)
             ctx.body_filter_timeout = true
             ctx.failed_nano_send = true
             kong.log.warn("body_filter timeout exceeded (2.5 minutes), failing open")
+            
+            -- Finalize session on timeout
+            if not ctx.session_finalized then
+                nano.fini_session(session_data)
+                nano.cleanup_all()
+                ctx.session_finalized = true
+            end
         end
         return
     end
@@ -274,22 +281,19 @@ function NanoHandler.body_filter(conf)
             local modifications = result[3]
 
             if modifications then
-                chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk - 1)
+                chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
+                ngx.arg[1] = chunk
             end
 
             if verdict == nano.AttachmentVerdict.DROP then
                 nano.fini_session(session_data)
                 ctx.session_finalized = true
-                ngx.arg[1] = nil
-                ngx.arg[2] = true
                 local custom_result = nano.handle_custom_response(session_data, response)
                 nano.cleanup_all()
                 return custom_result
             end
-            
-            ngx.arg[1] = chunk
         else
-            kong.log.warn("nano.send_body failed for chunk #", ctx.body_buffer_chunk + 1, ": ", result)
+            kong.log.warn("nano.send_body failed: ", result)
             ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
             ctx.failed_nano_send = true
         end
@@ -317,11 +321,11 @@ function NanoHandler.body_filter(conf)
             else
                 kong.log.warn("nano.end_inspection failed: ", result)
             end
+            
+            nano.fini_session(session_data)
+            nano.cleanup_all()
+            ctx.session_finalized = true
         end
-
-        nano.fini_session(session_data)
-        nano.cleanup_all()
-        ctx.session_finalized = true
     end
 end
 
