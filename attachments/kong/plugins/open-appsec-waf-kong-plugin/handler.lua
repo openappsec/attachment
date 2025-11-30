@@ -228,8 +228,10 @@ function NanoHandler.header_filter(conf)
         return nano.handle_custom_response(session_data, response)
     elseif verdict ~= nano.AttachmentVerdict.INSPECT then
         kong.log.debug("Got final verdict (not INSPECT) in header_filter: ", verdict, " - session will be finalized in log phase")
+        kong.log.err("------------------------------------------------------------------------")
+        kong.log.err("SETTING inspection_complete=true in header_filter (verdict != INSPECT)")
+        kong.log.err("------------------------------------------------------------------------")
         ctx.inspection_complete = true
-        return
     end
 
     kong.log.debug("Got INSPECT verdict - continuing to body_filter")
@@ -273,8 +275,11 @@ function NanoHandler.body_filter(conf)
         nano.cleanup_all()
         ctx.session_id = nil
         ctx.session_data = nil
+        kong.log.err("------------------------------------------------------------------------")
+        kong.log.err("SETTING inspection_complete=true in body_filter (TIMEOUT)")
+        kong.log.err("------------------------------------------------------------------------")
         ctx.inspection_complete = true
-        return
+        goto skip_inspection
     end
 
     if chunk and #chunk > 0 then
@@ -307,6 +312,9 @@ function NanoHandler.body_filter(conf)
                 return custom_result
             elseif verdict ~= nano.AttachmentVerdict.INSPECT then
                 kong.log.err("3-GOT ACCEPT VERDICT during chunk #" .. ctx.body_buffer_chunk .. " - setting inspection_complete, chunk will pass through")
+                kong.log.err("------------------------------------------------------------------------")
+                kong.log.err("SETTING inspection_complete=true in body_filter (ACCEPT verdict during chunk)")
+                kong.log.err("------------------------------------------------------------------------")
                 ctx.inspection_complete = true
             end
         else
@@ -334,6 +342,9 @@ function NanoHandler.body_filter(conf)
                 return custom_result
             elseif verdict ~= nano.AttachmentVerdict.INSPECT then
                 kong.log.err("3-Got ACCEPT verdict at EOF - inspection complete, EOF chunk will pass through")
+                kong.log.err("------------------------------------------------------------------------")
+                kong.log.err("SETTING inspection_complete=true in body_filter (ACCEPT verdict at EOF)")
+                kong.log.err("------------------------------------------------------------------------")
                 ctx.inspection_complete = true
             else
                 kong.log.warn("Got INSPECT verdict at EOF - this is unexpected, finalizing anyway")
@@ -342,6 +353,9 @@ function NanoHandler.body_filter(conf)
             kong.log.warn("nano.end_inspection failed, failing open: ", tostring(result))
         end
 
+        kong.log.err("------------------------------------------------------------------------")
+        kong.log.err("SETTING inspection_complete=true in body_filter (EOF processing complete)")
+        kong.log.err("------------------------------------------------------------------------")
         ctx.inspection_complete = true
     end
     
