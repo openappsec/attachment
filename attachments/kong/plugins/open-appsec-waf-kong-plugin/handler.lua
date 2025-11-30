@@ -15,18 +15,15 @@ function NanoHandler.init_worker()
     nano.init_attachment()
 end
 
--- **Handles Request Headers (DecodeHeaders Equivalent)**
 function NanoHandler.access(conf)
-    kong.log.err("1--------------------------------------------------------------------------------------------------------------------------------------------------")
+    kong.log.err("1-111111111 ACCESS PHASE START -------------------------------------------------------------------------------------------------------------------------------------------------")
     
-    -- Skip if no route is matched (internal Kong requests, unmapped paths)
     local route = kong.router.get_route()
     if not route then
         kong.log.debug("Skipping WAF inspection - no route matched")
         return
     end
     
-    -- Skip internal Kong requests (admin API, status endpoint, etc.)
     local request_path = kong.request.get_path()
     if request_path and (
         request_path:match("^/status") or 
@@ -37,13 +34,11 @@ function NanoHandler.access(conf)
         return
     end
     
-    -- Skip if this is an internal subrequest (ngx.location.capture, etc.)
     if ngx.var.internal then
         kong.log.debug("Skipping WAF inspection for internal subrequest")
         return
     end
     
-    -- Skip TLS/SSL handshake and certificate phase requests (no HTTP data yet)
     local request_uri = ngx.var.request_uri
     if not request_uri or request_uri == "" then
         kong.log.debug("Skipping WAF inspection - TLS handshake or no URI")
@@ -70,7 +65,7 @@ function NanoHandler.access(conf)
 
     local meta_data = nano.handle_start_transaction()
     if not meta_data then
-    kong.log.err("Failed to handle start transaction - failing open")
+        kong.log.err("Failed to handle start transaction - failing open")
         return
     end
     
@@ -87,7 +82,6 @@ function NanoHandler.access(conf)
         nano.cleanup_all()
         return result
     elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-        -- ACCEPT or other - stop inspection but keep session alive until log phase
         kong.log.debug("Got final verdict (not INSPECT) after request headers: ", verdict, " - session will be finalized in log phase")
         kong.ctx.plugin.inspection_complete = true
         return
@@ -104,10 +98,8 @@ function NanoHandler.access(conf)
                 nano.cleanup_all()
                 return result
             elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-                -- ACCEPT or other - stop inspection but keep session alive until log phase
                 kong.log.debug("Got final verdict (not INSPECT) after request body: ", verdict, " - session will be finalized in log phase")
                 kong.ctx.plugin.inspection_complete = true
-                -- Continue to response phase
             end
         else
             kong.log.debug("Request body not in memory, attempting to read from buffer/file")
@@ -121,10 +113,8 @@ function NanoHandler.access(conf)
                     kong.ctx.plugin.blocked = true
                     return nano.handle_custom_response(session_data, response)
                 elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-                    -- ACCEPT or other - stop inspection but keep session alive until log phase
                     kong.log.debug("Got final verdict (not INSPECT) after request body from var: ", verdict, " - session will be finalized in log phase")
                     kong.ctx.plugin.inspection_complete = true
-                    -- Continue to response phase
                 end
             else
                 local body_file = ngx.var.request_body_file
@@ -145,10 +135,8 @@ function NanoHandler.access(conf)
                                 nano.cleanup_all()
                                 return result
                             elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-                                -- ACCEPT or other - stop inspection but keep session alive until log phase
                                 kong.log.debug("Got final verdict (not INSPECT) after request body from file: ", verdict, " - session will be finalized in log phase")
                                 kong.ctx.plugin.inspection_complete = true
-                                -- Continue to response phase
                             end
                         else
                             kong.log.debug("Empty body file")
@@ -178,13 +166,21 @@ function NanoHandler.access(conf)
             nano.cleanup_all()
             return result
         elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-            -- ACCEPT or other - stop inspection but keep session alive until log phase
             kong.log.debug("Got final verdict (not INSPECT) at request END: ", verdict, " - session will be finalized in log phase")
             kong.ctx.plugin.inspection_complete = true
-            -- Continue to response phase
         end
     else
-        verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
+        local ok, verdict, response  = pcall(function()
+            return nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
+        end)
+
+        if not ok then
+            kong.log.err("Error ending request inspection (no body): ", verdict, " - failing open")
+            nano.fini_session(session_data)
+            nano.cleanup_all()
+            return
+        end
+
         if verdict == nano.AttachmentVerdict.DROP then
             nano.fini_session(session_data)
             kong.ctx.plugin.blocked = true
@@ -192,24 +188,19 @@ function NanoHandler.access(conf)
             nano.cleanup_all()
             return result
         elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-            -- ACCEPT or other - stop inspection but keep session alive until log phase
             kong.log.debug("Got final verdict (not INSPECT) at request END (no body): ", verdict, " - session will be finalized in log phase")
             kong.ctx.plugin.inspection_complete = true
-            -- Continue to response phase
         end
     end
-
-    NanoHandler.processed_requests[session_id] = true
 end
 
 function NanoHandler.header_filter(conf)
-    kong.log.err("22222222222222222222222--------------------------------------------------------------------------------------------------------------------------------------------------")
+    kong.log.err("2-222222222 HEADER_FILTER PHASE START -------------------------------------------------------------------------------------------------------------------------------------------------")
     local ctx = kong.ctx.plugin
     if ctx.blocked then
         return
     end
 
-    -- Skip if inspection already completed
     if ctx.inspection_complete then
         kong.log.debug("Inspection already completed, skipping header_filter")
         return
@@ -217,7 +208,6 @@ function NanoHandler.header_filter(conf)
 
     local session_id = ctx.session_id
     local session_data = ctx.session_data
-
     if not session_id or not session_data then
         kong.log.err("No session data found in header_filter")
         return
@@ -232,73 +222,69 @@ function NanoHandler.header_filter(conf)
     
     kong.log.warn("Response headers verdict: ", verdict, " (INSPECT=", nano.AttachmentVerdict.INSPECT, ", ACCEPT=", nano.AttachmentVerdict.ACCEPT, ", DROP=", nano.AttachmentVerdict.DROP, ")")
     
-    -- Check verdict following Envoy pattern: if verdict != INSPECT, finalize
     if verdict == nano.AttachmentVerdict.DROP then
         kong.ctx.plugin.blocked = true
-        nano.fini_session(session_data)
         nano.cleanup_all()
         return nano.handle_custom_response(session_data, response)
     elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-        -- ACCEPT or other verdict - stop inspection but keep session alive until log phase
         kong.log.debug("Got final verdict (not INSPECT) in header_filter: ", verdict, " - session will be finalized in log phase")
         ctx.inspection_complete = true
         return
     end
 
-    -- Only reach here if verdict == INSPECT - need to inspect body
     kong.log.debug("Got INSPECT verdict - continuing to body_filter")
-    ctx.expect_body = not (status_code == 204 or status_code == 304 or (100 <= status_code and status_code < 200) or content_length == 0)
 end
 
 function NanoHandler.body_filter(conf)
-    kong.log.err("3-3333333333333333333333333-------------------------------------------------------------------------------------------------------------------------------------------------")
+    local chunk = ngx.arg[1]
+    local eof = ngx.arg[2]
+    local chunk_size = chunk and #chunk or 0
+    kong.log.err("3-333333333 BODY_FILTER - chunk_size=" .. chunk_size .. " eof=" .. tostring(eof) .. " -------------------------------------------------------------------------------------------------------------------------------------------------")
+    
     local ctx = kong.ctx.plugin
     if ctx.blocked then
+        kong.log.err("3-BLOCKED: returning early")
         return
     end
 
-    -- Skip if inspection already completed
     if ctx.inspection_complete then
-        kong.log.debug("Inspection already completed, skipping body_filter")
-        return
+        kong.log.err("3-INSPECTION_COMPLETE: chunk_size=" .. chunk_size .. " eof=" .. tostring(eof) .. " - PASSING THROUGH")
+        goto skip_inspection
     end
 
     local session_id = ctx.session_id
     local session_data = ctx.session_data
 
     if not session_id or not session_data then
-        kong.log.err("No session data found in body_filter")
-        return
+        kong.log.err("No session data found in body_filter - letting chunk pass through")
+        goto skip_inspection
     end
 
-    local chunk = ngx.arg[1]
-    local eof = ngx.arg[2]
-
-    -- Initialize on first call
     if not ctx.body_buffer_chunk then
         ctx.body_buffer_chunk = 0
         ctx.body_filter_start_time = ngx.now() * 1000
     end
-    -- Check timeout (2.5 minutes)
+    
     local current_time = ngx.now() * 1000
-    if current_time - ctx.body_filter_start_time > 150000 then
-        kong.log.warn("body_filter timeout exceeded (2.5 minutes), failing open")
+    local elapsed = current_time - ctx.body_filter_start_time
+    if elapsed > 150000 then
+        kong.log.warn("Body filter timeout exceeded (", elapsed, "ms) - finalizing session")
         nano.fini_session(session_data)
         nano.cleanup_all()
         ctx.session_id = nil
         ctx.session_data = nil
+        ctx.inspection_complete = true
         return
     end
 
     if chunk and #chunk > 0 then
         ctx.body_seen = true
         
-        -- Send response body chunk
         local ok, result = pcall(function()
             return {nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)}
         end)
 
-        if ok and result and result[1] then
+        if ok then
             local verdict = result[1]
             local response = result[2]
             local modifications = result[3]
@@ -312,7 +298,6 @@ function NanoHandler.body_filter(conf)
 
             ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
 
-            -- Following Envoy pattern: check if verdict != INSPECT
             if verdict == nano.AttachmentVerdict.DROP then
                 nano.fini_session(session_data)
                 local custom_result = nano.handle_custom_response(session_data, response)
@@ -321,33 +306,25 @@ function NanoHandler.body_filter(conf)
                 ctx.session_data = nil
                 return custom_result
             elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-                -- ACCEPT or other - stop inspection but keep session alive until log phase
-                kong.log.debug("Got final verdict (not INSPECT) during body chunk: ", verdict, " - session will be finalized in log phase")
+                kong.log.err("3-GOT ACCEPT VERDICT during chunk #" .. ctx.body_buffer_chunk .. " - setting inspection_complete, chunk will pass through")
                 ctx.inspection_complete = true
-                return
             end
-            -- Continue if verdict == INSPECT
         else
             kong.log.warn("nano.send_body failed, failing open: ", tostring(result))
-            -- Continue processing, fail open
         end
     end
 
-    -- Handle EOF - this is where we signal end of transaction and get final verdict
     if eof or (ctx.expect_body == false and not ctx.body_seen) then
-        kong.log.debug("Reached EOF, sending RESPONSE_END signal")
-        
         local ok, result = pcall(function()
             return {nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)}
         end)
 
-        if ok and result and result[1] then
+        if ok then
             local verdict = result[1]
             local response = result[2]
 
-            kong.log.debug("Response END verdict: ", verdict)
+            kong.log.err("3-Response END verdict: " .. tostring(verdict))
 
-            -- Following Envoy pattern: check verdict after RESPONSE_END
             if verdict == nano.AttachmentVerdict.DROP then
                 nano.fini_session(session_data)
                 local custom_result = nano.handle_custom_response(session_data, response)
@@ -356,35 +333,41 @@ function NanoHandler.body_filter(conf)
                 ctx.session_data = nil
                 return custom_result
             elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-                -- ACCEPT or other - mark inspection complete, finalize in log phase
-                kong.log.debug("Got final verdict at EOF: ", verdict, " - session will be finalized in log phase")
+                kong.log.err("3-Got ACCEPT verdict at EOF - inspection complete, EOF chunk will pass through")
                 ctx.inspection_complete = true
-                return
+            else
+                kong.log.warn("Got INSPECT verdict at EOF - this is unexpected, finalizing anyway")
             end
-            -- If still INSPECT (shouldn't happen at EOF, but handle gracefully)
-            kong.log.warn("Got INSPECT verdict at EOF - this is unexpected, finalizing anyway")
         else
             kong.log.warn("nano.end_inspection failed, failing open: ", tostring(result))
         end
 
-        -- Mark inspection complete, actual cleanup in log phase
         ctx.inspection_complete = true
     end
+    
+    ::skip_inspection::
 end
 
--- log phase - equivalent to Envoy's OnDestroy
--- This is called when the last response byte has been sent to the client
 function NanoHandler.log(conf)
     kong.log.err("4-44444444444444444444-------------------------------------------------------------------------------------------------------------------------------------------------")
     local ctx = kong.ctx.plugin
     
-    -- Clean up session data if it exists
-    if ctx.session_data then
-        kong.log.debug("log phase: cleaning up session")
-        nano.fini_session(ctx.session_data)
+    if ctx.session_id and ctx.session_data then
+        local session_data = ctx.session_data
+        local session_id = ctx.session_id
+        
+        kong.log.debug("Log phase: finalizing session ", session_id)
+        
+        nano.fini_session(session_data)
+        
         nano.cleanup_all()
+        
         ctx.session_id = nil
         ctx.session_data = nil
+        
+        kong.log.debug("Session ", session_id, " finalized in log phase")
+    else
+        kong.log.debug("Log phase: no session data to finalize")
     end
 end
 
