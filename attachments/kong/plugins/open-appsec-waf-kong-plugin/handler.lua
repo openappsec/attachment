@@ -93,6 +93,7 @@ function NanoHandler.access(conf)
                 local result = nano.handle_custom_response(session_data, response)
                 nano.cleanup_all()
                 return result
+            end
         else
             kong.log.err("Request body not in memory, attempting to read from buffer/file")
 
@@ -104,6 +105,7 @@ function NanoHandler.access(conf)
                     nano.fini_session(session_data)
                     kong.ctx.plugin.blocked = true
                     return nano.handle_custom_response(session_data, response)
+                end
             else
                 local body_file = ngx.var.request_body_file
                 if body_file then
@@ -132,23 +134,25 @@ function NanoHandler.access(conf)
             end
         end
 
-        local ok, verdict, response  = pcall(function()
-            return nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
-        end)
+            local ok, verdict, response  = pcall(function()
+                return nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
+            end)
 
-        if not ok then
-            kong.log.err("Error ending request inspection: ", verdict, " - failing open")
-            nano.fini_session(session_data)
-            nano.cleanup_all()
-            return
+            if not ok then
+                kong.log.err("Error ending request inspection: ", verdict, " - failing open")
+                nano.fini_session(session_data)
+                nano.cleanup_all()
+                return
+            end
+
+            if verdict == nano.AttachmentVerdict.DROP then
+                nano.fini_session(session_data)
+                kong.ctx.plugin.blocked = true
+                local result = nano.handle_custom_response(session_data, response)
+                nano.cleanup_all()
+                return result
+            end
         end
-
-        if verdict == nano.AttachmentVerdict.DROP then
-            nano.fini_session(session_data)
-            kong.ctx.plugin.blocked = true
-            local result = nano.handle_custom_response(session_data, response)
-            nano.cleanup_all()
-            return result
     else
         local ok, verdict, response  = pcall(function()
             return nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
@@ -296,12 +300,13 @@ function NanoHandler.body_filter(conf)
                     ctx.session_data = nil
                     return custom_result
             else
-                kong.log.err("nano.send_body failed, failing open: ", tostring(result))
+                    kong.log.err("nano.send_body failed, failing open: ", tostring(result))
+                end
+            else
+                -- Inspection already complete - just count the chunk and pass through
+                kong.log.err("CHUNK #", ctx.body_buffer_chunk, " - skipping nano.send_body (inspection complete)")
+                ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
             end
-        else
-            -- Inspection already complete - just count the chunk and pass through
-            kong.log.err("CHUNK #", ctx.body_buffer_chunk, " - skipping nano.send_body (inspection complete)")
-            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
         end
     end
 
