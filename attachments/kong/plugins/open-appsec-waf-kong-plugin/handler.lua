@@ -294,6 +294,7 @@ function NanoHandler.body_filter(conf)
             local response = result[2]
             local modifications = result[3]
 
+            kong.log.err("CHUNK #", ctx.body_buffer_chunk, " VERDICT: ", verdict, " (INSPECT=", nano.AttachmentVerdict.INSPECT, ", ACCEPT=", nano.AttachmentVerdict.ACCEPT, ", DROP=", nano.AttachmentVerdict.DROP, ")")
             kong.log.debug("Response body chunk verdict: ", verdict, " (chunk #", ctx.body_buffer_chunk, ")")
 
             if modifications then
@@ -316,6 +317,12 @@ function NanoHandler.body_filter(conf)
                 kong.log.err("SETTING inspection_complete=true in body_filter (ACCEPT verdict during chunk)")
                 kong.log.err("------------------------------------------------------------------------")
                 ctx.inspection_complete = true
+                
+                kong.log.debug("ACCEPT verdict received - finalizing session")
+                nano.fini_session(session_data)
+                nano.cleanup_all()
+                ctx.session_id = nil
+                ctx.session_data = nil
             end
         else
             kong.log.warn("nano.send_body failed, failing open: ", tostring(result))
@@ -357,6 +364,12 @@ function NanoHandler.body_filter(conf)
         kong.log.err("SETTING inspection_complete=true in body_filter (EOF processing complete)")
         kong.log.err("------------------------------------------------------------------------")
         ctx.inspection_complete = true
+        
+        kong.log.debug("EOF reached - finalizing session in body_filter")
+        nano.fini_session(session_data)
+        nano.cleanup_all()
+        ctx.session_id = nil
+        ctx.session_data = nil
     end
     
     ::skip_inspection::
@@ -367,6 +380,11 @@ function NanoHandler.log(conf)
     local ctx = kong.ctx.plugin
     
     if ctx.session_id and ctx.session_data then
+        if not ctx.inspection_complete then
+            kong.log.warn("Log phase called but body_filter may still be processing - NOT finalizing session to avoid breaking streaming")
+            return
+        end
+        
         local session_data = ctx.session_data
         local session_id = ctx.session_id
         
