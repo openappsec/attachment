@@ -283,41 +283,48 @@ function NanoHandler.body_filter(conf)
     if chunk and #chunk > 0 then
         ctx.body_seen = true
         
-        local ok, result = pcall(function()
-            return {nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)}
-        end)
+        -- Only send to nano if inspection not yet complete
+        if not ctx.inspection_complete then
+            local ok, result = pcall(function()
+                return {nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)}
+            end)
 
-        if ok then
-            local verdict = result[1]
-            local response = result[2]
-            local modifications = result[3]
+            if ok then
+                local verdict = result[1]
+                local response = result[2]
+                local modifications = result[3]
 
-            kong.log.err("CHUNK #", ctx.body_buffer_chunk, " VERDICT: ", verdict, " (INSPECT=", nano.AttachmentVerdict.INSPECT, ", ACCEPT=", nano.AttachmentVerdict.ACCEPT, ", DROP=", nano.AttachmentVerdict.DROP, ")")
-            kong.log.err("Response body chunk verdict: ", verdict, " (chunk #", ctx.body_buffer_chunk, ")")
+                kong.log.err("CHUNK #", ctx.body_buffer_chunk, " VERDICT: ", verdict, " (INSPECT=", nano.AttachmentVerdict.INSPECT, ", ACCEPT=", nano.AttachmentVerdict.ACCEPT, ", DROP=", nano.AttachmentVerdict.DROP, ")")
+                kong.log.err("Response body chunk verdict: ", verdict, " (chunk #", ctx.body_buffer_chunk, ")")
 
-            if modifications then
-                chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
-                ngx.arg[1] = chunk
-            end
+                if modifications then
+                    chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
+                    ngx.arg[1] = chunk
+                end
 
-            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
+                ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
 
-            if verdict == nano.AttachmentVerdict.DROP then
-                nano.fini_session(session_data)
-                local custom_result = nano.handle_custom_response(session_data, response)
-                nano.cleanup_all()
-                ctx.session_id = nil
-                ctx.session_data = nil
-                return custom_result
-            elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-                kong.log.err("3-GOT ACCEPT VERDICT during chunk #" .. ctx.body_buffer_chunk .. " - will finalize at EOF")
-                kong.log.err("------------------------------------------------------------------------")
-                kong.log.err("SETTING inspection_complete=true in body_filter (ACCEPT verdict during chunk)")
-                kong.log.err("------------------------------------------------------------------------")
-                ctx.inspection_complete = true
+                if verdict == nano.AttachmentVerdict.DROP then
+                    nano.fini_session(session_data)
+                    local custom_result = nano.handle_custom_response(session_data, response)
+                    nano.cleanup_all()
+                    ctx.session_id = nil
+                    ctx.session_data = nil
+                    return custom_result
+                elseif verdict ~= nano.AttachmentVerdict.INSPECT then
+                    kong.log.err("3-GOT ACCEPT VERDICT during chunk #" .. ctx.body_buffer_chunk .. " - will finalize at EOF")
+                    kong.log.err("------------------------------------------------------------------------")
+                    kong.log.err("SETTING inspection_complete=true in body_filter (ACCEPT verdict during chunk)")
+                    kong.log.err("------------------------------------------------------------------------")
+                    ctx.inspection_complete = true
+                end
+            else
+                kong.log.err("nano.send_body failed, failing open: ", tostring(result))
             end
         else
-            kong.log.err("nano.send_body failed, failing open: ", tostring(result))
+            -- Inspection already complete - just count the chunk and pass through
+            kong.log.err("CHUNK #", ctx.body_buffer_chunk, " - skipping nano.send_body (inspection complete)")
+            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
         end
     end
 
