@@ -17,6 +17,32 @@ end
 
 -- **Handles Request Headers (DecodeHeaders Equivalent)**
 function NanoHandler.access(conf)
+    kong.log.err("1--------------------------------------------------------------------------------------------------------------------------------------------------")
+    
+    -- Skip if no route is matched (internal Kong requests, unmapped paths)
+    local route = kong.router.get_route()
+    if not route then
+        kong.log.debug("Skipping WAF inspection - no route matched")
+        return
+    end
+    
+    -- Skip internal Kong requests (admin API, status endpoint, etc.)
+    local request_path = kong.request.get_path()
+    if request_path and (
+        request_path:match("^/status") or 
+        request_path:match("^/_health") or
+        request_path:match("^/metrics")
+    ) then
+        kong.log.debug("Skipping WAF inspection for internal endpoint: ", request_path)
+        return
+    end
+    
+    -- Skip if this is an internal subrequest (ngx.location.capture, etc.)
+    if ngx.var.internal then
+        kong.log.debug("Skipping WAF inspection for internal subrequest")
+        return
+    end
+    
     local headers = kong.request.get_headers()
     local session_id = nano.generate_session_id()
     kong.service.request.set_header("x-session-id", tostring(session_id))
@@ -140,6 +166,7 @@ function NanoHandler.access(conf)
 end
 
 function NanoHandler.header_filter(conf)
+    kong.log.err("22222222222222222222222--------------------------------------------------------------------------------------------------------------------------------------------------")
     local ctx = kong.ctx.plugin
     if ctx.blocked then
         return
@@ -170,6 +197,7 @@ function NanoHandler.header_filter(conf)
 end
 
 function NanoHandler.body_filter(conf)
+    kong.log.err("3-3333333333333333333333333-------------------------------------------------------------------------------------------------------------------------------------------------")
     local ctx = kong.ctx.plugin
     if ctx.blocked then
         return
@@ -178,7 +206,8 @@ function NanoHandler.body_filter(conf)
     local session_id = ctx.session_id
     local session_data = ctx.session_data
 
-    if not session_id or not session_data or ctx.session_finalized then
+    if not session_id or not session_data then
+        kong.log.err("No session data found in body_filter")
         return
     end
 
@@ -195,16 +224,10 @@ function NanoHandler.body_filter(conf)
     local current_time = ngx.now() * 1000
     if current_time - ctx.body_filter_start_time > 150000 then
         kong.log.warn("body_filter timeout exceeded (2.5 minutes), failing open")
-        if not ctx.session_finalized then
-            -- Invalidate session references BEFORE finalization to prevent lingering IPC signals
-            ctx.session_id = nil
-            ctx.session_data = nil
-            ctx.session_finalized = true
-            
-            -- Now finalize and cleanup
-            nano.fini_session(session_data)
-            nano.cleanup_all()
-        end
+        nano.fini_session(session_data)
+        nano.cleanup_all()
+        ctx.session_id = nil
+        ctx.session_data = nil
         return
     end
 
@@ -229,67 +252,46 @@ function NanoHandler.body_filter(conf)
             ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
 
             if verdict == nano.AttachmentVerdict.DROP then
-                -- Invalidate session references BEFORE finalization
-                local temp_session_data = session_data
+                nano.fini_session(session_data)
+                local custom_result = nano.handle_custom_response(session_data, response)
+                nano.cleanup_all()
                 ctx.session_id = nil
                 ctx.session_data = nil
-                ctx.session_finalized = true
-                
-                nano.fini_session(temp_session_data)
-                local custom_result = nano.handle_custom_response(temp_session_data, response)
-                nano.cleanup_all()
                 return custom_result
             end
         else
             -- Nano failed - finalize session and pass through
             kong.log.warn("nano.send_body failed, failing open: ", tostring(result))
-            if not ctx.session_finalized then
-                -- Invalidate session references BEFORE finalization
-                local temp_session_data = session_data
-                ctx.session_id = nil
-                ctx.session_data = nil
-                ctx.session_finalized = true
-                
-                nano.fini_session(temp_session_data)
-                nano.cleanup_all()
-            end
+            nano.fini_session(session_data)
+            nano.cleanup_all()
+            ctx.session_id = nil
+            ctx.session_data = nil
         end
-        return
     end
 
     if eof or (ctx.expect_body == false and not ctx.body_seen) then
-        if not ctx.session_finalized then
-            local ok, result = pcall(function()
-                return {nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)}
-            end)
+        local ok, result = pcall(function()
+            return {nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)}
+        end)
 
-            if ok and result and result[1] then
-                local verdict = result[1]
-                local response = result[2]
+        if ok and result and result[1] then
+            local verdict = result[1]
+            local response = result[2]
 
-                if verdict == nano.AttachmentVerdict.DROP then
-                    -- Invalidate session references BEFORE finalization
-                    local temp_session_data = session_data
-                    ctx.session_id = nil
-                    ctx.session_data = nil
-                    ctx.session_finalized = true
-                    
-                    nano.fini_session(temp_session_data)
-                    local custom_result = nano.handle_custom_response(temp_session_data, response)
-                    nano.cleanup_all()
-                    return custom_result
-                end
+            if verdict == nano.AttachmentVerdict.DROP then
+                nano.fini_session(session_data)
+                local custom_result = nano.handle_custom_response(session_data, response)
+                nano.cleanup_all()
+                ctx.session_id = nil
+                ctx.session_data = nil
+                return custom_result
             end
-
-            -- Invalidate session references BEFORE finalization
-            local temp_session_data = session_data
-            ctx.session_id = nil
-            ctx.session_data = nil
-            ctx.session_finalized = true
-            
-            nano.fini_session(temp_session_data)
-            nano.cleanup_all()
         end
+
+        nano.fini_session(session_data)
+        nano.cleanup_all()
+        ctx.session_id = nil
+        ctx.session_data = nil
     end
 end
 
