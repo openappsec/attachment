@@ -20,7 +20,7 @@ function NanoHandler.access(conf)
     
     local route = kong.router.get_route()
     if not route then
-        kong.log.debug("Skipping WAF inspection - no route matched")
+        kong.log.err("ACCESS SKIPPED: no route matched")
         return
     end
     
@@ -30,18 +30,18 @@ function NanoHandler.access(conf)
         request_path:match("^/_health") or
         request_path:match("^/metrics")
     ) then
-        kong.log.debug("Skipping WAF inspection for internal endpoint: ", request_path)
+        kong.log.err("ACCESS SKIPPED: internal endpoint: ", request_path)
         return
     end
     
     if ngx.var.internal then
-        kong.log.debug("Skipping WAF inspection for internal subrequest")
+        kong.log.err("ACCESS SKIPPED: internal subrequest")
         return
     end
     
     local request_uri = ngx.var.request_uri
     if not request_uri or request_uri == "" then
-        kong.log.debug("Skipping WAF inspection - TLS handshake or no URI")
+        kong.log.err("ACCESS SKIPPED: TLS handshake or no URI")
         return
     end
     
@@ -82,8 +82,7 @@ function NanoHandler.access(conf)
         nano.cleanup_all()
         return result
     elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-        kong.log.debug("Got final verdict (not INSPECT) after request headers: ", verdict, " - session will be finalized in log phase")
-        kong.ctx.plugin.inspection_complete = true
+        kong.log.err("Got final verdict (not INSPECT) after request headers: ", verdict, " - continuing to response inspection")
         return
     end
 
@@ -98,35 +97,33 @@ function NanoHandler.access(conf)
                 nano.cleanup_all()
                 return result
             elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-                kong.log.debug("Got final verdict (not INSPECT) after request body: ", verdict, " - session will be finalized in log phase")
-                kong.ctx.plugin.inspection_complete = true
+                kong.log.err("Got final verdict (not INSPECT) after request body: ", verdict, " - continuing to response inspection")
             end
         else
-            kong.log.debug("Request body not in memory, attempting to read from buffer/file")
+            kong.log.err("Request body not in memory, attempting to read from buffer/file")
 
             local body_data = ngx.var.request_body
             if body_data and #body_data > 0 then
-                kong.log.debug("Found request body in nginx var, size: ", #body_data)
+                kong.log.err("Found request body in nginx var, size: ", #body_data)
                 verdict, response = nano.send_body(session_id, session_data, body_data, nano.HttpChunkType.HTTP_REQUEST_BODY)
                 if verdict == nano.AttachmentVerdict.DROP then
                     nano.fini_session(session_data)
                     kong.ctx.plugin.blocked = true
                     return nano.handle_custom_response(session_data, response)
                 elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-                    kong.log.debug("Got final verdict (not INSPECT) after request body from var: ", verdict, " - session will be finalized in log phase")
-                    kong.ctx.plugin.inspection_complete = true
+                    kong.log.err("Got final verdict (not INSPECT) after request body from var: ", verdict, " - continuing to response inspection")
                 end
             else
                 local body_file = ngx.var.request_body_file
                 if body_file then
-                    kong.log.debug("Reading request body from file: ", body_file)
+                    kong.log.err("Reading request body from file: ", body_file)
                     local file = io.open(body_file, "rb")
                     if file then
                         local entire_body = file:read("*all")
                         file:close()
 
                         if entire_body and #entire_body > 0 then
-                            kong.log.debug("Sending entire body of size ", #entire_body, " bytes to C module")
+                            kong.log.err("Sending entire body of size ", #entire_body, " bytes to C module")
                             verdict, response = nano.send_body(session_id, session_data, entire_body, nano.HttpChunkType.HTTP_REQUEST_BODY)
                             if verdict == nano.AttachmentVerdict.DROP then
                                 nano.fini_session(session_data)
@@ -135,15 +132,14 @@ function NanoHandler.access(conf)
                                 nano.cleanup_all()
                                 return result
                             elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-                                kong.log.debug("Got final verdict (not INSPECT) after request body from file: ", verdict, " - session will be finalized in log phase")
-                                kong.ctx.plugin.inspection_complete = true
+                                kong.log.err("Got final verdict (not INSPECT) after request body from file: ", verdict, " - continuing to response inspection")
                             end
                         else
-                            kong.log.debug("Empty body file")
+                            kong.log.err("Empty body file")
                         end
                     end
                 else
-                    kong.log.warn("Request body expected but no body data or file available")
+                    kong.log.err("Request body expected but no body data or file available")
                 end
             end
         end
@@ -166,8 +162,7 @@ function NanoHandler.access(conf)
             nano.cleanup_all()
             return result
         elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-            kong.log.debug("Got final verdict (not INSPECT) at request END: ", verdict, " - session will be finalized in log phase")
-            kong.ctx.plugin.inspection_complete = true
+            kong.log.err("Got final verdict (not INSPECT) at request END: ", verdict, " - continuing to response inspection")
         end
     else
         local ok, verdict, response  = pcall(function()
@@ -188,8 +183,7 @@ function NanoHandler.access(conf)
             nano.cleanup_all()
             return result
         elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-            kong.log.debug("Got final verdict (not INSPECT) at request END (no body): ", verdict, " - session will be finalized in log phase")
-            kong.ctx.plugin.inspection_complete = true
+            kong.log.err("Got final verdict (not INSPECT) at request END (no body): ", verdict, " - continuing to response inspection")
         end
     end
 end
@@ -202,7 +196,7 @@ function NanoHandler.header_filter(conf)
     end
 
     if ctx.inspection_complete then
-        kong.log.debug("Inspection already completed, skipping header_filter")
+        kong.log.err("Inspection already completed, skipping header_filter")
         return
     end
 
@@ -220,21 +214,21 @@ function NanoHandler.header_filter(conf)
 
     local verdict, response = nano.send_response_headers(session_id, session_data, header_data, status_code, content_length)
     
-    kong.log.warn("Response headers verdict: ", verdict, " (INSPECT=", nano.AttachmentVerdict.INSPECT, ", ACCEPT=", nano.AttachmentVerdict.ACCEPT, ", DROP=", nano.AttachmentVerdict.DROP, ")")
+    kong.log.err("Response headers verdict: ", verdict, " (INSPECT=", nano.AttachmentVerdict.INSPECT, ", ACCEPT=", nano.AttachmentVerdict.ACCEPT, ", DROP=", nano.AttachmentVerdict.DROP, ")")
     
     if verdict == nano.AttachmentVerdict.DROP then
         kong.ctx.plugin.blocked = true
         nano.cleanup_all()
         return nano.handle_custom_response(session_data, response)
     elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-        kong.log.debug("Got final verdict (not INSPECT) in header_filter: ", verdict, " - session will be finalized in log phase")
+        kong.log.err("Got final verdict (not INSPECT) in header_filter: ", verdict, " - session will be finalized in log phase")
         kong.log.err("------------------------------------------------------------------------")
         kong.log.err("SETTING inspection_complete=true in header_filter (verdict != INSPECT)")
         kong.log.err("------------------------------------------------------------------------")
         ctx.inspection_complete = true
     end
 
-    kong.log.debug("Got INSPECT verdict - continuing to body_filter")
+    kong.log.err("Got INSPECT verdict - continuing to body_filter")
 end
 
 function NanoHandler.body_filter(conf)
@@ -270,7 +264,7 @@ function NanoHandler.body_filter(conf)
     local current_time = ngx.now() * 1000
     local elapsed = current_time - ctx.body_filter_start_time
     if elapsed > 150000 then
-        kong.log.warn("Body filter timeout exceeded (", elapsed, "ms) - finalizing session")
+        kong.log.err("Body filter timeout exceeded (", elapsed, "ms) - finalizing session")
         nano.fini_session(session_data)
         nano.cleanup_all()
         ctx.session_id = nil
@@ -295,7 +289,7 @@ function NanoHandler.body_filter(conf)
             local modifications = result[3]
 
             kong.log.err("CHUNK #", ctx.body_buffer_chunk, " VERDICT: ", verdict, " (INSPECT=", nano.AttachmentVerdict.INSPECT, ", ACCEPT=", nano.AttachmentVerdict.ACCEPT, ", DROP=", nano.AttachmentVerdict.DROP, ")")
-            kong.log.debug("Response body chunk verdict: ", verdict, " (chunk #", ctx.body_buffer_chunk, ")")
+            kong.log.err("Response body chunk verdict: ", verdict, " (chunk #", ctx.body_buffer_chunk, ")")
 
             if modifications then
                 chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
@@ -318,14 +312,14 @@ function NanoHandler.body_filter(conf)
                 kong.log.err("------------------------------------------------------------------------")
                 ctx.inspection_complete = true
                 
-                kong.log.debug("ACCEPT verdict received - finalizing session")
+                kong.log.err("ACCEPT verdict received - finalizing session")
                 nano.fini_session(session_data)
                 nano.cleanup_all()
                 ctx.session_id = nil
                 ctx.session_data = nil
             end
         else
-            kong.log.warn("nano.send_body failed, failing open: ", tostring(result))
+            kong.log.err("nano.send_body failed, failing open: ", tostring(result))
         end
     end
 
@@ -354,10 +348,10 @@ function NanoHandler.body_filter(conf)
                 kong.log.err("------------------------------------------------------------------------")
                 ctx.inspection_complete = true
             else
-                kong.log.warn("Got INSPECT verdict at EOF - this is unexpected, finalizing anyway")
+                kong.log.err("Got INSPECT verdict at EOF - this is unexpected, finalizing anyway")
             end
         else
-            kong.log.warn("nano.end_inspection failed, failing open: ", tostring(result))
+            kong.log.err("nano.end_inspection failed, failing open: ", tostring(result))
         end
 
         kong.log.err("------------------------------------------------------------------------")
@@ -365,7 +359,7 @@ function NanoHandler.body_filter(conf)
         kong.log.err("------------------------------------------------------------------------")
         ctx.inspection_complete = true
         
-        kong.log.debug("EOF reached - finalizing session in body_filter")
+        kong.log.err("EOF reached - finalizing session in body_filter")
         nano.fini_session(session_data)
         nano.cleanup_all()
         ctx.session_id = nil
@@ -381,14 +375,14 @@ function NanoHandler.log(conf)
     
     if ctx.session_id and ctx.session_data then
         if not ctx.inspection_complete then
-            kong.log.warn("Log phase called but body_filter may still be processing - NOT finalizing session to avoid breaking streaming")
+            kong.log.err("Log phase called but body_filter may still be processing - NOT finalizing session to avoid breaking streaming")
             return
         end
         
         local session_data = ctx.session_data
         local session_id = ctx.session_id
         
-        kong.log.debug("Log phase: finalizing session ", session_id)
+        kong.log.err("Log phase: finalizing session ", session_id)
         
         nano.fini_session(session_data)
         
@@ -397,9 +391,9 @@ function NanoHandler.log(conf)
         ctx.session_id = nil
         ctx.session_data = nil
         
-        kong.log.debug("Session ", session_id, " finalized in log phase")
+        kong.log.err("Session ", session_id, " finalized in log phase")
     else
-        kong.log.debug("Log phase: no session data to finalize")
+        kong.log.err("Log phase: no session data to finalize")
     end
 end
 
