@@ -282,7 +282,6 @@ function NanoHandler.body_filter(conf)
                 local modifications = result[3]
 
                 kong.log.err("CHUNK #", ctx.body_buffer_chunk, " VERDICT: ", verdict, " (INSPECT=", nano.AttachmentVerdict.INSPECT, ", ACCEPT=", nano.AttachmentVerdict.ACCEPT, ", DROP=", nano.AttachmentVerdict.DROP, ")")
-                kong.log.err("Response body chunk verdict: ", verdict, " (chunk #", ctx.body_buffer_chunk, ")")
 
                 if modifications then
                     chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
@@ -299,18 +298,19 @@ function NanoHandler.body_filter(conf)
                     ctx.session_id = nil
                     ctx.session_data = nil
                     return custom_result
-            else
-                    kong.log.err("nano.send_body failed, failing open: ", tostring(result))
                 end
             else
-                -- Inspection already complete - just count the chunk and pass through
-                kong.log.err("CHUNK #", ctx.body_buffer_chunk, " - skipping nano.send_body (inspection complete)")
-                ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
+                kong.log.err("nano.send_body failed, failing open: ", tostring(result))
             end
+        else
+            -- Inspection already complete - just count the chunk and pass through
+            kong.log.err("CHUNK #", ctx.body_buffer_chunk, " - skipping nano.send_body (inspection complete)")
+            ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
         end
     end
 
-    if eof or (ctx.expect_body == false and not ctx.body_seen) then
+    -- Only process EOF if inspection is not yet complete (session still active)
+    if not ctx.inspection_complete and (eof or (ctx.expect_body == false and not ctx.body_seen)) then
         local ok, result = pcall(function()
             return {nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)}
         end)
@@ -328,6 +328,7 @@ function NanoHandler.body_filter(conf)
                 ctx.session_id = nil
                 ctx.session_data = nil
                 ctx.plugin.blocked = true
+                ctx.inspection_complete = true
                 return custom_result
             end
         else
