@@ -212,23 +212,27 @@ function NanoHandler.header_filter(conf)
     local status_code = kong.response.get_status()
     local content_length = tonumber(headers["content-length"]) or 0
 
-    local verdict, response = nano.send_response_headers(session_id, session_data, header_data, status_code, content_length)
+    kong.log.err("2-BEFORE send_response_headers call - session_id=", session_id, " status=", status_code, " content_length=", content_length)
     
-    kong.log.err("Response headers verdict: ", verdict, " (INSPECT=", nano.AttachmentVerdict.INSPECT, ", ACCEPT=", nano.AttachmentVerdict.ACCEPT, ", DROP=", nano.AttachmentVerdict.DROP, ")")
+    local ok, verdict, response = pcall(function()
+        return nano.send_response_headers(session_id, session_data, header_data, status_code, content_length)
+    end)
+    
+    if not ok then
+        kong.log.err("2-ERROR in send_response_headers: ", tostring(verdict), " - failing open, skipping response inspection")
+        ctx.inspection_complete = true
+        return
+    end
+    
+    kong.log.err("2-Response headers verdict: ", verdict, " (INSPECT=", nano.AttachmentVerdict.INSPECT, ", ACCEPT=", nano.AttachmentVerdict.ACCEPT, ", DROP=", nano.AttachmentVerdict.DROP, ")")
     
     if verdict == nano.AttachmentVerdict.DROP then
         kong.ctx.plugin.blocked = true
         nano.cleanup_all()
         return nano.handle_custom_response(session_data, response)
-    elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-        kong.log.err("Got final verdict (not INSPECT) in header_filter: ", verdict, " - session will be finalized in log phase")
-        kong.log.err("------------------------------------------------------------------------")
-        kong.log.err("SETTING inspection_complete=true in header_filter (verdict != INSPECT)")
-        kong.log.err("------------------------------------------------------------------------")
-        ctx.inspection_complete = true
     end
-
-    kong.log.err("Got INSPECT verdict - continuing to body_filter")
+    
+    kong.log.err("2-Response headers verdict: ", verdict, " - continuing to body_filter (will inspect body chunks)")
 end
 
 function NanoHandler.body_filter(conf)
