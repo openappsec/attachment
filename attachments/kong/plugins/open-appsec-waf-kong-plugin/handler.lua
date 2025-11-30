@@ -310,17 +310,11 @@ function NanoHandler.body_filter(conf)
                 ctx.session_data = nil
                 return custom_result
             elseif verdict ~= nano.AttachmentVerdict.INSPECT then
-                kong.log.err("3-GOT ACCEPT VERDICT during chunk #" .. ctx.body_buffer_chunk .. " - setting inspection_complete, chunk will pass through")
+                kong.log.err("3-GOT ACCEPT VERDICT during chunk #" .. ctx.body_buffer_chunk .. " - will finalize at EOF")
                 kong.log.err("------------------------------------------------------------------------")
                 kong.log.err("SETTING inspection_complete=true in body_filter (ACCEPT verdict during chunk)")
                 kong.log.err("------------------------------------------------------------------------")
                 ctx.inspection_complete = true
-                
-                kong.log.err("ACCEPT verdict received - finalizing session")
-                nano.fini_session(session_data)
-                nano.cleanup_all()
-                ctx.session_id = nil
-                ctx.session_data = nil
             end
         else
             kong.log.err("nano.send_body failed, failing open: ", tostring(result))
