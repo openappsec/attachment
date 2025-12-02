@@ -429,6 +429,11 @@ function nano.fini_session(session_data)
     end
 
     nano_attachment.fini_session(attachment, session_data)
+    
+    -- CRITICAL: Free all accumulated resources when session ends
+    -- This prevents memory leaks from responses, headers, metadata, etc.
+    nano.cleanup_all()
+    
     kong.log.info("Successfully finalized session ", session_data, " for worker ", worker_id)
     return true
 end
