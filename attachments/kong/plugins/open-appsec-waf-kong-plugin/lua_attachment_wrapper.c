@@ -363,13 +363,60 @@ static int lua_send_body(lua_State *L) {
         return lua_error(L);
     }
 
+    if (body_len <= 8 * 1024) {
+        HttpBody http_chunks;
+        http_chunks.bodies_count = 1;
+        
+        nano_str_t chunk;
+        chunk.data = (unsigned char*)body_chunk;
+        chunk.len = body_len;
+        http_chunks.data = &chunk;
+
+        AttachmentData attachment_data;
+        attachment_data.session_id = session_id;
+        attachment_data.session_data = session_data;
+        attachment_data.chunk_type = chunk_type;
+        attachment_data.data = &http_chunks;
+
+        AttachmentVerdictResponse* res_ptr = malloc(sizeof(AttachmentVerdictResponse));
+        *res_ptr = SendDataNanoAttachment(attachment, &attachment_data);
+
+        lua_pushinteger(L, res_ptr->verdict);
+        lua_pushlightuserdata(L, res_ptr);
+
+        if (res_ptr->modifications) {
+            lua_pushlightuserdata(L, res_ptr->modifications);
+        } else {
+            lua_pushnil(L);
+        }
+        
+        return 3;
+    }
+
+    const size_t CHUNK_SIZE = 8 * 1024;
+    size_t num_chunks = ((body_len - 1) / CHUNK_SIZE) + 1;
+
+    if (num_chunks > 10000) {
+        num_chunks = 10000;
+    }
+
     HttpBody http_chunks;
-    http_chunks.bodies_count = 1;
-    
-    nano_str_t chunk;
-    chunk.data = (unsigned char*)body_chunk;
-    chunk.len = body_len;
-    http_chunks.data = &chunk;
+    http_chunks.bodies_count = num_chunks;
+
+    http_chunks.data = (nano_str_t*)malloc(num_chunks * sizeof(nano_str_t));
+    if (!http_chunks.data) {
+        lua_pushstring(L, "Error: Failed to allocate memory for chunks");
+        return lua_error(L);
+    }
+
+    for (size_t i = 0; i < num_chunks; i++) {
+        nano_str_t* chunk_ptr = (nano_str_t*)((char*)http_chunks.data + (i * sizeof(nano_str_t)));
+        size_t chunk_start = i * CHUNK_SIZE;
+        size_t chunk_len = (i == num_chunks - 1) ? (body_len - chunk_start) : CHUNK_SIZE;
+        
+        chunk_ptr->data = (unsigned char*)(body_chunk + chunk_start);
+        chunk_ptr->len = chunk_len;
+    }
 
     AttachmentData attachment_data;
     attachment_data.session_id = session_id;
@@ -379,6 +426,8 @@ static int lua_send_body(lua_State *L) {
 
     AttachmentVerdictResponse* res_ptr = malloc(sizeof(AttachmentVerdictResponse));
     *res_ptr = SendDataNanoAttachment(attachment, &attachment_data);
+
+    free(http_chunks.data);
 
     lua_pushinteger(L, res_ptr->verdict);
     lua_pushlightuserdata(L, res_ptr);
@@ -449,30 +498,6 @@ static int lua_send_response_headers(lua_State *L) {
     return 2;
 }
 
-static int lua_send_content_length(lua_State *L) {
-    NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
-    SessionID session_id = luaL_checkinteger(L, 2);
-    HttpSessionData *session_data = (HttpSessionData*) lua_touserdata(L, 3);
-    uint64_t content_length = luaL_checkinteger(L, 4);
-
-    if (!attachment || !session_data) {
-        lua_pushstring(L, "Error: Invalid attachment or session_data");
-        return lua_error(L);
-    }
-
-    AttachmentData attachment_data;
-    attachment_data.session_id = session_id;
-    attachment_data.session_data = session_data;
-    attachment_data.chunk_type = CONTENT_LENGTH;
-    attachment_data.data = &content_length;
-
-    AttachmentVerdictResponse* res_ptr = malloc(sizeof(AttachmentVerdictResponse));
-    *res_ptr = SendDataNanoAttachment(attachment, &attachment_data);
-    lua_pushinteger(L, res_ptr->verdict);
-    lua_pushlightuserdata(L, res_ptr);
-    return 2;
-}
-
 static int lua_free_verdict_response(lua_State *L) {
     AttachmentVerdictResponse *response = (AttachmentVerdictResponse *)lua_touserdata(L, 1);
     if (!response) return 0;
@@ -493,7 +518,6 @@ static const struct luaL_Reg nano_attachment_lib[] = {
     {"setHeaderElement", lua_setHeaderElement},
     {"send_data", lua_send_data},
     {"send_response_headers", lua_send_response_headers},
-    {"send_content_length", lua_send_content_length},
     {"fini_session", lua_fini_session},
     {"is_session_finalized", lua_is_session_finalized},
     {"init_session", lua_init_session},
