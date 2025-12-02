@@ -255,9 +255,9 @@ function NanoHandler.body_filter(conf)
         ctx.body_filter_start_time = ngx.now() * 1000
     end
     
-    -- Check timeout (10 seconds)
+    -- Check timeout (150 seconds)
     local elapsed = (ngx.now() * 1000) - ctx.body_filter_start_time
-    if elapsed > 10000 then
+    if elapsed > 150000 then
         kong.log.err("Timeout after ", elapsed, "ms - cleaning up session")
         ngx.arg[1] = nil  -- Discard chunk first
         ctx.inspection_complete = true
