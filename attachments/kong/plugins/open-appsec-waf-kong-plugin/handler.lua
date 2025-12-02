@@ -391,10 +391,15 @@ function NanoHandler.log(conf)
     local ctx = kong.ctx.plugin
     
     if ctx.session_id and ctx.session_data then
-        if not ctx.inspection_complete then
-            kong.log.err("Log phase called but body_filter may still be processing - NOT finalizing session to avoid breaking streaming")
+        -- If inspection already complete, it was cleaned up in body_filter - skip
+        if ctx.inspection_complete then
+            kong.log.err("Log phase: inspection already complete, session already finalized in body_filter")
             return
         end
+        
+        -- If we reach here, body_filter never completed (connection closed/timeout/etc)
+        -- We MUST clean up here to prevent memory leak
+        kong.log.err("Log phase: body_filter never completed - finalizing session now to prevent memory leak")
         
         local session_data = ctx.session_data
         local session_id = ctx.session_id
@@ -407,8 +412,9 @@ function NanoHandler.log(conf)
         
         ctx.session_id = nil
         ctx.session_data = nil
+        ctx.inspection_complete = true
         
-        kong.log.err("Session ", session_id, " finalized in log phase")
+        kong.log.err("Session ", session_id, " finalized in log phase due to incomplete body_filter processing")
     else
         kong.log.err("Log phase: no session data to finalize")
     end
