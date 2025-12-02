@@ -6,6 +6,8 @@ local nano = {}
 nano.session_counter = 0
 nano.attachments = {}
 nano.num_workers = ngx.worker.count() or 1
+nano.last_init_attempt = {}  -- Track timestamp of last init attempt per worker
+nano.init_backoff_seconds = 5  -- Wait 5 seconds between retry attempts
 nano.allocated_strings = {}
 nano.allocate_headers = {}
 nano.allocated_metadata = {}
@@ -178,6 +180,20 @@ end
 
 function nano.init_attachment()
     local worker_id = ngx.worker.id()
+    
+    -- Check if we should throttle retry attempts
+    local last_attempt = nano.last_init_attempt[worker_id]
+    if last_attempt then
+        local time_since_last = ngx.now() - last_attempt
+        if time_since_last < nano.init_backoff_seconds then
+            -- Too soon to retry, skip this attempt
+            return false
+        end
+    end
+    
+    -- Record this attempt timestamp
+    nano.last_init_attempt[worker_id] = ngx.now()
+    
     local attachment, err
     local retries = 3
 
@@ -191,9 +207,11 @@ function nano.init_attachment()
     end
 
     if not attachment then
-        kong.log.err("Worker ", worker_id, " failed to initialize attachment after ", retries, " attempts. Worker will operate in fail-open mode.")
+        kong.log.err("Worker ", worker_id, " failed to initialize attachment after ", retries, " attempts. Worker will operate in fail-open mode. Will retry in ", nano.init_backoff_seconds, " seconds.")
+        return false
     else
         nano.attachments[worker_id] = attachment
+        nano.last_init_attempt[worker_id] = nil  -- Clear backoff on success
         kong.log.info("Worker ", worker_id, " successfully initialized nano_attachment.")
         return true
     end
@@ -205,9 +223,18 @@ function nano.init_session(session_id)
 
     if not attachment then
         kong.log.warn("Attachment not found for worker ", worker_id, ", attempting to reinitialize...")
-        nano.init_attachment()
+        local init_success = nano.init_attachment()
+        
+        if not init_success then
+            -- Log only if this is a fresh retry (not throttled)
+            local last_attempt = nano.last_init_attempt[worker_id]
+            if last_attempt and (ngx.now() - last_attempt) < 1 then
+                kong.log.warn("Cannot initialize session: Attachment initialization just attempted for worker ", worker_id, " - failing open. Will retry in ", nano.init_backoff_seconds, " seconds.")
+            end
+            return nil
+        end
+        
         attachment = nano.attachments[worker_id]
-
         if not attachment then
             kong.log.warn("Cannot initialize session: Attachment still not available for worker ", worker_id, " - failing open")
             return nil
