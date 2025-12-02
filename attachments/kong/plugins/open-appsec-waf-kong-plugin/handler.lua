@@ -210,6 +210,7 @@ end
 function NanoHandler.header_filter(conf)
     kong.log.err("2-222222222 HEADER_FILTER PHASE START -------------------------------------------------------------------------------------------------------------------------------------------------")
     local ctx = kong.ctx.plugin
+    
     if ctx.blocked then
         return
     end
@@ -264,15 +265,11 @@ function NanoHandler.header_filter(conf)
 end
 
 function NanoHandler.body_filter(conf)
-    local chunk = ngx.arg[1]
-    local eof = ngx.arg[2]
-    local chunk_size = chunk and #chunk or 0
-    kong.log.err("3-333333333 BODY_FILTER - chunk_size=" .. chunk_size .. " eof=" .. tostring(eof) .. " -------------------------------------------------------------------------------------------------------------------------------------------------")
-    
     local ctx = kong.ctx.plugin
+    local eof = ngx.arg[2]  -- Read EOF flag first (no memory impact)
+    
+    -- CRITICAL: Check blocked/complete status BEFORE reading chunk into Lua memory
     if ctx.blocked then
-        kong.log.err("3-BLOCKED: returning early")
-        -- If EOF and session still exists, cleanup to prevent memory leak
         if eof and ctx.session_data and not ctx.session_cleaned then
             kong.log.err("3-BLOCKED + EOF: cleaning up session to prevent memory leak")
             nano.fini_session(ctx.session_data)
@@ -281,25 +278,46 @@ function NanoHandler.body_filter(conf)
             ctx.session_data = nil
             ctx.session_cleaned = true
         end
-        return
+        return  -- Exit without reading chunk
     end
 
     if ctx.inspection_complete then
-        kong.log.err("3-INSPECTION_COMPLETE: chunk_size=" .. chunk_size .. " eof=" .. tostring(eof) .. " - PASSING THROUGH")
-        goto skip_inspection
+        -- Only log on EOF to reduce spam
+        if eof then
+            kong.log.err("3-INSPECTION_COMPLETE: EOF received, passing through")
+        end
+        return  -- Exit without reading chunk - PREVENTS MEMORY LEAK
     end
 
     local session_id = ctx.session_id
     local session_data = ctx.session_data
 
     if not session_id or not session_data then
-        kong.log.err("No session data found in body_filter - letting chunk pass through")
-        goto skip_inspection
+        -- Only log on EOF to reduce spam
+        if eof then
+            kong.log.err("3-NO_SESSION: EOF received, passing through")
+        end
+        return  -- Exit without reading chunk - PREVENTS MEMORY LEAK
     end
+
+    -- Only read chunk into Lua memory when actually inspecting
+    local chunk = ngx.arg[1]
+    local chunk_size = chunk and #chunk or 0
+    kong.log.err("3-BODY_FILTER: chunk_size=" .. chunk_size .. " eof=" .. tostring(eof))
 
     if not ctx.body_buffer_chunk then
         ctx.body_buffer_chunk = 0
         ctx.body_filter_start_time = ngx.now() * 1000
+        ctx.total_body_size = 0
+    end
+    
+    -- Track total body size
+    ctx.total_body_size = ctx.total_body_size + chunk_size
+    
+    -- Aggressive GC for large responses (every 10MB)
+    if ctx.total_body_size > 0 and ctx.total_body_size % 10485760 < chunk_size then
+        kong.log.warn("Large response streaming (", ctx.total_body_size, " bytes total), running GC")
+        collectgarbage("step", 1000)
     end
     
     local current_time = ngx.now() * 1000
@@ -315,7 +333,7 @@ function NanoHandler.body_filter(conf)
         nano.cleanup_all()
         ctx.session_id = nil
         ctx.session_data = nil
-        goto skip_inspection
+        return  -- Exit immediately to avoid Lua memory accumulation
     end
 
     if chunk and #chunk > 0 then
@@ -403,13 +421,20 @@ function NanoHandler.body_filter(conf)
             ctx.inspection_complete = true
         end
     end
-    
-    ::skip_inspection::
 end
 
 function NanoHandler.log(conf)
     kong.log.err("4-44444444444444444444-------------------------------------------------------------------------------------------------------------------------------------------------")
     local ctx = kong.ctx.plugin
+    
+    -- Log memory usage periodically (every 100th request)
+    if ngx.worker.id() == 0 then
+        local request_count = ngx.shared.kong_cache and ngx.shared.kong_cache:incr("request_count", 1, 0) or 0
+        if request_count % 100 == 0 then
+            local mem_kb = collectgarbage("count")
+            kong.log.warn("MEMORY: Lua memory usage: ", string.format("%.2f", mem_kb), " KB (", string.format("%.2f", mem_kb/1024), " MB)")
+        end
+    end
     
     if ctx.session_id and ctx.session_data then
         -- If inspection already complete, it was cleaned up in body_filter - skip
