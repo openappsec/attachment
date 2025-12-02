@@ -300,30 +300,18 @@ function NanoHandler.body_filter(conf)
         return  -- Exit without reading chunk - PREVENTS MEMORY LEAK
     end
 
-    -- Only read chunk into Lua memory when actually inspecting
-    local chunk = ngx.arg[1]
-    local chunk_size = chunk and #chunk or 0
-    kong.log.err("3-BODY_FILTER: chunk_size=" .. chunk_size .. " eof=" .. tostring(eof))
-
+    -- Initialize tracking on first chunk
     if not ctx.body_buffer_chunk then
         ctx.body_buffer_chunk = 0
         ctx.body_filter_start_time = ngx.now() * 1000
         ctx.total_body_size = 0
     end
     
-    -- Track total body size
-    ctx.total_body_size = ctx.total_body_size + chunk_size
-    
-    -- Aggressive GC for large responses (every 10MB)
-    if ctx.total_body_size > 0 and ctx.total_body_size % 10485760 < chunk_size then
-        kong.log.warn("Large response streaming (", ctx.total_body_size, " bytes total), running GC")
-        collectgarbage("step", 1000)
-    end
-    
+    -- CRITICAL: Check timeout BEFORE reading chunk into memory
     local current_time = ngx.now() * 1000
     local elapsed = current_time - ctx.body_filter_start_time
     if elapsed > 150000 then
-        kong.log.err("Body filter timeout exceeded (", elapsed, "ms) - finalizing session")
+        kong.log.err("Body filter timeout exceeded (", elapsed, "ms) - finalizing session and entering passthrough mode")
         kong.log.err("------------------------------------------------------------------------")
         kong.log.err("SETTING inspection_complete=true in body_filter (TIMEOUT)")
         kong.log.err("------------------------------------------------------------------------")
@@ -333,7 +321,30 @@ function NanoHandler.body_filter(conf)
         nano.cleanup_all()
         ctx.session_id = nil
         ctx.session_data = nil
-        return  -- Exit immediately to avoid Lua memory accumulation
+        
+        -- CRITICAL: Force garbage collection to reclaim all chunk memory immediately
+        kong.log.err("Forcing garbage collection after timeout cleanup")
+        collectgarbage("collect")  -- Full GC to reclaim ~1000 chunks worth of memory
+        local mem_after = collectgarbage("count")
+        kong.log.err("Memory after timeout GC: ", string.format("%.2f", mem_after), " KB (", string.format("%.2f", mem_after/1024), " MB)")
+        
+        return  -- Exit WITHOUT reading chunk - prevents memory accumulation
+    end
+    
+    -- NOW read chunk into Lua memory (only when actively inspecting and not timed out)
+    local chunk = ngx.arg[1]
+    local chunk_size = chunk and #chunk or 0
+    
+    -- Track total body size
+    ctx.total_body_size = ctx.total_body_size + chunk_size
+    
+    -- Log chunk processing
+    kong.log.err("3-BODY_FILTER: chunk_size=" .. chunk_size .. " eof=" .. tostring(eof) .. " total=" .. ctx.total_body_size)
+    
+    -- Aggressive GC for large responses (every 10MB)
+    if ctx.total_body_size > 0 and ctx.total_body_size % 10485760 < chunk_size then
+        kong.log.err("Large response streaming (", ctx.total_body_size, " bytes total), running GC")
+        collectgarbage("step", 1000)
     end
 
     if chunk and #chunk > 0 then
@@ -368,6 +379,10 @@ function NanoHandler.body_filter(conf)
                     nano.cleanup_all()
                     ctx.session_id = nil
                     ctx.session_data = nil
+                    
+                    -- Force GC after DROP to reclaim memory before returning custom response
+                    collectgarbage("collect")
+                    
                     return custom_result
                 end
             else
@@ -415,6 +430,12 @@ function NanoHandler.body_filter(conf)
                 nano.cleanup_all()
                 ctx.session_id = nil
                 ctx.session_data = nil
+                
+                -- Force GC to reclaim chunk memory immediately after session cleanup
+                if ctx.total_body_size and ctx.total_body_size > 1048576 then  -- If processed > 1MB
+                    collectgarbage("collect")
+                    kong.log.debug("Ran GC after processing ", ctx.total_body_size, " bytes")
+                end
             end
         else
             kong.log.err("nano.end_inspection failed, failing open: ", tostring(result))
@@ -427,12 +448,22 @@ function NanoHandler.log(conf)
     kong.log.err("4-44444444444444444444-------------------------------------------------------------------------------------------------------------------------------------------------")
     local ctx = kong.ctx.plugin
     
+    -- CRITICAL: Force garbage collection in log phase to prevent OOM
+    -- This is the last chance to reclaim memory before request completes
+    local mem_before = collectgarbage("count")
+    if mem_before > 10240 then  -- If memory > 10 MB, force full GC
+        kong.log.err("High memory detected in log phase: ", string.format("%.2f", mem_before), " KB - forcing full GC")
+        collectgarbage("collect")
+        local mem_after = collectgarbage("count")
+        kong.log.err("Memory after log phase GC: ", string.format("%.2f", mem_after), " KB (freed ", string.format("%.2f", mem_before - mem_after), " KB)")
+    end
+    
     -- Log memory usage periodically (every 100th request)
     if ngx.worker.id() == 0 then
         local request_count = ngx.shared.kong_cache and ngx.shared.kong_cache:incr("request_count", 1, 0) or 0
         if request_count % 100 == 0 then
             local mem_kb = collectgarbage("count")
-            kong.log.warn("MEMORY: Lua memory usage: ", string.format("%.2f", mem_kb), " KB (", string.format("%.2f", mem_kb/1024), " MB)")
+            kong.log.err("MEMORY: Lua memory usage: ", string.format("%.2f", mem_kb), " KB (", string.format("%.2f", mem_kb/1024), " MB)")
         end
     end
     
