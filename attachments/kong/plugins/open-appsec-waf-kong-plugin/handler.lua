@@ -272,6 +272,15 @@ function NanoHandler.body_filter(conf)
     local ctx = kong.ctx.plugin
     if ctx.blocked then
         kong.log.err("3-BLOCKED: returning early")
+        -- If EOF and session still exists, cleanup to prevent memory leak
+        if eof and ctx.session_data and not ctx.session_cleaned then
+            kong.log.err("3-BLOCKED + EOF: cleaning up session to prevent memory leak")
+            nano.fini_session(ctx.session_data)
+            nano.cleanup_all()
+            ctx.session_id = nil
+            ctx.session_data = nil
+            ctx.session_cleaned = true
+        end
         return
     end
 
@@ -301,6 +310,7 @@ function NanoHandler.body_filter(conf)
         kong.log.err("SETTING inspection_complete=true in body_filter (TIMEOUT)")
         kong.log.err("------------------------------------------------------------------------")
         ctx.inspection_complete = true
+        ctx.session_cleaned = true
         nano.fini_session(session_data)
         nano.cleanup_all()
         ctx.session_id = nil
@@ -334,6 +344,7 @@ function NanoHandler.body_filter(conf)
                 if verdict == nano.AttachmentVerdict.DROP then
                     ctx.plugin.blocked = true
                     ctx.inspection_complete = true
+                    ctx.session_cleaned = true
                     local custom_result = nano.handle_custom_response(session_data, response)
                     nano.fini_session(session_data)
                     nano.cleanup_all()
@@ -366,6 +377,7 @@ function NanoHandler.body_filter(conf)
             if verdict == nano.AttachmentVerdict.DROP then
                 ctx.plugin.blocked = true
                 ctx.inspection_complete = true
+                ctx.session_cleaned = true
                 local custom_result = nano.handle_custom_response(session_data, response)
                 nano.fini_session(session_data)
                 nano.cleanup_all()
@@ -378,6 +390,7 @@ function NanoHandler.body_filter(conf)
                 kong.log.err("SETTING inspection_complete=true in body_filter (EOF processing complete)")
                 kong.log.err("------------------------------------------------------------------------")
                 ctx.inspection_complete = true
+                ctx.session_cleaned = true
                 
                 kong.log.err("EOF reached - finalizing session in body_filter")
                 nano.fini_session(session_data)
