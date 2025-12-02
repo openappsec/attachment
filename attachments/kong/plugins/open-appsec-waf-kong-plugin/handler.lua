@@ -56,7 +56,8 @@ function NanoHandler.access(conf)
 
     local session_data = nano.init_session(session_id)
     if not session_data then
-        kong.log.err("Failed to initialize session - failing open")
+        kong.log.err("Failed to initialize session - failing open (no session created)")
+        kong.ctx.plugin.inspection_complete = true
         return
     end
 
@@ -65,7 +66,12 @@ function NanoHandler.access(conf)
 
     local meta_data = nano.handle_start_transaction()
     if not meta_data then
-        kong.log.err("Failed to handle start transaction - failing open")
+        kong.log.err("Failed to handle start transaction - cleaning up session and failing open")
+        kong.ctx.plugin.inspection_complete = true
+        nano.fini_session(session_data)
+        nano.cleanup_all()
+        kong.ctx.plugin.session_id = nil
+        kong.ctx.plugin.session_data = nil
         return
     end
     
@@ -154,6 +160,7 @@ function NanoHandler.access(conf)
 
             if not ok then
                 kong.log.err("Error ending request inspection: ", verdict, " - failing open")
+                kong.ctx.plugin.inspection_complete = true
                 nano.fini_session(session_data)
                 nano.cleanup_all()
                 kong.ctx.plugin.session_id = nil
@@ -179,6 +186,7 @@ function NanoHandler.access(conf)
 
         if not ok then
             kong.log.err("Error ending request inspection (no body): ", verdict, " - failing open")
+            kong.ctx.plugin.inspection_complete = true
             nano.fini_session(session_data)
             nano.cleanup_all()
             kong.ctx.plugin.session_id = nil
