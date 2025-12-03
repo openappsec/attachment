@@ -94,6 +94,7 @@ function nano.handle_custom_response(session_data, response)
     end
 
     local response_type = nano_attachment.get_web_response_type(attachment, session_data, response)
+    kong.log.err("Block response - type: ", response_type)
 
     if response_type == nano.WebResponseType.RESPONSE_CODE_ONLY then
         local code = nano_attachment.get_response_code(response)
@@ -101,12 +102,13 @@ function nano.handle_custom_response(session_data, response)
             kong.log.warn("Invalid response code received: ", code, " - using 403 instead")
             code = 403
         end
-        kong.log.debug("Response code only: ", code)
+        kong.log.err("Response code only: ", code)
         return kong.response.exit(code, "")
     end
 
     if response_type == nano.WebResponseType.REDIRECT_WEB_RESPONSE then
         local location = nano_attachment.get_redirect_page(attachment, session_data, response)
+        kong.log.err("Redirect response to: ", location)
         return kong.response.exit(307, "", { ["Location"] = location })
     end
 
@@ -120,7 +122,7 @@ function nano.handle_custom_response(session_data, response)
         kong.log.warn("Invalid response code received: ", code, " - using 403 instead")
         code = 403
     end
-    kong.log.debug("Block page response with code: ", code)
+    kong.log.err("Block page response with code: ", code, ", page length: ", #block_page)
     return kong.response.exit(code, block_page, { ["Content-Type"] = "text/html" })
 
 end
@@ -291,6 +293,8 @@ function nano.handle_start_transaction()
 
     table.insert(nano.allocated_metadata, metadata)
 
+    -- Temporarily stop GC to ensure metadata isn't collected before it's used
+    -- Handler will restart GC after send_data completes
     collectgarbage("stop")
 
     return metadata
@@ -434,7 +438,7 @@ function nano.fini_session(session_data)
     -- This prevents memory leaks from responses, headers, metadata, etc.
     nano.cleanup_all()
     
-    kong.log.info("Successfully finalized session ", session_data, " for worker ", worker_id)
+    kong.log.err("Successfully finalized session ", session_data, " for worker ", worker_id)
     return true
 end
 

@@ -72,12 +72,15 @@ function NanoHandler.access(conf)
     local contains_body = has_content_length and 1 or 0
 
     local verdict, response = nano.send_data(session_id, session_data, meta_data, req_headers, contains_body, nano.HttpChunkType.HTTP_REQUEST_FILTER)
+    
+    -- Restart GC after send_data completes (was stopped in handle_start_transaction)
+    collectgarbage("restart")
+    
     if verdict == nano.AttachmentVerdict.DROP then
         kong.ctx.plugin.blocked = true
         kong.ctx.plugin.inspection_complete = true
         local result = nano.handle_custom_response(session_data, response)
         nano.fini_session(session_data)
-        nano.cleanup_all()
         kong.ctx.plugin.session_id = nil
         kong.ctx.plugin.session_data = nil
         return result
@@ -92,7 +95,6 @@ function NanoHandler.access(conf)
                 kong.ctx.plugin.inspection_complete = true
                 local result = nano.handle_custom_response(session_data, response)
                 nano.fini_session(session_data)
-                nano.cleanup_all()
                 kong.ctx.plugin.session_id = nil
                 kong.ctx.plugin.session_data = nil
                 return result
@@ -112,7 +114,6 @@ function NanoHandler.access(conf)
                     kong.ctx.plugin.inspection_complete = true
                     local result = nano.handle_custom_response(session_data, response)
                     nano.fini_session(session_data)
-                    nano.cleanup_all()
                     kong.ctx.plugin.session_id = nil
                     kong.ctx.plugin.session_data = nil
                     return result
@@ -137,7 +138,6 @@ function NanoHandler.access(conf)
                                 kong.ctx.plugin.inspection_complete = true
                                 local result = nano.handle_custom_response(session_data, response)
                                 nano.fini_session(session_data)
-                                nano.cleanup_all()
                                 kong.ctx.plugin.session_id = nil
                                 kong.ctx.plugin.session_data = nil
                                 return result
@@ -177,7 +177,6 @@ function NanoHandler.access(conf)
         kong.ctx.plugin.inspection_complete = true
         local result = nano.handle_custom_response(session_data, response)
         nano.fini_session(session_data)
-        nano.cleanup_all()
         kong.ctx.plugin.session_id = nil
         kong.ctx.plugin.session_data = nil
         return result
@@ -219,12 +218,11 @@ function NanoHandler.header_filter(conf)
     if verdict == nano.AttachmentVerdict.DROP then
         ctx.blocked = true
         ctx.inspection_complete = true
-        local custom_result = nano.handle_custom_response(ctx.session_data, response)
+        local result = nano.handle_custom_response(ctx.session_data, response)
         nano.fini_session(ctx.session_data)
-        nano.cleanup_all()
         ctx.session_id = nil
         ctx.session_data = nil
-        return custom_result
+        return result
     end
 end
 
@@ -290,13 +288,12 @@ function NanoHandler.body_filter(conf)
                 if verdict == nano.AttachmentVerdict.DROP then
                     ctx.blocked = true
                     ctx.inspection_complete = true
-                    local custom_result = nano.handle_custom_response(ctx.session_data, response)
+                    local result = nano.handle_custom_response(ctx.session_data, response)
                     nano.fini_session(ctx.session_data)
-                    nano.cleanup_all()
                     collectgarbage("collect")
                     ctx.session_id = nil
                     ctx.session_data = nil
-                    return custom_result
+                    return result
                 end
             else
                 kong.log.err("nano.send_body failed: ", tostring(result), " - cleaning up session")
@@ -323,13 +320,12 @@ function NanoHandler.body_filter(conf)
             if verdict == nano.AttachmentVerdict.DROP then
                 ctx.blocked = true
                 ctx.inspection_complete = true
-                local custom_result = nano.handle_custom_response(ctx.session_data, response)
+                local result = nano.handle_custom_response(ctx.session_data, response)
                 nano.fini_session(ctx.session_data)
-                nano.cleanup_all()
                 collectgarbage("collect")
                 ctx.session_id = nil
                 ctx.session_data = nil
-                return custom_result
+                return result
             else
                 ngx.arg[1] = nil  -- Discard chunk
                 ctx.inspection_complete = true
@@ -378,7 +374,6 @@ function NanoHandler.log(conf)
     if ctx.session_id and ctx.session_data and not ctx.inspection_complete then
         kong.log.err("Emergency cleanup for session ", ctx.session_id)
         nano.fini_session(ctx.session_data)
-        nano.cleanup_all()
         collectgarbage("collect")
         ctx.inspection_complete = true
         ctx.session_id = nil
