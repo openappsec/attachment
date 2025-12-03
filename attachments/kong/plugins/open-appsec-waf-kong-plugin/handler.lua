@@ -247,12 +247,6 @@ function NanoHandler.body_filter(conf)
         collectgarbage("step", 100)
         return
     end
-    
-    -- Check if session is already finalized (like Envoy/nginx do)
-    if nano.is_session_finalized(ctx.session_data) then
-        kong.log.debug("Skipping already inspected session")
-        return  -- Let remaining data pass through
-    end
 
     -- Initialize timeout tracking on first chunk
     if not ctx.body_filter_start_time then
@@ -319,29 +313,26 @@ function NanoHandler.body_filter(conf)
 
     -- Process EOF
     if eof then
-        -- Only send end_inspection if session not already finalized
-        if not nano.is_session_finalized(ctx.session_data) then
-            local ok, result = pcall(function()
-                return {nano.end_inspection(ctx.session_id, ctx.session_data, nano.HttpChunkType.HTTP_RESPONSE_END)}
-            end)
+        local ok, result = pcall(function()
+            return {nano.end_inspection(ctx.session_id, ctx.session_data, nano.HttpChunkType.HTTP_RESPONSE_END)}
+        end)
 
-            if ok then
-                local verdict = result[1]
-                local response = result[2]
+        if ok then
+            local verdict = result[1]
+            local response = result[2]
 
-                if verdict == nano.AttachmentVerdict.DROP then
-                    ctx.blocked = true
-                    ctx.inspection_complete = true
-                    local result = nano.handle_custom_response(ctx.session_data, response)
-                    nano.fini_session(ctx.session_data)
-                    collectgarbage("collect")
-                    ctx.session_id = nil
-                    ctx.session_data = nil
-                    return result
-                end
-            else
-                kong.log.err("nano.end_inspection failed: ", tostring(result), " - cleaning up session")
+            if verdict == nano.AttachmentVerdict.DROP then
+                ctx.blocked = true
+                ctx.inspection_complete = true
+                local result = nano.handle_custom_response(ctx.session_data, response)
+                nano.fini_session(ctx.session_data)
+                collectgarbage("collect")
+                ctx.session_id = nil
+                ctx.session_data = nil
+                return result
             end
+        else
+            kong.log.err("nano.end_inspection failed: ", tostring(result), " - cleaning up session")
         end
         
         -- Clean up session at EOF
