@@ -13,10 +13,10 @@ function NanoHandler.init_worker()
 end
 
 function NanoHandler.access(conf)
-    kong.log.err("1-ACCESS PHASE START ========================================")
+    kong.log.debug("1-ACCESS PHASE START ========================================")
     
     if not kong.router.get_route() then
-        kong.log.err("ACCESS SKIPPED: no route matched")
+        kong.log.debug("ACCESS SKIPPED: no route matched")
         return
     end
     
@@ -26,18 +26,18 @@ function NanoHandler.access(conf)
         request_path:match("^/_health") or
         request_path:match("^/metrics")
     ) then
-        kong.log.err("ACCESS SKIPPED: internal endpoint: ", request_path)
+        kong.log.debug("ACCESS SKIPPED: internal endpoint: ", request_path)
         return
     end
     
     if ngx.var.internal then
-        kong.log.err("ACCESS SKIPPED: internal subrequest")
+        kong.log.debug("ACCESS SKIPPED: internal subrequest")
         return
     end
     
     local request_uri = ngx.var.request_uri
     if not request_uri or request_uri == "" then
-        kong.log.err("ACCESS SKIPPED: TLS handshake or no URI")
+        kong.log.debug("ACCESS SKIPPED: TLS handshake or no URI")
         return
     end
     
@@ -184,7 +184,7 @@ function NanoHandler.access(conf)
 end
 
 function NanoHandler.header_filter(conf)
-    kong.log.err("2-HEADER_FILTER PHASE START")
+    kong.log.debug("2-HEADER_FILTER PHASE START")
     local ctx = kong.ctx.plugin
     
     if ctx.blocked or ctx.inspection_complete then
@@ -192,7 +192,7 @@ function NanoHandler.header_filter(conf)
     end
 
     if not ctx.session_id or not ctx.session_data then
-        kong.log.err("No session data in header_filter")
+        kong.log.debug("No session data in header_filter")
         return
     end
 
@@ -232,12 +232,12 @@ function NanoHandler.body_filter(conf)
     
     -- Log first chunk only
     if not ctx.body_filter_start_time then
-        kong.log.err("3-BODY_FILTER PHASE START")
+        kong.log.debug("3-BODY_FILTER PHASE START")
     end
     
-    -- Fast path: skip if already blocked or inspection complete
-    if ctx.blocked or ctx.inspection_complete then
-        ngx.arg[1] = nil  -- Discard chunk
+    -- Fast path: skip if already blocked
+    if ctx.blocked then
+        ngx.arg[1] = nil  -- Discard chunk if blocked
         collectgarbage("step", 100)
         return
     end
@@ -246,6 +246,12 @@ function NanoHandler.body_filter(conf)
         ngx.arg[1] = nil
         collectgarbage("step", 100)
         return
+    end
+    
+    -- Check if session is already finalized (like Envoy/nginx do)
+    if nano.is_session_finalized(ctx.session_data) then
+        kong.log.debug("Skipping already inspected session")
+        return  -- Let remaining data pass through
     end
 
     -- Initialize timeout tracking on first chunk
@@ -271,19 +277,57 @@ function NanoHandler.body_filter(conf)
     local chunk = ngx.arg[1]
     
     if chunk and #chunk > 0 then
+        local ok, result = pcall(function()
+            return {nano.send_body(ctx.session_id, ctx.session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)}
+        end)
+
+        if ok then
+            local verdict = result[1]
+            local response = result[2]
+            local modifications = result[3]
+
+            if modifications then
+                chunk = nano.handle_body_modifications(chunk, modifications, 0)
+                ngx.arg[1] = chunk
+            end
+
+            if verdict == nano.AttachmentVerdict.DROP then
+                ctx.blocked = true
+                ctx.inspection_complete = true
+                local result = nano.handle_custom_response(ctx.session_data, response)
+                nano.fini_session(ctx.session_data)
+                collectgarbage("collect")
+                ctx.session_id = nil
+                ctx.session_data = nil
+                return result
+            elseif verdict == nano.AttachmentVerdict.ACCEPT then
+                -- Final ACCEPT verdict received - session is now finalized at C level
+                kong.log.debug("ACCEPT verdict received - session finalized")
+                ctx.inspection_complete = true
+            end
+        else
+            kong.log.err("nano.send_body failed: ", tostring(result), " - cleaning up session")
+            ctx.inspection_complete = true
+            nano.fini_session(ctx.session_data)
+            nano.cleanup_all()
+            collectgarbage("collect")
+            ctx.session_id = nil
+            ctx.session_data = nil
+            return
+        end
+    end
+
+    -- Process EOF
+    if eof then
+        -- Only send end_inspection if session not already finalized
+        if not nano.is_session_finalized(ctx.session_data) then
             local ok, result = pcall(function()
-                return {nano.send_body(ctx.session_id, ctx.session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)}
+                return {nano.end_inspection(ctx.session_id, ctx.session_data, nano.HttpChunkType.HTTP_RESPONSE_END)}
             end)
 
             if ok then
                 local verdict = result[1]
                 local response = result[2]
-                local modifications = result[3]
-
-                if modifications then
-                    chunk = nano.handle_body_modifications(chunk, modifications, 0)
-                    ngx.arg[1] = chunk
-                end
 
                 if verdict == nano.AttachmentVerdict.DROP then
                     ctx.blocked = true
@@ -296,60 +340,24 @@ function NanoHandler.body_filter(conf)
                     return result
                 end
             else
-                kong.log.err("nano.send_body failed: ", tostring(result), " - cleaning up session")
-                ctx.inspection_complete = true
-                nano.fini_session(ctx.session_data)
-                nano.cleanup_all()
-                collectgarbage("collect")
-                ctx.session_id = nil
-                ctx.session_data = nil
-                return
+                kong.log.err("nano.end_inspection failed: ", tostring(result), " - cleaning up session")
             end
-    end
-
-    -- Process EOF
-    if eof then
-        local ok, result = pcall(function()
-            return {nano.end_inspection(ctx.session_id, ctx.session_data, nano.HttpChunkType.HTTP_RESPONSE_END)}
-        end)
-
-        if ok then
-            local verdict = result[1]
-            local response = result[2]
-
-            if verdict == nano.AttachmentVerdict.DROP then
-                ctx.blocked = true
-                ctx.inspection_complete = true
-                local result = nano.handle_custom_response(ctx.session_data, response)
-                nano.fini_session(ctx.session_data)
-                collectgarbage("collect")
-                ctx.session_id = nil
-                ctx.session_data = nil
-                return result
-            else
-                ngx.arg[1] = nil  -- Discard chunk
-                ctx.inspection_complete = true
-                nano.fini_session(ctx.session_data)
-                nano.cleanup_all()
-                collectgarbage("collect")
-                ctx.session_id = nil
-                ctx.session_data = nil
-            end
-        else
-            kong.log.err("nano.end_inspection failed: ", tostring(result), " - cleaning up session")
+        end
+        
+        -- Clean up session at EOF
+        if not ctx.inspection_complete then
             ctx.inspection_complete = true
             nano.fini_session(ctx.session_data)
             nano.cleanup_all()
             collectgarbage("collect")
             ctx.session_id = nil
             ctx.session_data = nil
-            return
         end
     end
 end
 
 function NanoHandler.log(conf)
-    kong.log.err("4-LOG PHASE START")
+    kong.log.debug("4-LOG PHASE START")
     local ctx = kong.ctx.plugin
     
     -- Force GC if memory is high
