@@ -90,8 +90,7 @@ function nano.handle_custom_response(session_data, response)
 
     if not attachment then
         kong.log.warn("Cannot handle custom response: Attachment not available for worker ", worker_id, " - failing open")
-        kong.response.exit(200, "Request allowed due to attachment unavailability")
-        return
+        return kong.response.exit(200, "Request allowed due to attachment unavailability")
     end
 
     local response_type = nano_attachment.get_web_response_type(attachment, session_data, response)
@@ -104,22 +103,19 @@ function nano.handle_custom_response(session_data, response)
             code = 403
         end
         kong.log.err("Response code only: ", code)
-        kong.response.exit(code, "")
-        return
+        return kong.response.exit(code, "")
     end
 
     if response_type == nano.WebResponseType.REDIRECT_WEB_RESPONSE then
         local location = nano_attachment.get_redirect_page(attachment, session_data, response)
         kong.log.err("Redirect response to: ", location)
-        kong.response.exit(307, "", { ["Location"] = location })
-        return
+        return kong.response.exit(307, "", { ["Location"] = location })
     end
 
     local block_page = nano_attachment.get_block_page(attachment, session_data, response)
     if not block_page then
         kong.log.err("Failed to retrieve custom block page for session ", session_data)
-        kong.response.exit(500, { message = "Internal Server Error" })
-        return
+        return kong.response.exit(500, { message = "Internal Server Error" })
     end
     local code = nano_attachment.get_response_code(response)
     if not code or code < 100 or code > 599 then
@@ -127,7 +123,7 @@ function nano.handle_custom_response(session_data, response)
         code = 403
     end
     kong.log.err("Block page response with code: ", code, ", page length: ", #block_page)
-    kong.response.exit(code, block_page, { ["Content-Type"] = "text/html" })
+    return kong.response.exit(code, block_page, { ["Content-Type"] = "text/html" })
 end
 
 
@@ -428,12 +424,7 @@ function nano.fini_session(session_data)
     end
 
     nano_attachment.fini_session(attachment, session_data)
-    
-    -- CRITICAL: Free all accumulated resources when session ends
-    -- This prevents memory leaks from responses, headers, metadata, etc.
-    nano.cleanup_all()
-    
-    kong.log.err("Successfully finalized session ", session_data, " for worker ", worker_id)
+    kong.log.info("Successfully finalized session ", session_data, " for worker ", worker_id)
     return true
 end
 
