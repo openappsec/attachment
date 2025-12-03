@@ -351,12 +351,10 @@ function nano.send_data(session_id, session_data, meta_data, header_data, contai
 
     local verdict, response = nano_attachment.send_data(attachment, session_id, session_data, chunk_type, meta_data, header_data, contains_body)
 
-    if response then
-        if verdict == nano.AttachmentVerdict.DROP then
-            table.insert(nano.allocated_responses, response)
-        else
-            nano.free_response_immediate(response)
-        end
+    -- For DROP verdicts, caller must manually free response after using it
+    -- For other verdicts, free immediately
+    if response and verdict ~= nano.AttachmentVerdict.DROP then
+        nano.free_response_immediate(response)
     end
 
     return verdict, response
@@ -373,16 +371,10 @@ function nano.send_body(session_id, session_data, body_chunk, chunk_type)
 
     local verdict, response, modifications = nano_attachment.send_body(attachment, session_id, session_data, body_chunk, chunk_type)
 
-    -- CRITICAL OPTIMIZATION: Free response immediately if not needed for DROP handling
-    -- Only DROP verdicts need the response object for custom response generation
-    if response then
-        if verdict == nano.AttachmentVerdict.DROP then
-            -- Keep response for handle_custom_response() - will be freed in cleanup_all()
-            table.insert(nano.allocated_responses, response)
-        else
-            -- INSPECT or ACCEPT verdict - free immediately to prevent memory accumulation
-            nano.free_response_immediate(response)
-        end
+    -- For DROP verdicts, caller must manually free response after using it
+    -- For other verdicts, free immediately to prevent memory accumulation
+    if response and verdict ~= nano.AttachmentVerdict.DROP then
+        nano.free_response_immediate(response)
     end
 
     return verdict, response, modifications
@@ -460,12 +452,10 @@ function nano.send_response_headers(session_id, session_data, headers, status_co
         content_length
     )
 
-    if response then
-        if verdict == nano.AttachmentVerdict.DROP then
-            table.insert(nano.allocated_responses, response)
-        else
-            nano.free_response_immediate(response)
-        end
+    -- For DROP verdicts, caller must manually free response after using it
+    -- For other verdicts, free immediately
+    if response and verdict ~= nano.AttachmentVerdict.DROP then
+        nano.free_response_immediate(response)
     end
 
     return verdict, response
@@ -560,12 +550,10 @@ function nano.end_inspection(session_id, session_data, chunk_type)
 
     local verdict, response = nano_attachment.end_inspection(attachment, session_id, session_data, chunk_type)
 
-    if response then
-        if verdict == nano.AttachmentVerdict.DROP then
-            table.insert(nano.allocated_responses, response)
-        else
-            nano.free_response_immediate(response)
-        end
+    -- For DROP verdicts, caller must manually free response after using it
+    -- For other verdicts, free immediately
+    if response and verdict ~= nano.AttachmentVerdict.DROP then
+        nano.free_response_immediate(response)
     end
 
     return verdict, response

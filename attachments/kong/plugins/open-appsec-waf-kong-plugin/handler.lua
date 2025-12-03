@@ -82,6 +82,8 @@ function NanoHandler.access(conf)
         kong.ctx.plugin.inspection_complete = true
         local result = nano.handle_custom_response(session_data, response)
         kong.log.err("Block page result: ", result)
+        -- Free response AFTER using it
+        nano.free_response_immediate(response)
         nano.fini_session(session_data)
         kong.ctx.plugin.session_id = nil
         kong.ctx.plugin.session_data = nil
@@ -98,6 +100,8 @@ function NanoHandler.access(conf)
                 kong.ctx.plugin.inspection_complete = true
                 local result = nano.handle_custom_response(session_data, response)
                 kong.log.err("Block page result: ", result)
+                -- Free response AFTER using it
+                nano.free_response_immediate(response)
                 nano.fini_session(session_data)
                 kong.ctx.plugin.session_id = nil
                 kong.ctx.plugin.session_data = nil
@@ -119,6 +123,8 @@ function NanoHandler.access(conf)
                     kong.ctx.plugin.inspection_complete = true
                     local result = nano.handle_custom_response(session_data, response)
                     kong.log.err("Block page result: ", result)
+                    -- Free response AFTER using it
+                    nano.free_response_immediate(response)
                     nano.fini_session(session_data)
                     kong.ctx.plugin.session_id = nil
                     kong.ctx.plugin.session_data = nil
@@ -145,6 +151,8 @@ function NanoHandler.access(conf)
                                 kong.ctx.plugin.inspection_complete = true
                                 local result = nano.handle_custom_response(session_data, response)
                                 kong.log.err("Block page result: ", result)
+                                -- Free response AFTER using it
+                                nano.free_response_immediate(response)
                                 nano.fini_session(session_data)
                                 kong.ctx.plugin.session_id = nil
                                 kong.ctx.plugin.session_data = nil
@@ -186,6 +194,8 @@ function NanoHandler.access(conf)
         kong.ctx.plugin.inspection_complete = true
         local result = nano.handle_custom_response(session_data, response)
         kong.log.err("Block page result: ", result)
+        -- Free response AFTER using it
+        nano.free_response_immediate(response)
         nano.fini_session(session_data)
         kong.ctx.plugin.session_id = nil
         kong.ctx.plugin.session_data = nil
@@ -231,6 +241,8 @@ function NanoHandler.header_filter(conf)
         ctx.inspection_complete = true
         local result = nano.handle_custom_response(ctx.session_data, response)
         kong.log.err("Block page result: ", result)
+        -- Free response AFTER using it
+        nano.free_response_immediate(response)
         nano.fini_session(ctx.session_data)
         ctx.session_id = nil
         ctx.session_data = nil
@@ -309,8 +321,9 @@ function NanoHandler.body_filter(conf)
                 ctx.inspection_complete = true
                 local result = nano.handle_custom_response(ctx.session_data, response)
                 kong.log.err("Block page result: ", result)
+                -- Free response AFTER using it
+                nano.free_response_immediate(response)
                 nano.fini_session(ctx.session_data)
-                collectgarbage("collect")
                 ctx.session_id = nil
                 ctx.session_data = nil
                 return result
@@ -353,8 +366,9 @@ function NanoHandler.body_filter(conf)
                     ctx.inspection_complete = true
                     local result = nano.handle_custom_response(ctx.session_data, response)
                     kong.log.err("Block page result: ", result)
+                    -- Free response AFTER using it
+                    nano.free_response_immediate(response)
                     nano.fini_session(ctx.session_data)
-                    collectgarbage("collect")
                     ctx.session_id = nil
                     ctx.session_data = nil
                     return result
