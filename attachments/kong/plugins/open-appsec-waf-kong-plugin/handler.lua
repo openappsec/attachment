@@ -82,8 +82,6 @@ function NanoHandler.access(conf)
         kong.ctx.plugin.inspection_complete = true
         local result = nano.handle_custom_response(session_data, response)
         nano.fini_session(session_data)
-        -- Free response AFTER using it, then cleanup all resources
-        nano.free_response_immediate(response)
         nano.cleanup_all()
         kong.ctx.plugin.session_id = nil
         kong.ctx.plugin.session_data = nil
@@ -100,7 +98,6 @@ function NanoHandler.access(conf)
                 kong.ctx.plugin.inspection_complete = true
                 local result = nano.handle_custom_response(session_data, response)
                 nano.fini_session(session_data)
-                nano.free_response_immediate(response)
                 nano.cleanup_all()
                 kong.ctx.plugin.session_id = nil
                 kong.ctx.plugin.session_data = nil
@@ -122,7 +119,6 @@ function NanoHandler.access(conf)
                     kong.ctx.plugin.inspection_complete = true
                     local result = nano.handle_custom_response(session_data, response)
                     nano.fini_session(session_data)
-                    nano.free_response_immediate(response)
                     nano.cleanup_all()
                     kong.ctx.plugin.session_id = nil
                     kong.ctx.plugin.session_data = nil
@@ -149,7 +145,6 @@ function NanoHandler.access(conf)
                                 kong.ctx.plugin.inspection_complete = true
                                 local result = nano.handle_custom_response(session_data, response)
                                 nano.fini_session(session_data)
-                                nano.free_response_immediate(response)
                                 nano.cleanup_all()
                                 kong.ctx.plugin.session_id = nil
                                 kong.ctx.plugin.session_data = nil
@@ -191,7 +186,6 @@ function NanoHandler.access(conf)
         kong.ctx.plugin.inspection_complete = true
         local result = nano.handle_custom_response(session_data, response)
         nano.fini_session(session_data)
-        nano.free_response_immediate(response)
         nano.cleanup_all()
         kong.ctx.plugin.session_id = nil
         kong.ctx.plugin.session_data = nil
@@ -237,7 +231,6 @@ function NanoHandler.header_filter(conf)
         ctx.inspection_complete = true
         local result = nano.handle_custom_response(ctx.session_data, response)
         nano.fini_session(ctx.session_data)
-        nano.free_response_immediate(response)
         nano.cleanup_all()
         ctx.session_id = nil
         ctx.session_data = nil
@@ -316,7 +309,6 @@ function NanoHandler.body_filter(conf)
                 ctx.inspection_complete = true
                 local result = nano.handle_custom_response(ctx.session_data, response)
                 nano.fini_session(ctx.session_data)
-                nano.free_response_immediate(response)
                 nano.cleanup_all()
                 ctx.session_id = nil
                 ctx.session_data = nil
@@ -360,7 +352,6 @@ function NanoHandler.body_filter(conf)
                     ctx.inspection_complete = true
                     local result = nano.handle_custom_response(ctx.session_data, response)
                     nano.fini_session(ctx.session_data)
-                    nano.free_response_immediate(response)
                     nano.cleanup_all()
                     ctx.session_id = nil
                     ctx.session_data = nil

@@ -350,10 +350,8 @@ function nano.send_data(session_id, session_data, meta_data, header_data, contai
 
     local verdict, response = nano_attachment.send_data(attachment, session_id, session_data, chunk_type, meta_data, header_data, contains_body)
 
-    -- For DROP verdicts, caller must manually free response after using it
-    -- For other verdicts, free immediately
-    if response and verdict ~= nano.AttachmentVerdict.DROP then
-        nano.free_response_immediate(response)
+    if response then
+        table.insert(nano.allocated_responses, response)
     end
 
     return verdict, response
@@ -370,10 +368,8 @@ function nano.send_body(session_id, session_data, body_chunk, chunk_type)
 
     local verdict, response, modifications = nano_attachment.send_body(attachment, session_id, session_data, body_chunk, chunk_type)
 
-    -- For DROP verdicts, caller must manually free response after using it
-    -- For other verdicts, free immediately to prevent memory accumulation
-    if response and verdict ~= nano.AttachmentVerdict.DROP then
-        nano.free_response_immediate(response)
+    if response then
+        table.insert(nano.allocated_responses, response)
     end
 
     return verdict, response, modifications
@@ -446,10 +442,8 @@ function nano.send_response_headers(session_id, session_data, headers, status_co
         content_length
     )
 
-    -- For DROP verdicts, caller must manually free response after using it
-    -- For other verdicts, free immediately
-    if response and verdict ~= nano.AttachmentVerdict.DROP then
-        nano.free_response_immediate(response)
+    if response then
+        table.insert(nano.allocated_responses, response)
     end
 
     return verdict, response
@@ -544,10 +538,8 @@ function nano.end_inspection(session_id, session_data, chunk_type)
 
     local verdict, response = nano_attachment.end_inspection(attachment, session_id, session_data, chunk_type)
 
-    -- For DROP verdicts, caller must manually free response after using it
-    -- For other verdicts, free immediately
-    if response and verdict ~= nano.AttachmentVerdict.DROP then
-        nano.free_response_immediate(response)
+    if response then
+        table.insert(nano.allocated_responses, response)
     end
 
     return verdict, response
