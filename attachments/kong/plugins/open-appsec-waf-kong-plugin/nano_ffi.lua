@@ -292,10 +292,6 @@ function nano.handle_start_transaction()
 
     table.insert(nano.allocated_metadata, metadata)
 
-    -- Temporarily stop GC to ensure metadata isn't collected before it's used
-    -- Handler will restart GC after send_data completes
-    collectgarbage("stop")
-
     return metadata
 end
 

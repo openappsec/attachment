@@ -8,6 +8,9 @@ local NanoHandler = {}
 NanoHandler.PRIORITY = 3000
 NanoHandler.VERSION = "1.0.0"
 
+NanoHandler.sessions = {}
+NanoHandler.processed_requests = {}
+
 function NanoHandler.init_worker()
     nano.init_attachment()
 end
@@ -45,6 +48,11 @@ function NanoHandler.access(conf)
     local session_id = nano.generate_session_id()
     kong.service.request.set_header("x-session-id", tostring(session_id))
 
+    if NanoHandler.processed_requests[session_id] then
+        kong.ctx.plugin.blocked = true
+        return
+    end
+
     local session_data = nano.init_session(session_id)
     if not session_data then
         kong.log.err("Failed to initialize session - failing open (no session created)")
@@ -72,9 +80,6 @@ function NanoHandler.access(conf)
     local contains_body = has_content_length and 1 or 0
 
     local verdict, response = nano.send_data(session_id, session_data, meta_data, req_headers, contains_body, nano.HttpChunkType.HTTP_REQUEST_FILTER)
-    
-    -- Restart GC after send_data completes (was stopped in handle_start_transaction)
-    collectgarbage("restart")
     
     if verdict == nano.AttachmentVerdict.DROP then
         kong.log.err("DROP verdict in access/send_data - session_id: ", session_id)
@@ -191,6 +196,8 @@ function NanoHandler.access(conf)
         kong.ctx.plugin.session_data = nil
         return result
     end
+
+    NanoHandler.processed_requests[session_id] = true
 end
 
 function NanoHandler.header_filter(conf)
