@@ -48,15 +48,9 @@ function NanoHandler.access(conf)
     local session_id = nano.generate_session_id()
     kong.service.request.set_header("x-session-id", tostring(session_id))
 
-    if NanoHandler.processed_requests[session_id] then
-        kong.ctx.plugin.blocked = true
-        return
-    end
-
     local session_data = nano.init_session(session_id)
     if not session_data then
         kong.log.err("Failed to initialize session - failing open (no session created)")
-        kong.ctx.plugin.inspection_complete = true
         return
     end
 
@@ -66,7 +60,6 @@ function NanoHandler.access(conf)
     local meta_data = nano.handle_start_transaction()
     if not meta_data then
         kong.log.err("Failed to handle start transaction - cleaning up session and failing open")
-        kong.ctx.plugin.inspection_complete = true
         nano.fini_session(session_data)
         nano.cleanup_all()
         kong.ctx.plugin.session_id = nil
@@ -84,13 +77,7 @@ function NanoHandler.access(conf)
     if verdict == nano.AttachmentVerdict.DROP then
         kong.log.err("DROP verdict in access/send_data - session_id: ", session_id)
         kong.ctx.plugin.blocked = true
-        kong.ctx.plugin.inspection_complete = true
-        local result = nano.handle_custom_response(session_data, response)
-        nano.fini_session(session_data)
-        nano.cleanup_all()
-        kong.ctx.plugin.session_id = nil
-        kong.ctx.plugin.session_data = nil
-        return result
+        return nano.handle_custom_response(session_data, response)
     end
 
     if contains_body == 1 then
@@ -100,13 +87,7 @@ function NanoHandler.access(conf)
             if verdict == nano.AttachmentVerdict.DROP then
                 kong.log.err("DROP verdict in access/send_body (raw) - session_id: ", session_id)
                 kong.ctx.plugin.blocked = true
-                kong.ctx.plugin.inspection_complete = true
-                local result = nano.handle_custom_response(session_data, response)
-                nano.fini_session(session_data)
-                nano.cleanup_all()
-                kong.ctx.plugin.session_id = nil
-                kong.ctx.plugin.session_data = nil
-                return result
+                return nano.handle_custom_response(session_data, response)
             end
             -- Free body from memory after sending
             body = nil
@@ -121,13 +102,7 @@ function NanoHandler.access(conf)
                 if verdict == nano.AttachmentVerdict.DROP then
                     kong.log.err("DROP verdict in access/send_body (var) - session_id: ", session_id)
                     kong.ctx.plugin.blocked = true
-                    kong.ctx.plugin.inspection_complete = true
-                    local result = nano.handle_custom_response(session_data, response)
-                    nano.fini_session(session_data)
-                    nano.cleanup_all()
-                    kong.ctx.plugin.session_id = nil
-                    kong.ctx.plugin.session_data = nil
-                    return result
+                    return nano.handle_custom_response(session_data, response)
                 end
                 -- Free body_data from memory
                 body_data = nil
@@ -147,13 +122,7 @@ function NanoHandler.access(conf)
                             if verdict == nano.AttachmentVerdict.DROP then
                                 kong.log.err("DROP verdict in access/send_body (file) - session_id: ", session_id)
                                 kong.ctx.plugin.blocked = true
-                                kong.ctx.plugin.inspection_complete = true
-                                local result = nano.handle_custom_response(session_data, response)
-                                nano.fini_session(session_data)
-                                nano.cleanup_all()
-                                kong.ctx.plugin.session_id = nil
-                                kong.ctx.plugin.session_data = nil
-                                return result
+                                return nano.handle_custom_response(session_data, response)
                             end
                             -- Free entire_body from memory
                             entire_body = nil
@@ -176,7 +145,6 @@ function NanoHandler.access(conf)
 
     if not ok then
         kong.log.err("Error ending request inspection: ", verdict, " - failing open")
-        kong.ctx.plugin.inspection_complete = true
         nano.fini_session(session_data)
         nano.cleanup_all()
         collectgarbage("collect")
@@ -188,13 +156,7 @@ function NanoHandler.access(conf)
     if verdict == nano.AttachmentVerdict.DROP then
         kong.log.err("DROP verdict in access/end_inspection - session_id: ", session_id)
         kong.ctx.plugin.blocked = true
-        kong.ctx.plugin.inspection_complete = true
-        local result = nano.handle_custom_response(session_data, response)
-        nano.fini_session(session_data)
-        nano.cleanup_all()
-        kong.ctx.plugin.session_id = nil
-        kong.ctx.plugin.session_data = nil
-        return result
+        return nano.handle_custom_response(session_data, response)
     end
 
     NanoHandler.processed_requests[session_id] = true
@@ -204,7 +166,17 @@ function NanoHandler.header_filter(conf)
     kong.log.debug("2-HEADER_FILTER PHASE START")
     local ctx = kong.ctx.plugin
     
-    if ctx.blocked or ctx.inspection_complete then
+    -- Cleanup blocked sessions
+    if ctx.blocked and ctx.session_data then
+        kong.log.err("Cleaning up blocked session in header_filter: ", ctx.session_id)
+        nano.fini_session(ctx.session_data)
+        nano.cleanup_all()
+        ctx.session_data = nil
+        ctx.session_id = nil
+        return
+    end
+    
+    if ctx.blocked then
         return
     end
 
@@ -223,7 +195,6 @@ function NanoHandler.header_filter(conf)
     
     if not ok then
         kong.log.err("send_response_headers failed: ", tostring(verdict))
-        ctx.inspection_complete = true
         nano.fini_session(ctx.session_data)
         nano.cleanup_all()
         collectgarbage("collect")
@@ -235,16 +206,9 @@ function NanoHandler.header_filter(conf)
     if verdict == nano.AttachmentVerdict.DROP then
         kong.log.err("DROP verdict in header_filter - session_id: ", ctx.session_id)
         ctx.blocked = true
-        ctx.inspection_complete = true
-        local result = nano.handle_custom_response(ctx.session_data, response)
-        nano.fini_session(ctx.session_data)
-        nano.cleanup_all()
-        ctx.session_id = nil
-        ctx.session_data = nil
-        return result
+        return nano.handle_custom_response(ctx.session_data, response)
     elseif verdict == nano.AttachmentVerdict.ACCEPT then
         kong.log.debug("ACCEPT verdict in header_filter - marking inspection complete")
-        ctx.inspection_complete = true
     end
 end
 
@@ -256,6 +220,15 @@ function NanoHandler.body_filter(conf)
     if not ctx.body_filter_start_time then
         kong.log.debug("3-BODY_FILTER PHASE START")
         ctx.body_filter_start_time = ngx.now() * 1000
+    end
+    
+    -- Cleanup blocked sessions
+    if ctx.blocked and ctx.session_data then
+        kong.log.err("Cleaning up blocked session in body_filter: ", ctx.session_id)
+        nano.fini_session(ctx.session_data)
+        nano.cleanup_all()
+        ctx.session_data = nil
+        ctx.session_id = nil
     end
     
     -- Fast path: skip if already blocked
@@ -273,7 +246,7 @@ function NanoHandler.body_filter(conf)
     
     -- CRITICAL: Check if session is finalized (exactly like Envoy does)
     -- This prevents sending chunks after final verdict received
-    if ctx.inspection_complete or nano.is_session_finalized(ctx.session_data) then
+    if nano.is_session_finalized(ctx.session_data) then
         kong.log.debug("Session already finalized - skipping inspection")
         return
     end
@@ -283,7 +256,6 @@ function NanoHandler.body_filter(conf)
     if elapsed > 150000 then
         kong.log.err("Timeout after ", elapsed, "ms - cleaning up session")
         ngx.arg[1] = nil  -- Discard chunk first
-        ctx.inspection_complete = true
         nano.fini_session(ctx.session_data)
         nano.cleanup_all()
         collectgarbage("collect")
@@ -313,17 +285,10 @@ function NanoHandler.body_filter(conf)
             if verdict == nano.AttachmentVerdict.DROP then
                 kong.log.err("DROP verdict in body_filter/send_body - session_id: ", ctx.session_id)
                 ctx.blocked = true
-                ctx.inspection_complete = true
-                local result = nano.handle_custom_response(ctx.session_data, response)
-                nano.fini_session(ctx.session_data)
-                nano.cleanup_all()
-                ctx.session_id = nil
-                ctx.session_data = nil
-                return result
+                return nano.handle_custom_response(ctx.session_data, response)
             elseif verdict == nano.AttachmentVerdict.ACCEPT then
                 -- Final ACCEPT verdict received - mark complete but don't cleanup yet (wait for EOF)
                 kong.log.debug("ACCEPT verdict received - session finalized")
-                ctx.inspection_complete = true
             end
             
             -- Incremental GC after processing chunk
@@ -331,7 +296,6 @@ function NanoHandler.body_filter(conf)
             collectgarbage("step", 100)
         else
             kong.log.err("nano.send_body failed: ", tostring(result), " - cleaning up session")
-            ctx.inspection_complete = true
             nano.fini_session(ctx.session_data)
             nano.cleanup_all()
             collectgarbage("collect")
@@ -344,7 +308,7 @@ function NanoHandler.body_filter(conf)
     -- Process EOF
     if eof then
         -- Only send end_inspection if we haven't already finalized
-        if not ctx.inspection_complete then
+        if not nano.is_session_finalized(ctx.session_data) then
             local ok, result = pcall(function()
                 return {nano.end_inspection(ctx.session_id, ctx.session_data, nano.HttpChunkType.HTTP_RESPONSE_END)}
             end)
@@ -356,13 +320,7 @@ function NanoHandler.body_filter(conf)
                 if verdict == nano.AttachmentVerdict.DROP then
                     kong.log.err("DROP verdict in body_filter/end_inspection - session_id: ", ctx.session_id)
                     ctx.blocked = true
-                    ctx.inspection_complete = true
-                    local result = nano.handle_custom_response(ctx.session_data, response)
-                    nano.fini_session(ctx.session_data)
-                    nano.cleanup_all()
-                    ctx.session_id = nil
-                    ctx.session_data = nil
-                    return result
+                    return nano.handle_custom_response(ctx.session_data, response)
                 end
             else
                 kong.log.err("nano.end_inspection failed: ", tostring(result), " - cleaning up session")
@@ -385,6 +343,15 @@ function NanoHandler.log(conf)
     kong.log.debug("4-LOG PHASE START")
     local ctx = kong.ctx.plugin
     
+    -- Cleanup blocked sessions that returned early from access phase
+    if ctx.blocked and ctx.session_data then
+        kong.log.err("Cleaning up blocked session ", ctx.session_id)
+        nano.fini_session(ctx.session_data)
+        nano.cleanup_all()
+        ctx.session_data = nil
+        ctx.session_id = nil
+    end
+    
     -- Force GC if memory is high
     local mem_before = collectgarbage("count")
     if mem_before > 10240 then
@@ -404,11 +371,10 @@ function NanoHandler.log(conf)
     end
     
     -- Emergency cleanup if body_filter never completed
-    if ctx.session_id and ctx.session_data and not ctx.inspection_complete then
+    if ctx.session_id and ctx.session_data then
         kong.log.err("Emergency cleanup for session ", ctx.session_id)
         nano.fini_session(ctx.session_data)
         collectgarbage("collect")
-        ctx.inspection_complete = true
         ctx.session_id = nil
         ctx.session_data = nil
     end
