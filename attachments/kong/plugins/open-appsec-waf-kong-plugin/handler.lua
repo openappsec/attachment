@@ -131,13 +131,13 @@ function NanoHandler.access(conf)
             end
         end
 
-        local verdict, respopcall_verdictnse = nano.AttachmentVerdict.INSPECT, nil
-        local ok, , pcall_response = pcall(function()
+        local verdict, response = nano.AttachmentVerdict.INSPECT, nil
+        local ok, pcall_verdict, pcall_response = pcall(function()
             return nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
         end)
 
         if not ok then
-            kong.log.err("Error ending request inspection: ", pcall_verdict, " - failing open")open")
+            kong.log.err("Error ending request inspection: ", pcall_verdict, " - failing open")
             nano.fini_session(session_data)
             nano.cleanup_all()
             kong.ctx.plugin.session_data = nil
