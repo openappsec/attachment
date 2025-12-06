@@ -40,8 +40,6 @@ function NanoHandler.access(conf)
         kong.log.err("Failed to handle start transaction - failing open")
         nano.fini_session(session_data)
         nano.cleanup_all()
-        --collectgarbage("restart")
-        --collectgarbage("collect")
         kong.ctx.plugin.session_data = nil
         kong.ctx.plugin.session_id = nil
         return
@@ -52,8 +50,6 @@ function NanoHandler.access(conf)
         kong.log.err("Failed to handle request headers - failing open")
         nano.fini_session(session_data)
         nano.cleanup_all()
-        --collectgarbage("restart")
-        --collectgarbage("collect")
         kong.ctx.plugin.session_data = nil
         kong.ctx.plugin.session_id = nil
         return
@@ -68,7 +64,6 @@ function NanoHandler.access(conf)
         local result = nano.handle_custom_response(session_data, response)
         nano.fini_session(session_data)
         nano.cleanup_all()
-        --collectgarbage("restart")
         kong.ctx.plugin.session_data = nil
         kong.ctx.plugin.session_id = nil
         return result
@@ -83,24 +78,22 @@ function NanoHandler.access(conf)
                 local result = nano.handle_custom_response(session_data, response)
                 nano.fini_session(session_data)
                 nano.cleanup_all()
-                --collectgarbage("restart")
                 kong.ctx.plugin.session_data = nil
                 kong.ctx.plugin.session_id = nil
                 return result
             end
         else
-            kong.log.err("Request body not in memory, attempting to read from buffer/file")
+            kong.log.debug("Request body not in memory, attempting to read from buffer/file")
 
             local body_data = ngx.var.request_body
             if body_data and #body_data > 0 then
-                kong.log.err("Found request body in nginx var, size: ", #body_data)
+                kong.log.debug("Found request body in nginx var, size: ", #body_data)
                 verdict, response = nano.send_body(session_id, session_data, body_data, nano.HttpChunkType.HTTP_REQUEST_BODY)
                 if verdict == nano.AttachmentVerdict.DROP then
                     kong.ctx.plugin.blocked = true
                     local result = nano.handle_custom_response(session_data, response)
                     nano.fini_session(session_data)
                     nano.cleanup_all()
-                    --collectgarbage("restart")
                     kong.ctx.plugin.session_data = nil
                     kong.ctx.plugin.session_id = nil
                     return result
@@ -108,7 +101,7 @@ function NanoHandler.access(conf)
             else
                 local body_file = ngx.var.request_body_file
                 if body_file then
-                    kong.log.err("Reading request body from file: ", body_file)
+                    kong.log.debug("Reading request body from file: ", body_file)
                     local file = io.open(body_file, "rb")
                     if file then
                         local entire_body = file:read("*all")
@@ -117,24 +110,23 @@ function NanoHandler.access(conf)
                         if not entire_body then
                             kong.log.err("Failed to read body file: ", body_file)
                         elseif entire_body and #entire_body > 0 then
-                            kong.log.err("Sending entire body of size ", #entire_body, " bytes to C module")
+                            kong.log.debug("Sending entire body of size ", #entire_body, " bytes to C module")
                             verdict, response = nano.send_body(session_id, session_data, entire_body, nano.HttpChunkType.HTTP_REQUEST_BODY)
                             if verdict == nano.AttachmentVerdict.DROP then
                                 kong.ctx.plugin.blocked = true
                                 local result = nano.handle_custom_response(session_data, response)
                                 nano.fini_session(session_data)
                                 nano.cleanup_all()
-                                collectgarbage("restart")
                                 kong.ctx.plugin.session_data = nil
                                 kong.ctx.plugin.session_id = nil
                                 return result
                             end
                         else
-                            kong.log.err("Empty body file")
+                            kong.log.debug("Empty body file")
                         end
                     end
                 else
-                    kong.log.err("Request body expected but no body data or file available")
+                    kong.log.warn("Request body expected but no body data or file available")
                 end
             end
         end
@@ -148,7 +140,6 @@ function NanoHandler.access(conf)
             kong.log.err("Error ending request inspection: ", pcall_verdict, " - failing open")
             nano.fini_session(session_data)
             nano.cleanup_all()
-            --collectgarbage("restart")
             kong.ctx.plugin.session_data = nil
             kong.ctx.plugin.session_id = nil
             return
@@ -161,7 +152,6 @@ function NanoHandler.access(conf)
             local result = nano.handle_custom_response(session_data, response)
             nano.fini_session(session_data)
             nano.cleanup_all()
-            --collectgarbage("restart")
             kong.ctx.plugin.session_data = nil
             kong.ctx.plugin.session_id = nil
             return result
@@ -173,7 +163,6 @@ function NanoHandler.access(conf)
             local result = nano.handle_custom_response(session_data, response)
             nano.fini_session(session_data)
             nano.cleanup_all()
-            --collectgarbage("restart")
             kong.ctx.plugin.session_data = nil
             kong.ctx.plugin.session_id = nil
             return result
@@ -232,28 +221,7 @@ function NanoHandler.body_filter(conf)
     local session_data = ctx.session_data
 
     if not session_id or not session_data or ctx.session_finalized then
-        kong.log.err("No session data found or session already finalized in body_filter")
         return
-    end
-
-    -- Initialize timeout tracking on first call
-    if not ctx.body_filter_start_time then
-        kong.log.err("Initializing body filter start time")
-        ctx.body_filter_start_time = ngx.now()
-    end
-
-    -- Check for timeout (150 seconds)
-    local elapsed_time = ngx.now() - ctx.body_filter_start_time
-    if elapsed_time > 150 then
-        kong.log.err("Body filter timeout after ", elapsed_time, " seconds - failing open")
-        nano.fini_session(session_data)
-        nano.cleanup_all()
-        -- collectgarbage("restart")
-        -- collectgarbage("collect")  -- Force immediate collection
-        ctx.session_finalized = true
-        ctx.session_data = nil
-        ctx.session_id = nil
-        return 
     end
 
     -- Get current chunk only, not entire body
@@ -261,14 +229,13 @@ function NanoHandler.body_filter(conf)
     local eof = ngx.arg[2]
 
     if chunk and #chunk > 0 then
-        -- Initialize if not exists
-        ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
-        
-        kong.log.err("Processing response body chunk #", ctx.body_buffer_chunk, "  bytes, EOF: ", tostring(eof))
         ctx.body_seen = true
         
         -- Process chunk by chunk to avoid loading entire large body into memory
         local verdict, response, modifications = nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
+
+        -- Initialize if not exists
+        ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
 
         -- Handle body modifications if any
         if modifications then
@@ -285,8 +252,6 @@ function NanoHandler.body_filter(conf)
             nano.fini_session(session_data)
             -- Clean up allocated memory
             nano.cleanup_all()
-            --collectgarbage("restart")
-            --collectgarbage("collect")  -- Force immediate collection
             ctx.session_data = nil
             ctx.session_id = nil
             ngx.arg[1] = ""
@@ -301,10 +266,7 @@ function NanoHandler.body_filter(conf)
 
     -- Handle end of stream
     if eof then
-        kong.log.err("End of response body stream reached, body_seen: ", tostring(ctx.body_seen), ", expect_body: ", tostring(ctx.expect_body))
-        -- Always finalize at EOF, whether we saw body chunks or expected no body
         if ctx.body_seen or ctx.expect_body == false then
-            kong.log.err("Ending response body inspection")
             local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
             if verdict == nano.AttachmentVerdict.DROP then
                 ctx.blocked = true
@@ -313,8 +275,6 @@ function NanoHandler.body_filter(conf)
                 nano.fini_session(session_data)
                 -- Clean up allocated memory
                 nano.cleanup_all()
-               -- collectgarbage("restart")
-                --collectgarbage("collect")  -- Force immediate collection
                 ctx.session_data = nil
                 ctx.session_id = nil
                 ngx.arg[1] = ""
@@ -325,8 +285,6 @@ function NanoHandler.body_filter(conf)
             nano.fini_session(session_data)
             -- Clean up allocated memory
             nano.cleanup_all()
-            --collectgarbage("restart")
-            --collectgarbage("collect")  -- Force immediate collection
             ctx.session_finalized = true
             ctx.session_data = nil
             ctx.session_id = nil
