@@ -238,6 +238,9 @@ function NanoHandler.body_filter(conf)
     local session_data = ctx.session_data
 
     if not session_id or not session_data or ctx.session_finalized then
+        -- Clear the chunk to release it from memory immediately
+        -- Without this, Kong holds chunks in memory causing OOM
+        ngx.arg[1] = nil
         return
     end
 
