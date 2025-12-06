@@ -224,19 +224,23 @@ function NanoHandler.body_filter(conf)
         return
     end
 
-    local body = kong.response.get_raw_body()
+    -- Get current chunk only, not entire body
+    local chunk = ngx.arg[1]
+    local eof = ngx.arg[2]
 
-    if body and #body > 0 then
+    if chunk and #chunk > 0 then
         ctx.body_seen = true
-        local verdict, response, modifications = nano.send_body(session_id, session_data, body, nano.HttpChunkType.HTTP_RESPONSE_BODY)
+        
+        -- Process chunk by chunk to avoid loading entire large body into memory
+        local verdict, response, modifications = nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
 
         -- Initialize if not exists
         ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
 
         -- Handle body modifications if any
         if modifications then
-            body = nano.handle_body_modifications(body, modifications, ctx.body_buffer_chunk)
-            kong.response.set_raw_body(body)
+            chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
+            ngx.arg[1] = chunk
         end
 
         ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
@@ -250,31 +254,41 @@ function NanoHandler.body_filter(conf)
             nano.cleanup_all()
             ctx.session_data = nil
             ctx.session_id = nil
+            ngx.arg[1] = ""
+            ngx.arg[2] = true
             return result
         end
-        return
+        
+        -- Cleanup allocated memory after processing each chunk to prevent accumulation
+        nano.free_all_responses()
+        nano.free_all_nano_str()
     end
 
-    if ctx.body_seen or ctx.expect_body == false then
-        local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
-        if verdict == nano.AttachmentVerdict.DROP then
-            ctx.blocked = true
-            ctx.session_finalized = true
-            local result = nano.handle_custom_response(session_data, response)
+    -- Handle end of stream
+    if eof then
+        if ctx.body_seen or ctx.expect_body == false then
+            local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
+            if verdict == nano.AttachmentVerdict.DROP then
+                ctx.blocked = true
+                ctx.session_finalized = true
+                local result = nano.handle_custom_response(session_data, response)
+                nano.fini_session(session_data)
+                -- Clean up allocated memory
+                nano.cleanup_all()
+                ctx.session_data = nil
+                ctx.session_id = nil
+                ngx.arg[1] = ""
+                ngx.arg[2] = true
+                return result
+            end
+
             nano.fini_session(session_data)
             -- Clean up allocated memory
             nano.cleanup_all()
+            ctx.session_finalized = true
             ctx.session_data = nil
             ctx.session_id = nil
-            return result
         end
-
-        nano.fini_session(session_data)
-        -- Clean up allocated memory
-        nano.cleanup_all()
-        ctx.session_finalized = true
-        ctx.session_data = nil
-        ctx.session_id = nil
     end
 end
 
