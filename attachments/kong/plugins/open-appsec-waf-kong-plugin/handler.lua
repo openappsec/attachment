@@ -32,8 +32,7 @@ function NanoHandler.access(conf)
        user_agent:match("Go%-http%-client") or  -- Common health checker
        (method == "GET" and path == "/") then  -- Root path health checks
         kong.log.debug("Bypassing inspection for internal request: ", method, " ", path, " (UA: ", user_agent, ")")
-        kong.ctx.plugin.session_data = nil
-        kong.ctx.plugin.session_id = nil
+        kong.ctx.plugin.bypass_inspection = true
         return
     end
 
@@ -212,7 +211,7 @@ end
 
 function NanoHandler.header_filter(conf)
     local ctx = kong.ctx.plugin
-    if ctx.blocked then
+    if ctx.blocked or ctx.bypass_inspection then
         return
     end
 
@@ -251,7 +250,7 @@ end
 
 function NanoHandler.body_filter(conf)
     local ctx = kong.ctx.plugin
-    if ctx.blocked then
+    if ctx.blocked or ctx.bypass_inspection then
         return
     end
 
