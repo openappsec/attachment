@@ -91,6 +91,11 @@ function nano.handle_custom_response(session_data, response)
         return kong.response.exit(200, "Request allowed due to attachment unavailability")
     end
 
+    if not session_data or not response then
+        kong.log.err("Invalid session_data or response in handle_custom_response")
+        return kong.response.exit(500, "Internal Server Error")
+    end
+
     local response_type = nano_attachment.get_web_response_type(attachment, session_data, response)
 
     if response_type == nano.WebResponseType.RESPONSE_CODE_ONLY then
@@ -264,6 +269,12 @@ end
 
 function nano.handleHeaders(headers)
     local header_data = nano_attachment.allocHttpHeaders()
+    
+    if not header_data then
+        kong.log.err("Failed to allocate HTTP headers")
+        return nil
+    end
+    
     table.insert(nano.allocate_headers, header_data)
     local index = 0
 
