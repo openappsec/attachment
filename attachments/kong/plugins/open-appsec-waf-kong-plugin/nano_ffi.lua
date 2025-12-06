@@ -292,6 +292,8 @@ function nano.handle_start_transaction()
 
     table.insert(nano.allocated_metadata, metadata)
 
+    collectgarbage("stop")
+
     return metadata
 end
 
