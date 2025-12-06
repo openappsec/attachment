@@ -6,8 +6,6 @@ local nano = {}
 nano.session_counter = 0
 nano.attachments = {}
 nano.num_workers = ngx.worker.count() or 1
-nano.last_init_attempt = {}  -- Track timestamp of last init attempt per worker
-nano.init_backoff_seconds = 5  -- Wait 5 seconds between retry attempts
 nano.allocated_strings = {}
 nano.allocate_headers = {}
 nano.allocated_metadata = {}
@@ -94,7 +92,6 @@ function nano.handle_custom_response(session_data, response)
     end
 
     local response_type = nano_attachment.get_web_response_type(attachment, session_data, response)
-    kong.log.err("Block response - type: ", response_type)
 
     if response_type == nano.WebResponseType.RESPONSE_CODE_ONLY then
         local code = nano_attachment.get_response_code(response)
@@ -102,13 +99,12 @@ function nano.handle_custom_response(session_data, response)
             kong.log.warn("Invalid response code received: ", code, " - using 403 instead")
             code = 403
         end
-        kong.log.err("Response code only: ", code)
+        kong.log.debug("Response code only: ", code)
         return kong.response.exit(code, "")
     end
 
     if response_type == nano.WebResponseType.REDIRECT_WEB_RESPONSE then
         local location = nano_attachment.get_redirect_page(attachment, session_data, response)
-        kong.log.err("Redirect response to: ", location)
         return kong.response.exit(307, "", { ["Location"] = location })
     end
 
@@ -122,8 +118,9 @@ function nano.handle_custom_response(session_data, response)
         kong.log.warn("Invalid response code received: ", code, " - using 403 instead")
         code = 403
     end
-    kong.log.err("Block page response with code: ", code, ", page length: ", #block_page)
+    kong.log.debug("Block page response with code: ", code)
     return kong.response.exit(code, block_page, { ["Content-Type"] = "text/html" })
+
 end
 
 
@@ -172,13 +169,6 @@ function nano.free_all_responses()
     nano.allocated_responses = {}
 end
 
--- Free a single response immediately (for INSPECT/ACCEPT verdicts)
-function nano.free_response_immediate(response)
-    if response then
-        nano_attachment.free_verdict_response(response)
-    end
-end
-
 function nano.cleanup_all()
     nano.free_all_nano_str()
     nano.free_all_metadata()
@@ -188,20 +178,6 @@ end
 
 function nano.init_attachment()
     local worker_id = ngx.worker.id()
-    
-    -- Check if we should throttle retry attempts
-    local last_attempt = nano.last_init_attempt[worker_id]
-    if last_attempt then
-        local time_since_last = ngx.now() - last_attempt
-        if time_since_last < nano.init_backoff_seconds then
-            -- Too soon to retry, skip this attempt
-            return false
-        end
-    end
-    
-    -- Record this attempt timestamp
-    nano.last_init_attempt[worker_id] = ngx.now()
-    
     local attachment, err
     local retries = 3
 
@@ -215,11 +191,9 @@ function nano.init_attachment()
     end
 
     if not attachment then
-        kong.log.err("Worker ", worker_id, " failed to initialize attachment after ", retries, " attempts. Worker will operate in fail-open mode. Will retry in ", nano.init_backoff_seconds, " seconds.")
-        return false
+        kong.log.err("Worker ", worker_id, " failed to initialize attachment after ", retries, " attempts. Worker will operate in fail-open mode.")
     else
         nano.attachments[worker_id] = attachment
-        nano.last_init_attempt[worker_id] = nil  -- Clear backoff on success
         kong.log.info("Worker ", worker_id, " successfully initialized nano_attachment.")
         return true
     end
@@ -231,18 +205,9 @@ function nano.init_session(session_id)
 
     if not attachment then
         kong.log.warn("Attachment not found for worker ", worker_id, ", attempting to reinitialize...")
-        local init_success = nano.init_attachment()
-        
-        if not init_success then
-            -- Log only if this is a fresh retry (not throttled)
-            local last_attempt = nano.last_init_attempt[worker_id]
-            if last_attempt and (ngx.now() - last_attempt) < 1 then
-                kong.log.warn("Cannot initialize session: Attachment initialization just attempted for worker ", worker_id, " - failing open. Will retry in ", nano.init_backoff_seconds, " seconds.")
-            end
-            return nil
-        end
-        
+        nano.init_attachment()
         attachment = nano.attachments[worker_id]
+
         if not attachment then
             kong.log.warn("Cannot initialize session: Attachment still not available for worker ", worker_id, " - failing open")
             return nil
@@ -442,33 +407,6 @@ function nano.send_response_headers(session_id, session_data, headers, status_co
 
     if response then
         table.insert(nano.allocated_responses, response)
-    end
-
-    return verdict, response
-end
-
-function nano.send_content_length(session_id, session_data, content_length)
-    local worker_id = ngx.worker.id()
-    local attachment = nano.attachments[worker_id]
-
-    if not attachment then
-        kong.log.warn("Attachment not available for worker ", worker_id, " - failing open")
-        return nano.AttachmentVerdict.INSPECT
-    end
-
-    local verdict, response = nano_attachment.send_content_length(
-        attachment,
-        session_id,
-        session_data,
-        content_length
-    )
-
-    if response then
-        if verdict == nano.AttachmentVerdict.DROP then
-            table.insert(nano.allocated_responses, response)
-        else
-            nano.free_response_immediate(response)
-        end
     end
 
     return verdict, response
