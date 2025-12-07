@@ -201,19 +201,19 @@ function NanoHandler.body_filter(conf)
     local chunk = ngx.arg[1]
     local eof = ngx.arg[2]
     
-    kong.log.err("body_filter START: ctx.blocked=", ctx.blocked, " ctx.cleanup_needed=", ctx.cleanup_needed, " ctx.session_id=", ctx.session_id, " ctx.session_data=", ctx.session_data and "EXISTS" or "NIL")
+    --kong.log.err("body_filter START: ctx.blocked=", ctx.blocked, " ctx.cleanup_needed=", ctx.cleanup_needed, " ctx.session_id=", ctx.session_id, " ctx.session_data=", ctx.session_data and "EXISTS" or "NIL")
     
     if ctx.blocked or ctx.cleanup_needed then
-        kong.log.err("Fail-open mode - blocked/cleanup chunk without inspection, chunk size: ", chunk and #chunk or 0)
+        kong.log.err("Fail-open mode - blocked/cleanup chunk without inspection, chunk size: ")
         return
     end
 
-    kong.log.err("In body_filter phase")
+    --kong.log.err("In body_filter phase")
     local session_id = ctx.session_id
     local session_data = ctx.session_data
-    kong.log.err("Session id after: ", session_id, " session_data: ", session_data and "EXISTS" or "NIL")
+    -- kong.log.err("Session id after: ", session_id, " session_data: ", session_data and "EXISTS" or "NIL")
     if not session_id or not session_data or ctx.session_finalized then
-        kong.log.err("Fail-open mode - consuming chunk without inspection, chunk size: ", chunk and #chunk or 0)
+        kong.log.err("Fail-open mode - for missing session data or finalized session")
         return
     end
     kong.log.err("Session id after 2")
