@@ -249,6 +249,8 @@ function NanoHandler.header_filter(conf)
 end
 
 function NanoHandler.body_filter(conf)
+    local chunk = ngx.arg[1]
+    local eof = ngx.arg[2]
     local ctx = kong.ctx.plugin
     if ctx.blocked or ctx.bypass_inspection then
         return
@@ -258,9 +260,6 @@ function NanoHandler.body_filter(conf)
     local session_data = ctx.session_data
 
     if not session_id or not session_data or ctx.session_finalized then
-        -- Clear the chunk to release it from memory immediately
-        -- Without this, Kong holds chunks in memory causing OOM
-        ngx.arg[1] = nil
         return
     end
 
@@ -273,7 +272,6 @@ function NanoHandler.body_filter(conf)
         local verdict, response, modifications = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
         
         if modifications then
-            local chunk = ngx.arg[1]
             chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk or 0)
             ngx.arg[1] = chunk
         end
@@ -299,9 +297,6 @@ function NanoHandler.body_filter(conf)
         ctx.session_id = nil
         return 
     end
-
-    local chunk = ngx.arg[1]
-    local eof = ngx.arg[2]
 
     if chunk and #chunk > 0 then
         ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
