@@ -196,7 +196,10 @@ end
 
 function NanoHandler.body_filter(conf)
     local ctx = kong.ctx.plugin
+    local chunk = ngx.arg[1]
+    local eof = ngx.arg[2]
     if ctx.blocked or ctx.cleanup_needed then
+        kong.log.err("In body_filter but already blocked or cleanup needed - skipping processing  ", chunk)
         return
     end
 
@@ -204,6 +207,7 @@ function NanoHandler.body_filter(conf)
     local session_data = ctx.session_data
 
     if not session_id or not session_data or ctx.session_finalized then
+        kong.log.err("Session finalized or missing session data - skipping processing  ", chunk)
         return
     end
 
@@ -216,7 +220,6 @@ function NanoHandler.body_filter(conf)
         local verdict, response, modifications = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
         
         if modifications then
-            local chunk = ngx.arg[1]
             chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk or 0)
             ngx.arg[1] = chunk
         end
@@ -229,19 +232,13 @@ function NanoHandler.body_filter(conf)
             ngx.arg[2] = true
             return nano.handle_custom_response(session_data, response)
         end
-        nano.fini_session(session_data)
-        nano.cleanup_all()
-        -- collectgarbage("restart")
-        -- collectgarbage("collect")
+        -- Don't cleanup here - let log phase handle it
         ctx.cleanup_needed = true
-        ctx.session_finalized = true
-        ctx.session_data = nil
-        ctx.session_id = nil
+        -- Mark that we're in passthrough mode after timeout
+        ctx.timeout_passthrough = true
         return 
     end
 
-    local chunk = ngx.arg[1]
-    local eof = ngx.arg[2]
 
     if chunk and #chunk > 0 then
         ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
@@ -281,14 +278,9 @@ function NanoHandler.body_filter(conf)
                 return nano.handle_custom_response(session_data, response)
             end
 
-            nano.fini_session(session_data)
-            nano.cleanup_all()
-            -- collectgarbage("restart")
-            -- collectgarbage("collect")
+            -- Cleanup in log phase instead
             ctx.cleanup_needed = true
             ctx.session_finalized = true
-            ctx.session_data = nil
-            ctx.session_id = nil
         end
     end
 end
