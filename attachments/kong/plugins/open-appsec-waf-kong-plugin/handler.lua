@@ -59,8 +59,8 @@ function NanoHandler.access(conf)
         kong.log.err("Failed to handle start transaction - failing open")
         nano.fini_session(session_data)
         nano.cleanup_all()
-        collectgarbage("restart")
-        collectgarbage("collect")
+        -- collectgarbage("restart")
+        -- collectgarbage("collect")
         kong.ctx.plugin.session_data = nil
         kong.ctx.plugin.session_id = nil
         return
@@ -71,8 +71,8 @@ function NanoHandler.access(conf)
         kong.log.err("Failed to handle request headers - failing open")
         nano.fini_session(session_data)
         nano.cleanup_all()
-        collectgarbage("restart")
-        collectgarbage("collect")
+        -- collectgarbage("restart")
+        -- collectgarbage("collect")
         kong.ctx.plugin.session_data = nil
         kong.ctx.plugin.session_id = nil
         return
@@ -87,8 +87,8 @@ function NanoHandler.access(conf)
         local result = nano.handle_custom_response(session_data, response)
         nano.fini_session(session_data)
         nano.cleanup_all()
-        collectgarbage("restart")
-        collectgarbage("collect")
+        -- collectgarbage("restart")
+        -- collectgarbage("collect")
         kong.ctx.plugin.session_data = nil
         kong.ctx.plugin.session_id = nil
         return result
@@ -103,8 +103,8 @@ function NanoHandler.access(conf)
                 local result = nano.handle_custom_response(session_data, response)
                 nano.fini_session(session_data)
                 nano.cleanup_all()
-                collectgarbage("restart")
-                collectgarbage("collect")
+                -- collectgarbage("restart")
+                -- collectgarbage("collect")
                 kong.ctx.plugin.session_data = nil
                 kong.ctx.plugin.session_id = nil
                 return result
@@ -121,8 +121,8 @@ function NanoHandler.access(conf)
                     local result = nano.handle_custom_response(session_data, response)
                     nano.fini_session(session_data)
                     nano.cleanup_all()
-                    collectgarbage("restart")
-                    collectgarbage("collect")
+                    -- collectgarbage("restart")
+                    -- collectgarbage("collect")
                     kong.ctx.plugin.session_data = nil
                     kong.ctx.plugin.session_id = nil
                     return result
@@ -146,8 +146,8 @@ function NanoHandler.access(conf)
                                 local result = nano.handle_custom_response(session_data, response)
                                 nano.fini_session(session_data)
                                 nano.cleanup_all()
-                                collectgarbage("restart")
-                                collectgarbage("collect")
+                                -- collectgarbage("restart")
+                                -- collectgarbage("collect")
                                 kong.ctx.plugin.session_data = nil
                                 kong.ctx.plugin.session_id = nil
                                 return result
@@ -171,8 +171,8 @@ function NanoHandler.access(conf)
             kong.log.err("Error ending request inspection: ", pcall_verdict, " - failing open")
             nano.fini_session(session_data)
             nano.cleanup_all()
-            collectgarbage("restart")
-            collectgarbage("collect")
+            -- collectgarbage("restart")
+            -- collectgarbage("collect")
             kong.ctx.plugin.session_data = nil
             kong.ctx.plugin.session_id = nil
             return
@@ -185,8 +185,8 @@ function NanoHandler.access(conf)
             local result = nano.handle_custom_response(session_data, response)
             nano.fini_session(session_data)
             nano.cleanup_all()
-            collectgarbage("restart")
-            collectgarbage("collect")
+            -- collectgarbage("restart")
+            -- collectgarbage("collect")
             kong.ctx.plugin.session_data = nil
             kong.ctx.plugin.session_id = nil
             return result
@@ -198,8 +198,8 @@ function NanoHandler.access(conf)
             local result = nano.handle_custom_response(session_data, response)
             nano.fini_session(session_data)
             nano.cleanup_all()
-            collectgarbage("restart")
-            collectgarbage("collect")
+            -- collectgarbage("restart")
+            -- collectgarbage("collect")
             kong.ctx.plugin.session_data = nil
             kong.ctx.plugin.session_id = nil
             return result
@@ -249,8 +249,6 @@ function NanoHandler.header_filter(conf)
 end
 
 function NanoHandler.body_filter(conf)
-    local chunk = ngx.arg[1]
-    local eof = ngx.arg[2]
     local ctx = kong.ctx.plugin
     if ctx.blocked or ctx.bypass_inspection then
         return
@@ -272,6 +270,7 @@ function NanoHandler.body_filter(conf)
         local verdict, response, modifications = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
         
         if modifications then
+            local chunk = ngx.arg[1]
             chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk or 0)
             ngx.arg[1] = chunk
         end
@@ -290,13 +289,16 @@ function NanoHandler.body_filter(conf)
         end
         nano.fini_session(session_data)
         nano.cleanup_all()
-        collectgarbage("restart")
-        collectgarbage("collect")
+        -- collectgarbage("restart")
+        -- collectgarbage("collect")
         ctx.session_finalized = true
         ctx.session_data = nil
         ctx.session_id = nil
         return 
     end
+
+    local chunk = ngx.arg[1]
+    local eof = ngx.arg[2]
 
     if chunk and #chunk > 0 then
         ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
@@ -317,8 +319,8 @@ function NanoHandler.body_filter(conf)
             local result = nano.handle_custom_response(session_data, response)
             nano.fini_session(session_data)
             nano.cleanup_all()
-            collectgarbage("restart")
-            collectgarbage("collect")
+            -- collectgarbage("restart")
+            -- collectgarbage("collect")
             ctx.session_data = nil
             ctx.session_id = nil
             ngx.arg[1] = ""
@@ -339,8 +341,8 @@ function NanoHandler.body_filter(conf)
                 local result = nano.handle_custom_response(session_data, response)
                 nano.fini_session(session_data)
                 nano.cleanup_all()
-                collectgarbage("restart")
-                collectgarbage("collect")
+                -- collectgarbage("restart")
+                -- collectgarbage("collect")
                 ctx.session_data = nil
                 ctx.session_id = nil
                 ngx.arg[1] = ""
@@ -350,8 +352,8 @@ function NanoHandler.body_filter(conf)
 
             nano.fini_session(session_data)
             nano.cleanup_all()
-            collectgarbage("restart")
-            collectgarbage("collect")
+            -- collectgarbage("restart")
+            -- collectgarbage("collect")
             ctx.session_finalized = true
             ctx.session_data = nil
             ctx.session_id = nil
