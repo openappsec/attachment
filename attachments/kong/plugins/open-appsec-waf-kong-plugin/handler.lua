@@ -28,6 +28,8 @@ function NanoHandler.access(conf)
     local session_data = nano.init_session(session_id)
     if not session_data then
         kong.log.err("Failed to initialize session - failing open")
+        -- Mark for passthrough mode to prevent OOM with large responses
+        kong.ctx.plugin.fail_open = true
         return
     end
 
@@ -161,7 +163,7 @@ end
 
 function NanoHandler.header_filter(conf)
     local ctx = kong.ctx.plugin
-    if ctx.blocked or ctx.cleanup_needed then
+    if ctx.blocked or ctx.cleanup_needed or ctx.fail_open then
         return
     end
 
@@ -198,19 +200,22 @@ function NanoHandler.body_filter(conf)
     local ctx = kong.ctx.plugin
     local chunk = ngx.arg[1]
     local eof = ngx.arg[2]
-    if ctx.blocked or ctx.cleanup_needed then
-        kong.log.err("In body_filter but already blocked or cleanup needed - skipping processing  ", chunk)
+    
+    if ctx.blocked or ctx.cleanup_needed or ctx.fail_open then
         return
     end
 
+    kong.log.err("In body_filter phase")
     local session_id = ctx.session_id
     local session_data = ctx.session_data
-
+    kong.log.err("Session id after")
     if not session_id or not session_data or ctx.session_finalized then
-        kong.log.err("Session finalized or missing session data - skipping processing  ", chunk)
+        -- Fail-open: pass through without inspection
         return
     end
+    kong.log.err("Session id after 2")
 
+     -- Timeout handling
     if not ctx.body_filter_start_time then
         ctx.body_filter_start_time = ngx.now()
     end
