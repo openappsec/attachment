@@ -223,15 +223,13 @@ function NanoHandler.body_filter(conf)
         ctx.body_filter_start_time = ngx.now()
     end
     local elapsed_time = ngx.now() - ctx.body_filter_start_time
-    if elapsed_time > 150 then
+    if elapsed_time > 150 and not ctx.timeout_passthrough then
         kong.log.warn("Body filter timeout after ", elapsed_time, " seconds - failing open")
-        ctx.cleanup_needed = true
         ctx.timeout_passthrough = true
-        return 
     end
 
-
-    if chunk and #chunk > 0 then
+    -- If timeout occurred, skip nano inspection but still process chunks
+    if not ctx.timeout_passthrough and chunk and #chunk > 0 then
         ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
         ctx.body_seen = true
         
@@ -252,13 +250,10 @@ function NanoHandler.body_filter(conf)
             ngx.arg[2] = true
             return nano.handle_custom_response(session_data, response)
         end
-        
-        nano.free_all_responses()
-        nano.free_all_nano_str()
     end
 
     if eof then
-        if ctx.body_seen or ctx.expect_body == false then
+        if not ctx.timeout_passthrough and (ctx.body_seen or ctx.expect_body == false) then
             local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
             if verdict == nano.AttachmentVerdict.DROP then
                 ctx.blocked = true
@@ -272,6 +267,9 @@ function NanoHandler.body_filter(conf)
             -- Cleanup in log phase instead
             ctx.cleanup_needed = true
             ctx.session_finalized = true
+        elseif ctx.timeout_passthrough then
+            -- Timeout occurred, just mark for cleanup in log phase
+            ctx.session_finalized = true
         end
     end
 end
@@ -279,8 +277,8 @@ end
 function NanoHandler.log(conf)
     local ctx = kong.ctx.plugin
     
-    -- Cleanup session if it was blocked (kong.response.exit was called)
-    if ctx.cleanup_needed and ctx.session_data then
+    -- Cleanup session if it was blocked (kong.response.exit was called) OR timed out
+    if (ctx.cleanup_needed or ctx.timeout_passthrough) and ctx.session_data then
         nano.fini_session(ctx.session_data)
         nano.cleanup_all()
         ctx.session_data = nil
