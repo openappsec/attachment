@@ -223,13 +223,15 @@ function NanoHandler.body_filter(conf)
         ctx.body_filter_start_time = ngx.now()
     end
     local elapsed_time = ngx.now() - ctx.body_filter_start_time
-    if elapsed_time > 150 and not ctx.timeout_passthrough then
+    if elapsed_time > 150 then
         kong.log.warn("Body filter timeout after ", elapsed_time, " seconds - failing open")
+        ctx.cleanup_needed = true
         ctx.timeout_passthrough = true
+        return 
     end
 
-    -- If timeout occurred, skip nano inspection but still process chunks
-    if not ctx.timeout_passthrough and chunk and #chunk > 0 then
+
+    if chunk and #chunk > 0 then
         ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
         ctx.body_seen = true
         
@@ -253,9 +255,14 @@ function NanoHandler.body_filter(conf)
     end
 
     if eof then
-        if not ctx.timeout_passthrough and (ctx.body_seen or ctx.expect_body == false) then
+        kong.log.err("End of response body reached in body_filter")
+        
+         -- Timeout handling
+        if ctx.body_seen or ctx.expect_body == false then
+            kong.log.err("Finalizing session in body_filter")
             local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
             if verdict == nano.AttachmentVerdict.DROP then
+                kong.log.err("Dropping response in body_filter after end_inspection")
                 ctx.blocked = true
                 ctx.session_finalized = true
                 ctx.cleanup_needed = true
@@ -264,21 +271,18 @@ function NanoHandler.body_filter(conf)
                 return nano.handle_custom_response(session_data, response)
             end
 
-            -- Cleanup in log phase instead
-            ctx.cleanup_needed = true
-            ctx.session_finalized = true
-        elseif ctx.timeout_passthrough then
-            -- Timeout occurred, just mark for cleanup in log phase
-            ctx.session_finalized = true
         end
+        -- Cleanup in log phase instead
+        ctx.cleanup_needed = true
+        ctx.session_finalized = true
     end
 end
 
 function NanoHandler.log(conf)
     local ctx = kong.ctx.plugin
-    
-    -- Cleanup session if it was blocked (kong.response.exit was called) OR timed out
-    if (ctx.cleanup_needed or ctx.timeout_passthrough) and ctx.session_data then
+    kong.log.err("log phase: ctx.blocked=", ctx.blocked, " ctx.cleanup_needed=", ctx.cleanup_needed, " ctx.session_id=", ctx.session_id, " ctx.session_data=", ctx.session_data and "EXISTS" or "NIL")
+    -- Cleanup session if it was blocked (kong.response.exit was called)
+    if ctx.cleanup_needed and ctx.session_data then
         nano.fini_session(ctx.session_data)
         nano.cleanup_all()
         ctx.session_data = nil
