@@ -205,10 +205,6 @@ function NanoHandler.body_filter(conf)
     
     if ctx.blocked or ctx.cleanup_needed then
         kong.log.err("Fail-open mode - blocked/cleanup chunk without inspection, chunk size: ", chunk and #chunk or 0)
-        
-        if chunk then
-            ngx.arg[1] = chunk
-        end
         return
     end
 
@@ -218,11 +214,6 @@ function NanoHandler.body_filter(conf)
     kong.log.err("Session id after: ", session_id, " session_data: ", session_data and "EXISTS" or "NIL")
     if not session_id or not session_data or ctx.session_finalized then
         kong.log.err("Fail-open mode - consuming chunk without inspection, chunk size: ", chunk and #chunk or 0)
-        -- In fail-open, we need to consume the chunk to prevent buffering
-        -- Setting ngx.arg[1] to itself signals to Kong that we processed it
-        if chunk then
-            ngx.arg[1] = chunk
-        end
         return
     end
     kong.log.err("Session id after 2")
@@ -234,24 +225,7 @@ function NanoHandler.body_filter(conf)
     local elapsed_time = ngx.now() - ctx.body_filter_start_time
     if elapsed_time > 150 then
         kong.log.warn("Body filter timeout after ", elapsed_time, " seconds - failing open")
-        local verdict, response, modifications = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
-        
-        if modifications then
-            chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk or 0)
-            ngx.arg[1] = chunk
-        end
-        
-        if verdict == nano.AttachmentVerdict.DROP then
-            ctx.blocked = true
-            ctx.session_finalized = true
-            ctx.cleanup_needed = true
-            ngx.arg[1] = ""
-            ngx.arg[2] = true
-            return nano.handle_custom_response(session_data, response)
-        end
-        -- Don't cleanup here - let log phase handle it
         ctx.cleanup_needed = true
-        -- Mark that we're in passthrough mode after timeout
         ctx.timeout_passthrough = true
         return 
     end
