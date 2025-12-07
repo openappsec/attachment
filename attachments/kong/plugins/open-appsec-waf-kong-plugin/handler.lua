@@ -16,26 +16,6 @@ function NanoHandler.init_worker()
 end
 
 function NanoHandler.access(conf)
-    -- Skip inspection for health checks and internal requests
-    local path = kong.request.get_path()
-    local user_agent = kong.request.get_header("User-Agent") or ""
-    local method = kong.request.get_method()
-    
-    -- Bypass health checks, status endpoints, and internal monitoring
-    if path == "/status" or 
-       path == "/health" or 
-       path:match("^/metrics") or
-       path:match("^/_health") or
-       path:match("^/kong") or  -- Kong admin API paths
-       user_agent:match("kube%-probe") or
-       user_agent:match("Prometheus") or
-       user_agent:match("Go%-http%-client") or  -- Common health checker
-       (method == "GET" and path == "/") then  -- Root path health checks
-        kong.log.debug("Bypassing inspection for internal request: ", method, " ", path, " (UA: ", user_agent, ")")
-        kong.ctx.plugin.bypass_inspection = true
-        return
-    end
-
     local headers = kong.request.get_headers()
     local session_id = nano.generate_session_id()
     kong.service.request.set_header("x-session-id", tostring(session_id))
