@@ -205,6 +205,13 @@ function NanoHandler.body_filter(conf)
     
     if ctx.blocked or ctx.cleanup_needed then
         kong.log.err("Fail-open mode - blocked/cleanup chunk without inspection, chunk size: ")
+        if not ctx.gc_counter then
+            ctx.gc_counter = 0
+        end
+        ctx.gc_counter = ctx.gc_counter + 1
+        if ctx.gc_counter % 128 == 0 then
+            collectgarbage("step", 200)
+        end
         return
     end
 
@@ -214,6 +221,13 @@ function NanoHandler.body_filter(conf)
     -- kong.log.err("Session id after: ", session_id, " session_data: ", session_data and "EXISTS" or "NIL")
     if not session_id or not session_data or ctx.session_finalized then
         kong.log.err("Fail-open mode - for missing session data or finalized session")
+        if not ctx.gc_counter then
+            ctx.gc_counter = 0
+        end
+        ctx.gc_counter = ctx.gc_counter + 1
+        if ctx.gc_counter % 128 == 0 then
+            collectgarbage("step", 200)
+        end
         return
     end
     kong.log.err("Session id after 2")
