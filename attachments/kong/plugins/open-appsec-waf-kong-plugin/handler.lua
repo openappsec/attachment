@@ -27,6 +27,7 @@ function NanoHandler.access(conf)
 
     local session_data = nano.init_session(session_id)
     if not session_data then
+        kong.log.err("Failed to initialize session - failing open")
         return
     end
 
@@ -35,6 +36,7 @@ function NanoHandler.access(conf)
 
     local meta_data = nano.handle_start_transaction()
     if not meta_data then
+        kong.log.err("Failed to handle start transaction - failing open")
         nano.fini_session(session_data)
         nano.cleanup_all()
         -- collectgarbage("restart")
@@ -46,6 +48,7 @@ function NanoHandler.access(conf)
     
     local req_headers = nano.handleHeaders(headers)
     if not req_headers then
+        kong.log.err("Failed to handle request headers - failing open")
         nano.fini_session(session_data)
         nano.cleanup_all()
         -- collectgarbage("restart")
@@ -121,6 +124,7 @@ function NanoHandler.access(conf)
         end)
 
         if not ok then
+            kong.log.err("Error ending request inspection: ", pcall_verdict, " - failing open")
             nano.fini_session(session_data)
             nano.cleanup_all()
             -- collectgarbage("restart")
@@ -157,7 +161,9 @@ end
 
 function NanoHandler.header_filter(conf)
     local ctx = kong.ctx.plugin
-   if ctx.blocked or ctx.cleanup_needed then
+    kong.log.err("header_filter: ctx.blocked=", ctx.blocked, " ctx.cleanup_needed=", ctx.cleanup_needed, " ctx.session_id=", ctx.session_id, " ctx.session_data=", ctx.session_data and "EXISTS" or "NIL")
+    
+    if ctx.blocked or ctx.cleanup_needed then
         return
     end
 
@@ -165,6 +171,7 @@ function NanoHandler.header_filter(conf)
     local session_data = ctx.session_data
 
     if not session_id or not session_data then
+        kong.log.err("No session data found in header_filter - session_id:", session_id, " session_data:", session_data)
         return
     end
 
@@ -172,6 +179,7 @@ function NanoHandler.header_filter(conf)
     local header_data = nano.handleHeaders(headers)
     
     if not header_data then
+        kong.log.err("Failed to handle response headers - failing open")
         return
     end
     
@@ -192,10 +200,14 @@ function NanoHandler.body_filter(conf)
     local ctx = kong.ctx.plugin
     local chunk = ngx.arg[1]
     local eof = ngx.arg[2]
+    ctx.response_body_size = (ctx.response_body_size or 0) + (chunk and #chunk or 0)
+    kong.log.err("Response body size so far: ", ctx.response_body_size)
     
     --kong.log.err("body_filter START: ctx.blocked=", ctx.blocked, " ctx.cleanup_needed=", ctx.cleanup_needed, " ctx.session_id=", ctx.session_id, " ctx.session_data=", ctx.session_data and "EXISTS" or "NIL")
     
     if ctx.blocked or ctx.cleanup_needed then
+        kong.log.err("Fail-open mode - blocked/cleanup chunk without inspection, passing through")
+        ngx.arg[1] = chunk
         return
     end
 
@@ -204,8 +216,12 @@ function NanoHandler.body_filter(conf)
     local session_data = ctx.session_data
     -- kong.log.err("Session id after: ", session_id, " session_data: ", session_data and "EXISTS" or "NIL")
     if not session_id or not session_data or ctx.session_finalized then
+        kong.log.err("No session data found in body_filter - session_id:", session_id, " session_data:", session_data)
+        ngx.arg[1] = chunk
         return
     end
+    kong.log.err("Session id after 2")
+
      -- Timeout handling
     if not ctx.body_filter_start_time then
         ctx.body_filter_start_time = ngx.now()
@@ -270,7 +286,7 @@ function NanoHandler.log(conf)
     local ctx = kong.ctx.plugin
     kong.log.err("log phase: ctx.blocked=", ctx.blocked, " ctx.cleanup_needed=", ctx.cleanup_needed, " ctx.session_id=", ctx.session_id, " ctx.session_data=", ctx.session_data and "EXISTS" or "NIL")
     -- Cleanup session if it was blocked (kong.response.exit was called)
-    if ctx.cleanup_needed and ctx.session_data then
+    if ctx.cleanup_needed or ctx.session_data then
         nano.fini_session(ctx.session_data)
         nano.cleanup_all()
         ctx.session_data = nil
