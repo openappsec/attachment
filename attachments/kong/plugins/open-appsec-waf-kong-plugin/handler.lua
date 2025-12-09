@@ -37,10 +37,7 @@ function NanoHandler.access(conf)
     local meta_data = nano.handle_start_transaction()
     if not meta_data then
         kong.log.err("Failed to handle start transaction - failing open")
-        nano.fini_session(session_data)
-        nano.cleanup_all()
-        -- collectgarbage("restart")
-        -- collectgarbage("collect")
+        kong.ctx.plugin.cleanup_needed = true
         kong.ctx.plugin.session_data = nil
         kong.ctx.plugin.session_id = nil
         return
@@ -49,10 +46,7 @@ function NanoHandler.access(conf)
     local req_headers = nano.handleHeaders(headers)
     if not req_headers then
         kong.log.err("Failed to handle request headers - failing open")
-        nano.fini_session(session_data)
-        nano.cleanup_all()
-        -- collectgarbage("restart")
-        -- collectgarbage("collect")
+        kong.ctx.plugin.cleanup_needed = true
         kong.ctx.plugin.session_data = nil
         kong.ctx.plugin.session_id = nil
         return
@@ -125,10 +119,7 @@ function NanoHandler.access(conf)
 
         if not ok then
             kong.log.err("Error ending request inspection: ", pcall_verdict, " - failing open")
-            nano.fini_session(session_data)
-            nano.cleanup_all()
-            -- collectgarbage("restart")
-            -- collectgarbage("collect")
+            kong.ctx.plugin.cleanup_needed = true
             kong.ctx.plugin.session_data = nil
             kong.ctx.plugin.session_id = nil
             return
@@ -139,10 +130,7 @@ function NanoHandler.access(conf)
         if verdict == nano.AttachmentVerdict.DROP then
             kong.ctx.plugin.blocked = true
             local result = nano.handle_custom_response(session_data, response)
-            nano.fini_session(session_data)
-            nano.cleanup_all()
-            -- collectgarbage("restart")
-            -- collectgarbage("collect")
+            kong.ctx.plugin.cleanup_needed = true
             kong.ctx.plugin.session_data = nil
             kong.ctx.plugin.session_id = nil
             return result
