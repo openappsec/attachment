@@ -1,4 +1,3 @@
-cat /usr/local/share/lua/5.1/kong/plugins/open-appsec-waf-kong-plugin/handler.lua
 local module_name = ...
 local prefix = module_name:match("^(.-)handler$")
 local nano = require(prefix .. "nano_ffi")
