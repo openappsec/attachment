@@ -5,7 +5,6 @@ local nano = {}
 
 nano.session_counter = 0
 nano.attachments = {}
-nano.num_workers = ngx.worker.count() or 1
 nano.allocated_strings = {}
 nano.allocate_headers = {}
 nano.allocated_metadata = {}
@@ -178,11 +177,12 @@ end
 
 function nano.init_attachment()
     local worker_id = ngx.worker.id()
+    local num_workers = ngx.worker.count() or 1  -- Get count dynamically
     local attachment, err
     local retries = 3
 
     for attempt = 1, retries do
-        attachment, err = nano_attachment.init_nano_attachment(worker_id, nano.num_workers)
+        attachment, err = nano_attachment.init_nano_attachment(worker_id, num_workers)
         if attachment then
             break
         end
