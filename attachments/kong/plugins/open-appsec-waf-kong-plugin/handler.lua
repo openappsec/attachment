@@ -13,6 +13,7 @@ function NanoHandler.init_worker()
 end
 
 function NanoHandler.access(conf)
+    kong.log.debug("Entering access phase")
     local ctx = kong.ctx.plugin
     local headers = kong.request.get_headers()
     local session_id = nano.generate_session_id()
@@ -122,6 +123,7 @@ function NanoHandler.access(conf)
 end
 
 function NanoHandler.header_filter(conf)
+    kong.log.debug("Entering header_filter phase, cleanup_needed: ", tostring(kong.ctx.plugin.cleanup_needed))
     local ctx = kong.ctx.plugin
     if ctx.cleanup_needed then
         kong.log.debug("Cleanup needed in header_filter, skipping processing")
@@ -158,6 +160,7 @@ function NanoHandler.header_filter(conf)
 end
 
 function NanoHandler.body_filter(conf)
+    kong.log.debug("Entering body_filter phase, cleanup_needed: ", tostring(kong.ctx.plugin.cleanup_needed))
     local ctx = kong.ctx.plugin
     if ctx.cleanup_needed then
         kong.log.debug("Cleanup needed in body_filter, skipping processing")
@@ -225,7 +228,7 @@ end
 function NanoHandler.log(conf)
     local ctx = kong.ctx.plugin
     kong.log.debug("Entering log phase cleanup, cleanup_needed: ", tostring(ctx.cleanup_needed))
-    if ctx.cleanup_needed then
+    if ctx.cleanup_needed or ctx.session_data then
         nano.fini_session(ctx.session_data)
         nano.cleanup_all()
         ctx.session_data = nil
