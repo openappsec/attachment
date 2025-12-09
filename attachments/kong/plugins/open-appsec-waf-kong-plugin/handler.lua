@@ -8,9 +8,6 @@ local NanoHandler = {}
 NanoHandler.PRIORITY = 3000
 NanoHandler.VERSION = "1.0.0"
 
-NanoHandler.sessions = {}
-NanoHandler.processed_requests = {}
-
 function NanoHandler.init_worker()
     nano.init_attachment()
 end
@@ -19,11 +16,6 @@ function NanoHandler.access(conf)
     local headers = kong.request.get_headers()
     local session_id = nano.generate_session_id()
     kong.service.request.set_header("x-session-id", tostring(session_id))
-
-    if NanoHandler.processed_requests[session_id] then
-        kong.ctx.plugin.blocked = true
-        return
-    end
 
     local session_data = nano.init_session(session_id)
     if not session_data then
@@ -143,8 +135,6 @@ function NanoHandler.access(conf)
             return nano.handle_custom_response(session_data, response)
         end
     end
-
-    NanoHandler.processed_requests[session_id] = true
 end
 
 function NanoHandler.header_filter(conf)
