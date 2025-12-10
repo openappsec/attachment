@@ -193,7 +193,7 @@ function NanoHandler.header_filter(conf)
 
     local status_code = kong.response.get_status()
     local content_length = tonumber(headers["content-length"]) or 0
-    konhg.log.err("NanoHandler header_filter phase sending response headers to C module, status_code: ", status_code, " content_length: ", content_length)
+    kong.log.err("NanoHandler header_filter phase sending response headers to C module, status_code: ", status_code, " content_length: ", content_length)
 
     local verdict, response = nano.send_response_headers(session_id, session_data, header_data, status_code, content_length)
     if verdict == nano.AttachmentVerdict.DROP then
