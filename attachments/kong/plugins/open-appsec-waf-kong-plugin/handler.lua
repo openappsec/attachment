@@ -17,25 +17,25 @@ function NanoHandler.access(conf)
     
     -- Check if we already have a finalized session from a previous phase
     local ctx = kong.ctx.plugin
-    if nano.is_session_finalized(ctx.session_data) then
-        kong.log.info("Session has already been inspected, no need for further inspection")
-        return
-    end
     
     local headers = kong.request.get_headers()
     local session_id = nano.generate_session_id()
     -- I don't think we need to set this header, but keeping it for now
     kong.service.request.set_header("x-session-id", tostring(session_id))
-
+    
     local session_data = nano.init_session(session_id)
     if not session_data then
         --kong.log.err("Failed to initialize session - failing open")
         kong.ctx.plugin.cleanup_needed = false
         return
     end
-
+    
     kong.ctx.plugin.session_data = session_data
     kong.ctx.plugin.session_id = session_id
+    if nano.is_session_finalized(session_id) then
+        kong.log.info("Session has already been inspected, no need for further inspection")
+        return
+    end
 
     local meta_data = nano.handle_start_transaction()
     kong.ctx.plugin.meta_data = meta_data  -- Keep reference to prevent GC
