@@ -154,17 +154,6 @@ function NanoHandler.access(conf)
             kong.ctx.plugin.cleanup_needed = true
             return
         end
-    else
-        kong.log.err("No request body to inspect, ending inspection directly")
-        verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
-        if verdict == nano.AttachmentVerdict.DROP then
-            kong.ctx.plugin.cleanup_needed = true
-            return nano.handle_custom_response(session_data, response)
-        elseif verdict == nano.AttachmentVerdict.ACCEPT then
-            kong.log.debug("Request end inspection passed (no body)")
-            kong.ctx.plugin.cleanup_needed = true
-            return
-        end
     end
 end
 
