@@ -229,7 +229,7 @@ function nano.is_session_finalized(session_data)
 
     if not attachment or not session_data then
         kong.log.err("Cannot check session finalization: Invalid attachment or session_data")
-        return false
+        return true
     end
 
     return nano_attachment.is_session_finalized(attachment, session_data)
@@ -256,8 +256,8 @@ function nano.handle_start_transaction()
     )
 
     table.insert(nano.allocated_metadata, metadata)
-
     collectgarbage("stop")
+    kong.log.err("Generated start transaction metadata: ", metadata)
 
     return metadata
 end
@@ -295,6 +295,7 @@ function nano.handleHeaders(headers)
     end
 
     nano_attachment.setHeaderCount(header_data, index)
+    kong.log.err("Processed headers into header_data : ", header_data)
 
     return header_data
 end
