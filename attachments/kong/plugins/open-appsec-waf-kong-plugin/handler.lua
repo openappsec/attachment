@@ -78,6 +78,10 @@ function NanoHandler.access(conf)
             if verdict == nano.AttachmentVerdict.DROP then
                 kong.ctx.plugin.cleanup_needed = true
                 return nano.handle_custom_response(session_data, response)
+            elseif verdict == nano.AttachmentVerdict.ACCEPT then
+                kong.log.debug("Request body passed inspection")
+                kong.ctx.plugin.cleanup_needed = true
+                return
             end
         else
             --kong.log.err("Request body not found in memory, checking nginx vars")
@@ -91,6 +95,10 @@ function NanoHandler.access(conf)
                 if verdict == nano.AttachmentVerdict.DROP then
                     kong.ctx.plugin.cleanup_needed = true
                     return nano.handle_custom_response(session_data, response)
+                elseif verdict == nano.AttachmentVerdict.ACCEPT then
+                    kong.log.debug("Request body from nginx var passed inspection")
+                    kong.ctx.plugin.cleanup_needed = true
+                    return
                 end
                 kong.log.err("Sent request body from nginx var to C module")
             else
@@ -113,6 +121,10 @@ function NanoHandler.access(conf)
                             if verdict == nano.AttachmentVerdict.DROP then
                                 kong.ctx.plugin.cleanup_needed = true
                                 return nano.handle_custom_response(session_data, response)
+                            elseif verdict == nano.AttachmentVerdict.ACCEPT then
+                                kong.log.debug("Request body from file passed inspection")
+                                kong.ctx.plugin.cleanup_needed = true
+                                return
                             end
                         else
                             kong.log.debug("Empty body file")
@@ -137,6 +149,10 @@ function NanoHandler.access(conf)
         if verdict == nano.AttachmentVerdict.DROP then
             kong.ctx.plugin.cleanup_needed = true
             return nano.handle_custom_response(session_data, response)
+        elseif verdict == nano.AttachmentVerdict.ACCEPT then
+            kong.log.debug("Request end inspection passed")
+            kong.ctx.plugin.cleanup_needed = true
+            return
         end
     else
         kong.log.err("No request body to inspect, ending inspection directly")
@@ -144,6 +160,10 @@ function NanoHandler.access(conf)
         if verdict == nano.AttachmentVerdict.DROP then
             kong.ctx.plugin.cleanup_needed = true
             return nano.handle_custom_response(session_data, response)
+        elseif verdict == nano.AttachmentVerdict.ACCEPT then
+            kong.log.debug("Request end inspection passed (no body)")
+            kong.ctx.plugin.cleanup_needed = true
+            return
         end
     end
 end
@@ -190,6 +210,10 @@ function NanoHandler.header_filter(conf)
     if verdict == nano.AttachmentVerdict.DROP then
         kong.ctx.plugin.cleanup_needed = true
         return nano.handle_custom_response(session_data, response)
+    elseif verdict == nano.AttachmentVerdict.ACCEPT then
+        kong.log.debug("Response headers passed inspection")
+        kong.ctx.plugin.cleanup_needed = true
+        return
     end
     --kong.log.err("NanoHandler header_filter phase sent response headers")
 
@@ -203,6 +227,10 @@ function NanoHandler.header_filter(conf)
             kong.log.err("DROP verdict after response end inspection")
             ctx.cleanup_needed = true
             return nano.handle_custom_response(session_data, response)
+        elseif verdict == nano.AttachmentVerdict.ACCEPT then
+            kong.log.debug("Response end inspection passed (no body expected)")
+            ctx.cleanup_needed = true
+            return
         end
         ctx.cleanup_needed = true
     end
@@ -263,6 +291,10 @@ function NanoHandler.body_filter(conf)
             ngx.arg[1] = ""
             ngx.arg[2] = true
             return nano.handle_custom_response(session_data, response)
+        elseif verdict == nano.AttachmentVerdict.ACCEPT then
+            kong.log.debug("Response body chunk passed inspection")
+            ctx.cleanup_needed = true
+            return
         end
     end
 
@@ -279,6 +311,10 @@ function NanoHandler.body_filter(conf)
                 ngx.arg[1] = ""
                 ngx.arg[2] = true
                 return nano.handle_custom_response(session_data, response)
+            elseif verdict == nano.AttachmentVerdict.ACCEPT then
+                kong.log.debug("Response end inspection passed")
+                ctx.cleanup_needed = true
+                return
             end
             --kong.log.err("Response inspection ended successfully")
 
