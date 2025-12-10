@@ -63,6 +63,10 @@ function NanoHandler.access(conf)
     if verdict == nano.AttachmentVerdict.DROP then
         kong.ctx.plugin.cleanup_needed = true
         return nano.handle_custom_response(session_data, response)
+    elseif verdict == nano.AttachmentVerdict.ACCEPT then
+        kong.log.debug("Request passed without body inspection")
+        kong.ctx.plugin.cleanup_needed = true
+        return
     end
 
     if contains_body == 1 then
