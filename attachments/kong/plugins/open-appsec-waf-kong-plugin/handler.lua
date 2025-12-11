@@ -193,6 +193,7 @@ function NanoHandler.header_filter(conf)
 end
 
 function NanoHandler.body_filter(conf)
+    kong.log.err("Entering body_filter phase")
     local ctx = kong.ctx.plugin
     local chunk = ngx.arg[1]
     local eof = ngx.arg[2]
@@ -203,7 +204,9 @@ function NanoHandler.body_filter(conf)
     
     -- If blocked in header_filter, send custom response
     if ctx.blocked then
+        kong.log.err("Sending custom block response in body_filter")
         if ctx.block_response then
+            kong.log.err("Block response data available, preparing custom response")
             local code, body, headers = nano.get_custom_response_data(session_data, ctx.block_response)
             kong.log.info("Replacing response with custom response, code: ", code)
             ngx.status = code
@@ -259,6 +262,7 @@ function NanoHandler.body_filter(conf)
     end
 
     if chunk and #chunk > 0 then
+        kong.log.err("Processing response body chunk of size ", #chunk, " bytes")
         ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
         ctx.body_seen = true
 
@@ -276,7 +280,7 @@ function NanoHandler.body_filter(conf)
         ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
 
         if verdict ~= nano.AttachmentVerdict.INSPECT then
-            kong.log.debug("Final verdict for response body chunk: ", verdict)
+            kong.log.err("Final verdict for response body chunk: ", verdict)
             ctx.cleanup_needed = true
             if verdict == nano.AttachmentVerdict.DROP then
                 kong.log.warn("DROP verdict in body_filter - replacing with custom response")
@@ -296,7 +300,7 @@ function NanoHandler.body_filter(conf)
             end
             return
         end
-        
+        kong.log.err("Response body chunk of size ", #chunk, " bytes inspected and passed")
         -- Don't send chunk yet - hold it in buffer
         ngx.arg[1] = ""
         return
@@ -329,7 +333,7 @@ function NanoHandler.body_filter(conf)
                 end
             end
         end
-        
+        kong.log.err("Response fully inspected and passed - flushing buffered chunks , total buffered chunks: ", #ctx.response_buffer)
         -- All chunks inspected and passed - send buffered response
         if ctx.response_buffer and #ctx.response_buffer > 0 then
             local buffered_data = table.concat(ctx.response_buffer)
