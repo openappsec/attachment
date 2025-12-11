@@ -93,8 +93,17 @@ function NanoHandler.access(conf)
                     if file then
                         local chunk_size = 8192
                         local chunk_count = 0
+                        local start_time = ngx.now()
                         
                         while true do
+                            -- Check timeout
+                            local elapsed = ngx.now() - start_time
+                            if elapsed > 3 then
+                                kong.log.warn("Request body reading timeout after ", elapsed, " seconds")
+                                file:close()
+                                return
+                            end
+                            
                             kong.log.err("Reading next chunk from request body file")
                             local chunk = file:read(chunk_size)
                             if not chunk or #chunk == 0 then
@@ -194,13 +203,13 @@ function NanoHandler.body_filter(conf)
     local session_id = ctx.session_id
     local session_data = ctx.session_data
     
+    -- If blocked in header_filter, send custom response
     if ctx.blocked then
         if ctx.block_response then
             local code, body, headers = nano.get_custom_response_data(session_data, ctx.block_response)
             kong.log.info("Replacing response with custom response, code: ", code)
             ngx.status = code
             
-            -- Set custom headers
             for header_name, header_value in pairs(headers) do
                 ngx.header[header_name] = header_value
             end
@@ -239,17 +248,31 @@ function NanoHandler.body_filter(conf)
     if elapsed_time > 3 then
         kong.log.warn("Body filter timeout after ", elapsed_time, " seconds - failing open")
         ctx.cleanup_needed = true
+        -- Send buffered chunks before timeout
+        if ctx.response_buffer and #ctx.response_buffer > 0 then
+            ngx.arg[1] = table.concat(ctx.response_buffer)
+        end
         return
+    end
+
+    -- Initialize response buffer
+    if not ctx.response_buffer then
+        ctx.response_buffer = {}
     end
 
     if chunk and #chunk > 0 then
         ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
         ctx.body_seen = true
 
+        -- Buffer the chunk BEFORE sending to agent
+        table.insert(ctx.response_buffer, chunk)
+
         local verdict, response, modifications = nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
+        
         if modifications then
             chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
-            ngx.arg[1] = chunk
+            -- Update buffered chunk with modifications
+            ctx.response_buffer[#ctx.response_buffer] = chunk
         end
 
         ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
@@ -258,7 +281,7 @@ function NanoHandler.body_filter(conf)
             kong.log.debug("Final verdict for response body chunk: ", verdict)
             ctx.cleanup_needed = true
             if verdict == nano.AttachmentVerdict.DROP then
-                kong.log.warn("DROP verdict in body_filter - replacing response immediately")
+                kong.log.warn("DROP verdict in body_filter - replacing with custom response")
                 local code, body, headers = nano.get_custom_response_data(session_data, response)
                 ngx.status = code
                 for header_name, header_value in pairs(headers) do
@@ -275,6 +298,10 @@ function NanoHandler.body_filter(conf)
             end
             return
         end
+        
+        -- Don't send chunk yet - hold it in buffer
+        ngx.arg[1] = ""
+        return
     end
 
     if eof then
@@ -285,7 +312,7 @@ function NanoHandler.body_filter(conf)
                 kong.log.debug("Final verdict after end_inspection: ", verdict)
                 ctx.cleanup_needed = true
                 if verdict == nano.AttachmentVerdict.DROP then
-                    kong.log.warn("DROP verdict at EOF - replacing response immediately")
+                    kong.log.warn("DROP verdict at EOF - replacing with custom response")
                     local code, body, headers = nano.get_custom_response_data(session_data, response)
                     ngx.status = code
                     for header_name, header_value in pairs(headers) do
@@ -299,10 +326,16 @@ function NanoHandler.body_filter(conf)
                         ngx.arg[1] = ""
                     end
                     ngx.arg[2] = true
+                    return
                 end
-                return
             end
         end
+        
+        -- All chunks inspected and passed - send buffered response
+        if ctx.response_buffer and #ctx.response_buffer > 0 then
+            ngx.arg[1] = table.concat(ctx.response_buffer)
+        end
+        ngx.arg[2] = true
         ctx.cleanup_needed = true
     end
 end
