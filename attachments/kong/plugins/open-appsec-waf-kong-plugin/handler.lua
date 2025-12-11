@@ -61,7 +61,6 @@ function NanoHandler.access(conf)
     if contains_body == 1 then
         local body = kong.request.get_raw_body()
         if body and #body > 0 then
-            kong.log.err("Request body found in memory, size: ", #body)
             verdict, response = nano.send_body(session_id, session_data, body, nano.HttpChunkType.HTTP_REQUEST_BODY)
             if verdict ~= nano.AttachmentVerdict.INSPECT then
                 ctx.cleanup_needed = true
@@ -71,7 +70,6 @@ function NanoHandler.access(conf)
                 return
             end
         else
-            kong.log.err("Request body not in memory, attempting to read from buffer/file")
             local body_data = ngx.var.request_body
             if body_data and #body_data > 0 then
                 kong.log.debug("Found request body in nginx var, size: ", #body_data)
@@ -83,12 +81,9 @@ function NanoHandler.access(conf)
                     end
                     return
                 end
-            else
-                kong.log.err("reading request body from file as last resort")
-        
+            else        
                 local body_file = ngx.var.request_body_file
                 if body_file then
-                    kong.log.err("Reading request body from file: ", body_file)
                     local file = io.open(body_file, "rb")
                     if file then
                         local chunk_size = 8192
@@ -104,15 +99,14 @@ function NanoHandler.access(conf)
                                 return
                             end
                             
-                            kong.log.err("Reading next chunk from request body file")
                             local chunk = file:read(chunk_size)
                             if not chunk or #chunk == 0 then
-                                kong .log.err("End of request body file reached")
+                                kong.log.err("End of request body file reached")
                                 break
                             end
                             
                             chunk_count = chunk_count + 1
-                            kong.log.err("Sending request body chunk ", chunk_count, " of size ", #chunk, " bytes to C module")
+                            kong.log.debug("Sending request body chunk ", chunk_count, " of size ", #chunk, " bytes to C module")
                             verdict, response = nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_REQUEST_BODY)
                             
                             if verdict ~= nano.AttachmentVerdict.INSPECT then
@@ -125,7 +119,7 @@ function NanoHandler.access(conf)
                             end
                         end
                         file:close()
-                        kong.log.err("Sent ", chunk_count, " chunks from request body file")
+                        kong.log.debug("Sent ", chunk_count, " chunks from request body file")
                     end
                 else
                     kong.log.err("Request body expected but no body data or file available")
@@ -191,6 +185,10 @@ function NanoHandler.header_filter(conf)
         return
     end
 
+    -- Clear Content-Length since we're buffering the response
+    kong.log.err("Clearing Content-Length header to enable response body buffering, current value: ", tostring(content_length))
+    ngx.header["Content-Length"] = nil
+    
     ctx.expect_body = not (status_code == 204 or status_code == 304 or (100 <= status_code and status_code < 200) or content_length == 0)
 end
 
@@ -305,8 +303,9 @@ function NanoHandler.body_filter(conf)
     end
 
     if eof then
-        kong.log.debug("End of response body reached in body_filter")
+        kong.log.err("End of response body reached in body_filter, eof=true")
         if ctx.body_seen or ctx.expect_body == false then
+            kong.log.err("Calling end_inspection for response")
             local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
             if verdict ~= nano.AttachmentVerdict.INSPECT then
                 kong.log.debug("Final verdict after end_inspection: ", verdict)
@@ -333,7 +332,14 @@ function NanoHandler.body_filter(conf)
         
         -- All chunks inspected and passed - send buffered response
         if ctx.response_buffer and #ctx.response_buffer > 0 then
-            ngx.arg[1] = table.concat(ctx.response_buffer)
+            local buffered_data = table.concat(ctx.response_buffer)
+            kong.log.err("Flushing ", #ctx.response_buffer, " buffered chunks, total size: ", #buffered_data, " bytes")
+            -- Set Content-Length for the buffered data
+            ngx.header["Content-Length"] = #buffered_data
+            ngx.arg[1] = buffered_data
+        else
+            kong.log.err("No buffered chunks to flush")
+            ngx.header["Content-Length"] = 0
         end
         ngx.arg[2] = true
         ctx.cleanup_needed = true
