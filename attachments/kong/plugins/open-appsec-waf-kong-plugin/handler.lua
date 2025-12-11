@@ -90,8 +90,10 @@ function NanoHandler.access(conf)
                         local chunk_count = 0
                         local start_time = ngx.now()
                         
+                        kong.log.err("Reading request body from file start time : ", start_time)
                         while true do
                             -- Check timeout
+                            kong.log.err("Checking timeout for request body reading at ", ngx.now())
                             local elapsed = ngx.now() - start_time
                             if elapsed > 3 then
                                 kong.log.warn("Request body reading timeout after ", elapsed, " seconds")
@@ -297,12 +299,11 @@ function NanoHandler.body_filter(conf)
                 ngx.arg[2] = true
                 return
             else
-                -- ACCEPT verdict - flush buffered data and switch to pass-through mode
-                kong.log.err("ACCEPT verdict in body_filter - flushing buffer and switching to pass-through")
+                kong.log.err("ACCEPT verdict in body_filter - flushing buffer and switching to pass-through  chucnk :" , ctx.body_buffer_chunk)
                 local buffered_data = table.concat(ctx.response_buffer)
                 kong.log.err("Flushing ", #ctx.response_buffer, " buffered chunks (", #buffered_data, " bytes) before switching to pass-through")
                 ngx.arg[1] = buffered_data
-                ctx.response_buffer = nil  -- Clear buffer to free memory
+                ctx.response_buffer = nil
                 return
             end
         end
