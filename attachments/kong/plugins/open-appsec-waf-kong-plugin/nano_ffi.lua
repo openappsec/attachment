@@ -81,13 +81,14 @@ function nano.generate_session_id()
     return tonumber(string.format("%d%05d", worker_id, nano.session_counter))
 end
 
-function nano.handle_custom_response(session_data, response)
+-- Returns: status_code, body, headers
+function nano.get_custom_response_data(session_data, response)
     local worker_id = ngx.worker.id()
     local attachment = nano.attachments[worker_id]
 
     if not attachment then
         kong.log.warn("Cannot handle custom response: Attachment not available for worker ", worker_id, " - failing open")
-        return kong.response.exit(200, "Request allowed due to attachment unavailability")
+        return 200, "Request allowed due to attachment unavailability", {}
     end
 
     local response_type = nano_attachment.get_web_response_type(attachment, session_data, response)
@@ -99,18 +100,19 @@ function nano.handle_custom_response(session_data, response)
             code = 403
         end
         kong.log.debug("Response code only: ", code)
-        return kong.response.exit(code, "")
+        return code, "", {}
     end
 
     if response_type == nano.WebResponseType.REDIRECT_WEB_RESPONSE then
         local location = nano_attachment.get_redirect_page(attachment, session_data, response)
-        return kong.response.exit(307, "", { ["Location"] = location })
+        local code = nano_attachment.get_response_code(response) or 307
+        return code, "", { ["Location"] = location }
     end
 
     local block_page = nano_attachment.get_block_page(attachment, session_data, response)
     if not block_page then
         kong.log.err("Failed to retrieve custom block page for session ", session_data)
-        return kong.response.exit(500, { message = "Internal Server Error" })
+        return 403, "", {}
     end
     local code = nano_attachment.get_response_code(response)
     if not code or code < 100 or code > 599 then
@@ -118,8 +120,13 @@ function nano.handle_custom_response(session_data, response)
         code = 403
     end
     kong.log.debug("Block page response with code: ", code)
-    return kong.response.exit(code, block_page, { ["Content-Type"] = "text/html" })
+    return code, block_page, { ["Content-Type"] = "text/html" }
+end
 
+-- Wrapper for backward compatibility - calls kong.response.exit() in access phase
+function nano.handle_custom_response(session_data, response)
+    local code, body, headers = nano.get_custom_response_data(session_data, response)
+    return kong.response.exit(code, body, headers)
 end
 
 

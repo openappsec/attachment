@@ -51,7 +51,6 @@ function NanoHandler.access(conf)
 
     local verdict, response = nano.send_data(session_id, session_data, meta_data, req_headers, contains_body, nano.HttpChunkType.HTTP_REQUEST_FILTER)
     if verdict ~= nano.AttachmentVerdict.INSPECT then
-        kong.log.err("Failed to send request headers to C module - failing open")
         ctx.cleanup_needed = true
         if verdict == nano.AttachmentVerdict.DROP then
             return nano.handle_custom_response(session_data, response)
@@ -62,7 +61,7 @@ function NanoHandler.access(conf)
     if contains_body == 1 then
         local body = kong.request.get_raw_body()
         if body and #body > 0 then
-            kong.log.debug("Request body found in memory, size: ", #body)
+            kong.log.err("Request body found in memory, size: ", #body)
             verdict, response = nano.send_body(session_id, session_data, body, nano.HttpChunkType.HTTP_REQUEST_BODY)
             if verdict ~= nano.AttachmentVerdict.INSPECT then
                 ctx.cleanup_needed = true
@@ -72,7 +71,7 @@ function NanoHandler.access(conf)
                 return
             end
         else
-            kong.log.debug("Request body not in memory, attempting to read from buffer/file")
+            kong.log.err("Request body not in memory, attempting to read from buffer/file")
             local body_data = ngx.var.request_body
             if body_data and #body_data > 0 then
                 kong.log.debug("Found request body in nginx var, size: ", #body_data)
@@ -85,17 +84,21 @@ function NanoHandler.access(conf)
                     return
                 end
             else
+                kong.log.err("reading request body from file as last resort")
+        
                 local body_file = ngx.var.request_body_file
                 if body_file then
-                    kong.log.debug("Reading request body from file: ", body_file)
+                    kong.log.err("Reading request body from file: ", body_file)
                     local file = io.open(body_file, "rb")
                     if file then
                         local chunk_size = 8192
                         local chunk_count = 0
                         
                         while true do
+                            kong.log.err("Reading next chunk from request body file")
                             local chunk = file:read(chunk_size)
                             if not chunk or #chunk == 0 then
+                                kong .log.err("End of request body file reached")
                                 break
                             end
                             
@@ -113,10 +116,10 @@ function NanoHandler.access(conf)
                             end
                         end
                         file:close()
-                        kong.log.debug("Sent ", chunk_count, " chunks from request body file")
+                        kong.log.err("Sent ", chunk_count, " chunks from request body file")
                     end
                 else
-                    kong.log.debug("Request body expected but no body data or file available")
+                    kong.log.err("Request body expected but no body data or file available")
                 end
             end
         end
@@ -172,7 +175,9 @@ function NanoHandler.header_filter(conf)
     if verdict ~= nano.AttachmentVerdict.INSPECT then
         ctx.cleanup_needed = true
         if verdict == nano.AttachmentVerdict.DROP then
-            return nano.handle_custom_response(session_data, response)
+            kong.log.warn("DROP verdict in header_filter - will replace response in body_filter")
+            ctx.blocked = true
+            ctx.block_response = response
         end
         return
     end
@@ -184,20 +189,46 @@ function NanoHandler.body_filter(conf)
     local ctx = kong.ctx.plugin
     local chunk = ngx.arg[1]
     local eof = ngx.arg[2]
-    if nano.is_session_finalized(ctx.session_data) then
+
+    
+    local session_id = ctx.session_id
+    local session_data = ctx.session_data
+    
+    if ctx.blocked then
+        if ctx.block_response then
+            local code, body, headers = nano.get_custom_response_data(session_data, ctx.block_response)
+            kong.log.info("Replacing response with custom response, code: ", code)
+            ngx.status = code
+            
+            -- Set custom headers
+            for header_name, header_value in pairs(headers) do
+                ngx.header[header_name] = header_value
+            end
+            
+            if body and #body > 0 then
+                ngx.header["Content-Length"] = #body
+                ngx.arg[1] = body
+            else
+                ngx.header["Content-Length"] = 0
+                ngx.arg[1] = ""
+            end
+        else
+            kong.log.err("Missing session_data or block_response, sending empty response")
+            ngx.status = 403
+            ngx.arg[1] = ""
+        end
+        ngx.arg[2] = true
+        ctx.cleanup_needed = true
+        return
+    end
+
+    if nano.is_session_finalized(session_data) then
         kong.log.info("Session has already been inspected, no need for further inspection")
         return
     end
     
     if ctx.cleanup_needed then
         kong.log.debug("cleanup chunk without inspection, passing through")
-        return
-    end
-
-    local session_id = ctx.session_id
-    local session_data = ctx.session_data
-    if not session_id or not session_data then
-        kong.log.debug("No session data found in body_filter")
         return
     end
 
@@ -227,9 +258,20 @@ function NanoHandler.body_filter(conf)
             kong.log.debug("Final verdict for response body chunk: ", verdict)
             ctx.cleanup_needed = true
             if verdict == nano.AttachmentVerdict.DROP then
-                ngx.arg[1] = ""
+                kong.log.warn("DROP verdict in body_filter - replacing response immediately")
+                local code, body, headers = nano.get_custom_response_data(session_data, response)
+                ngx.status = code
+                for header_name, header_value in pairs(headers) do
+                    ngx.header[header_name] = header_value
+                end
+                if body and #body > 0 then
+                    ngx.header["Content-Length"] = #body
+                    ngx.arg[1] = body
+                else
+                    ngx.header["Content-Length"] = 0
+                    ngx.arg[1] = ""
+                end
                 ngx.arg[2] = true
-                return nano.handle_custom_response(session_data, response)
             end
             return
         end
@@ -243,9 +285,20 @@ function NanoHandler.body_filter(conf)
                 kong.log.debug("Final verdict after end_inspection: ", verdict)
                 ctx.cleanup_needed = true
                 if verdict == nano.AttachmentVerdict.DROP then
-                    ngx.arg[1] = ""
+                    kong.log.warn("DROP verdict at EOF - replacing response immediately")
+                    local code, body, headers = nano.get_custom_response_data(session_data, response)
+                    ngx.status = code
+                    for header_name, header_value in pairs(headers) do
+                        ngx.header[header_name] = header_value
+                    end
+                    if body and #body > 0 then
+                        ngx.header["Content-Length"] = #body
+                        ngx.arg[1] = body
+                    else
+                        ngx.header["Content-Length"] = 0
+                        ngx.arg[1] = ""
+                    end
                     ngx.arg[2] = true
-                    return nano.handle_custom_response(session_data, response)
                 end
                 return
             end
