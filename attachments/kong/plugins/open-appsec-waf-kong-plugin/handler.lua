@@ -92,9 +92,12 @@ function NanoHandler.access(conf)
                         
                         kong.log.err("Reading request body from file start time : ", start_time)
                         while true do
-                            -- Check timeout
-                            kong.log.err("Checking timeout for request body reading at ", ngx.now())
-                            local elapsed = ngx.now() - start_time
+                            -- Update time and check timeout
+                            ngx.update_time()
+                            local current_time = ngx.now()
+                            local elapsed = current_time - start_time
+                            kong.log.err("Request body reading elapsed time: ", elapsed, " seconds")
+                            
                             if elapsed > 3 then
                                 kong.log.warn("Request body reading timeout after ", elapsed, " seconds")
                                 file:close()
