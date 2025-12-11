@@ -13,46 +13,36 @@ function NanoHandler.init_worker()
 end
 
 function NanoHandler.access(conf)
-    kong.log.err("NanoHandler access phase started")
-    
-    -- Check if we already have a finalized session from a previous phase
     local ctx = kong.ctx.plugin
     
     local headers = kong.request.get_headers()
     local session_id = nano.generate_session_id()
-    -- I don't think we need to set this header, but keeping it for now
     kong.service.request.set_header("x-session-id", tostring(session_id))
     
     local session_data = nano.init_session(session_id)
     if not session_data then
-        --kong.log.err("Failed to initialize session - failing open")
         kong.ctx.plugin.cleanup_needed = false
         return
     end
     
-    kong.ctx.plugin.session_data = session_data
-    kong.ctx.plugin.session_id = session_id
+    ctx.session_data = session_data
+    ctx.session_id = session_id
     if nano.is_session_finalized(session_id) then
         kong.log.info("Session has already been inspected, no need for further inspection")
         return
     end
 
     local meta_data = nano.handle_start_transaction()
-    kong.ctx.plugin.meta_data = meta_data  -- Keep reference to prevent GC
-    --kong.log.err("NanoHandler access phase handled start transaction metadata: ", meta_data)
     if not meta_data then
         kong.log.err("Failed to handle start transaction - failing open")
-        kong.ctx.plugin.cleanup_needed = true
+        ctx.cleanup_needed = true
         return
     end
-    --kong.log.err("NanoHandler access phase handled start transaction")
 
     local req_headers = nano.handleHeaders(headers)
-    kong.ctx.plugin.req_headers = req_headers  -- Keep reference to prevent GC
-    --kong.log.err("NanoHandler access phase handled request headers: ", req_headers)
     if not req_headers then
         kong.log.err("Failed to handle request headers - failing open")
-        kong.ctx.plugin.cleanup_needed = true
+        ctx.cleanup_needed = true
         return
     end
 
@@ -60,75 +50,70 @@ function NanoHandler.access(conf)
     local contains_body = has_content_length and 1 or 0
 
     local verdict, response = nano.send_data(session_id, session_data, meta_data, req_headers, contains_body, nano.HttpChunkType.HTTP_REQUEST_FILTER)
-    if verdict == nano.AttachmentVerdict.DROP then
-        kong.ctx.plugin.cleanup_needed = true
-        return nano.handle_custom_response(session_data, response)
-    elseif verdict == nano.AttachmentVerdict.ACCEPT then
-        kong.log.debug("Request passed without body inspection")
-        kong.ctx.plugin.cleanup_needed = true
+    if verdict ~= nano.AttachmentVerdict.INSPECT then
+        kong.log.err("Failed to send request headers to C module - failing open")
+        ctx.cleanup_needed = true
+        if verdict == nano.AttachmentVerdict.DROP then
+            return nano.handle_custom_response(session_data, response)
+        end
         return
     end
 
     if contains_body == 1 then
-        --kong.log.err("Request body expected, inspecting body")
         local body = kong.request.get_raw_body()
         if body and #body > 0 then
             kong.log.debug("Request body found in memory, size: ", #body)
             verdict, response = nano.send_body(session_id, session_data, body, nano.HttpChunkType.HTTP_REQUEST_BODY)
-            if verdict == nano.AttachmentVerdict.DROP then
-                kong.ctx.plugin.cleanup_needed = true
-                return nano.handle_custom_response(session_data, response)
-            elseif verdict == nano.AttachmentVerdict.ACCEPT then
-                kong.log.debug("Request body passed inspection")
-                kong.ctx.plugin.cleanup_needed = true
+            if verdict ~= nano.AttachmentVerdict.INSPECT then
+                ctx.cleanup_needed = true
+                if verdict == nano.AttachmentVerdict.DROP then
+                    return nano.handle_custom_response(session_data, response)
+                end
                 return
             end
         else
-            --kong.log.err("Request body not found in memory, checking nginx vars")
             kong.log.debug("Request body not in memory, attempting to read from buffer/file")
-
             local body_data = ngx.var.request_body
             if body_data and #body_data > 0 then
-                kong.log.err("Request body found in nginx var, size: ", #body_data)
                 kong.log.debug("Found request body in nginx var, size: ", #body_data)
                 verdict, response = nano.send_body(session_id, session_data, body_data, nano.HttpChunkType.HTTP_REQUEST_BODY)
-                if verdict == nano.AttachmentVerdict.DROP then
-                    kong.ctx.plugin.cleanup_needed = true
-                    return nano.handle_custom_response(session_data, response)
-                elseif verdict == nano.AttachmentVerdict.ACCEPT then
-                    kong.log.debug("Request body from nginx var passed inspection")
-                    kong.ctx.plugin.cleanup_needed = true
+                if verdict ~= nano.AttachmentVerdict.INSPECT then
+                    ctx.cleanup_needed = true
+                    if verdict == nano.AttachmentVerdict.DROP then
+                        return nano.handle_custom_response(session_data, response)
+                    end
                     return
                 end
-                kong.log.err("Sent request body from nginx var to C module")
             else
-                kong.log.err("Request body not found in nginx var, checking request_body_file")
                 local body_file = ngx.var.request_body_file
                 if body_file then
-                    kong.log.err("Request body file found")
                     kong.log.debug("Reading request body from file: ", body_file)
                     local file = io.open(body_file, "rb")
                     if file then
-                        kong.log.err("Opened request body file successfully")
-                        local entire_body = file:read("*all")
-                        file:close()
-
-                        if not entire_body then
-                            kong.log.err("Failed to read body file: ", body_file)
-                        elseif entire_body and #entire_body > 0 then
-                            kong.log.debug("Sending entire body of size ", #entire_body, " bytes to C module")
-                            verdict, response = nano.send_body(session_id, session_data, entire_body, nano.HttpChunkType.HTTP_REQUEST_BODY)
-                            if verdict == nano.AttachmentVerdict.DROP then
-                                kong.ctx.plugin.cleanup_needed = true
-                                return nano.handle_custom_response(session_data, response)
-                            elseif verdict == nano.AttachmentVerdict.ACCEPT then
-                                kong.log.debug("Request body from file passed inspection")
-                                kong.ctx.plugin.cleanup_needed = true
+                        local chunk_size = 8192
+                        local chunk_count = 0
+                        
+                        while true do
+                            local chunk = file:read(chunk_size)
+                            if not chunk or #chunk == 0 then
+                                break
+                            end
+                            
+                            chunk_count = chunk_count + 1
+                            kong.log.err("Sending request body chunk ", chunk_count, " of size ", #chunk, " bytes to C module")
+                            verdict, response = nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_REQUEST_BODY)
+                            
+                            if verdict ~= nano.AttachmentVerdict.INSPECT then
+                                file:close()
+                                ctx.cleanup_needed = true
+                                if verdict == nano.AttachmentVerdict.DROP then
+                                    return nano.handle_custom_response(session_data, response)
+                                end
                                 return
                             end
-                        else
-                            kong.log.debug("Empty body file")
                         end
+                        file:close()
+                        kong.log.debug("Sent ", chunk_count, " chunks from request body file")
                     end
                 else
                     kong.log.debug("Request body expected but no body data or file available")
@@ -142,25 +127,22 @@ function NanoHandler.access(conf)
 
         if not ok then
             kong.log.err("Error ending request inspection: ", verdict, " - failing open")
-            kong.ctx.plugin.cleanup_needed = true
+            ctx.cleanup_needed = true
             return
         end
 
-        if verdict == nano.AttachmentVerdict.DROP then
-            kong.ctx.plugin.cleanup_needed = true
-            return nano.handle_custom_response(session_data, response)
-        elseif verdict == nano.AttachmentVerdict.ACCEPT then
-            kong.log.debug("Request end inspection passed")
-            kong.ctx.plugin.cleanup_needed = true
+        if verdict ~= nano.AttachmentVerdict.INSPECT then
+            ctx.cleanup_needed = true
+            if verdict == nano.AttachmentVerdict.DROP then
+                return nano.handle_custom_response(session_data, response)
+            end
             return
         end
     end
 end
 
 function NanoHandler.header_filter(conf)
-    kong.log.err("NanoHandler header_filter phase started")
     local ctx = kong.ctx.plugin
-
     if nano.is_session_finalized(ctx.session_data) then
         kong.log.info("Session has already been inspected, no need for further inspection")
         return
@@ -173,60 +155,32 @@ function NanoHandler.header_filter(conf)
 
     local session_id = ctx.session_id
     local session_data = ctx.session_data
-    
-
-    if not session_id or not session_data then
-        kong.log.debug("No session data found in header_filter - session_id:", session_id, " session_data:", session_data)
-        return
-    end
 
     local headers = kong.response.get_headers()
     local header_data = nano.handleHeaders(headers)
-    --kong.log.err("NanoHandler header_filter phase handled response headers")
-    ctx.res_headers = header_data  -- Keep reference to prevent GC
-
+    
     if not header_data then
-        --kong.log.err("Failed to handle response headers - failing open")
+        kong.log.err("Failed to handle response headers - failing open")
         ctx.cleanup_needed = true
         return
     end
 
     local status_code = kong.response.get_status()
     local content_length = tonumber(headers["content-length"]) or 0
-    kong.log.err("NanoHandler header_filter phase sending response headers to C module, status_code: ", status_code, " content_length: ", content_length)
-
+    
     local verdict, response = nano.send_response_headers(session_id, session_data, header_data, status_code, content_length)
-    if verdict == nano.AttachmentVerdict.DROP then
-        kong.ctx.plugin.cleanup_needed = true
-        return nano.handle_custom_response(session_data, response)
-    elseif verdict == nano.AttachmentVerdict.ACCEPT then
-        kong.log.debug("Response headers passed inspection")
-        kong.ctx.plugin.cleanup_needed = true
+    if verdict ~= nano.AttachmentVerdict.INSPECT then
+        ctx.cleanup_needed = true
+        if verdict == nano.AttachmentVerdict.DROP then
+            return nano.handle_custom_response(session_data, response)
+        end
         return
     end
-    --kong.log.err("NanoHandler header_filter phase sent response headers")
 
     ctx.expect_body = not (status_code == 204 or status_code == 304 or (100 <= status_code and status_code < 200) or content_length == 0)
-    
-    -- If no body is expected (like Envoy's endStream=true), end inspection immediately
-    if not ctx.expect_body then
-        --kong.log.err("No response body expected, ending inspection in header_filter")
-        verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
-        if verdict == nano.AttachmentVerdict.DROP then
-            kong.log.err("DROP verdict after response end inspection")
-            ctx.cleanup_needed = true
-            return nano.handle_custom_response(session_data, response)
-        elseif verdict == nano.AttachmentVerdict.ACCEPT then
-            kong.log.debug("Response end inspection passed (no body expected)")
-            ctx.cleanup_needed = true
-            return
-        end
-        ctx.cleanup_needed = true
-    end
 end
 
 function NanoHandler.body_filter(conf)
-    kong.log.err("NanoHandler body_filter phase started")
     local ctx = kong.ctx.plugin
     local chunk = ngx.arg[1]
     local eof = ngx.arg[2]
@@ -251,79 +205,62 @@ function NanoHandler.body_filter(conf)
         ctx.body_filter_start_time = ngx.now()
     end
     local elapsed_time = ngx.now() - ctx.body_filter_start_time
-    if elapsed_time > 150 then
+    if elapsed_time > 3 then
         kong.log.warn("Body filter timeout after ", elapsed_time, " seconds - failing open")
         ctx.cleanup_needed = true
-        ctx.timeout_passthrough = true
         return
     end
 
-    --kong.log.err("Inspecting response body chunk")
     if chunk and #chunk > 0 then
-        --kong.log.err("Response body chunk size: ", #chunk)
         ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
         ctx.body_seen = true
 
         local verdict, response, modifications = nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
-        --kong.log.err("after Sent response body chunk to C module")
         if modifications then
             chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
             ngx.arg[1] = chunk
         end
-        --kong.log.err("after Handling response body modifications")
 
         ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
 
-        if verdict == nano.AttachmentVerdict.DROP then
-            kong.log.debug("Dropping response in body_filter")
+        if verdict ~= nano.AttachmentVerdict.INSPECT then
+            kong.log.debug("Final verdict for response body chunk: ", verdict)
             ctx.cleanup_needed = true
-            ngx.arg[1] = ""
-            ngx.arg[2] = true
-            return nano.handle_custom_response(session_data, response)
-        elseif verdict == nano.AttachmentVerdict.ACCEPT then
-            kong.log.debug("Response body chunk passed inspection")
-            ctx.cleanup_needed = true
+            if verdict == nano.AttachmentVerdict.DROP then
+                ngx.arg[1] = ""
+                ngx.arg[2] = true
+                return nano.handle_custom_response(session_data, response)
+            end
             return
         end
     end
 
     if eof then
-        --kong.log.err("Response body EOF reached")
         kong.log.debug("End of response body reached in body_filter")
-
         if ctx.body_seen or ctx.expect_body == false then
-            --kong.log.err("Ending response inspection")
             local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
-            if verdict == nano.AttachmentVerdict.DROP then
-                kong.log.debug("Dropping response in body_filter after end_inspection")
+            if verdict ~= nano.AttachmentVerdict.INSPECT then
+                kong.log.debug("Final verdict after end_inspection: ", verdict)
                 ctx.cleanup_needed = true
-                ngx.arg[1] = ""
-                ngx.arg[2] = true
-                return nano.handle_custom_response(session_data, response)
-            elseif verdict == nano.AttachmentVerdict.ACCEPT then
-                kong.log.debug("Response end inspection passed")
-                ctx.cleanup_needed = true
+                if verdict == nano.AttachmentVerdict.DROP then
+                    ngx.arg[1] = ""
+                    ngx.arg[2] = true
+                    return nano.handle_custom_response(session_data, response)
+                end
                 return
             end
-            --kong.log.err("Response inspection ended successfully")
-
         end
         ctx.cleanup_needed = true
     end
 end
 
 function NanoHandler.log(conf)
-    kong.log.err("NanoHandler log phase started")
     local ctx = kong.ctx.plugin
     if ctx.cleanup_needed then
         nano.fini_session(ctx.session_data)
         nano.cleanup_all()
-        -- Clear context references to allow GC
         ctx.session_data = nil
         ctx.session_id = nil
-        ctx.meta_data = nil
-        ctx.req_headers = nil
-        ctx.res_headers = nil
         collectgarbage("collect")
     end
 end
