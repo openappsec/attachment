@@ -90,13 +90,10 @@ function NanoHandler.access(conf)
                         local chunk_count = 0
                         local start_time = ngx.now()
                         
-                        kong.log.err("Reading request body from file start time : ", start_time)
                         while true do
-                            -- Update time and check timeout
                             ngx.update_time()
                             local current_time = ngx.now()
                             local elapsed = current_time - start_time
-                            kong.log.err("Request body reading elapsed time: ", elapsed, " seconds")
                             
                             if elapsed > 3 then
                                 kong.log.warn("Request body reading timeout after ", elapsed, " seconds")
@@ -136,8 +133,8 @@ function NanoHandler.access(conf)
             return nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
         end)
 
+        kong.log.err("Error ending request inspection: ", verdict, " - failing open")
         if not ok then
-            kong.log.err("Error ending request inspection: ", verdict, " - failing open")
             ctx.cleanup_needed = true
             return
         end
@@ -155,14 +152,15 @@ end
 function NanoHandler.header_filter(conf)
     local ctx = kong.ctx.plugin
     if nano.is_session_finalized(ctx.session_data) then
-        kong.log.info("Session has already been inspected, no need for further inspection")
+        kong.log.err("Session has already been inspected, no need for further inspection")
         return
     end
 
     if ctx.cleanup_needed then
-        kong.log.debug("cleanup in header_filter, passing through")
+        kong.log.err("cleanup in header_filter, passing through")
         return
     end
+    kong.log.err("header_filter phase started")
 
     local session_id = ctx.session_id
     local session_data = ctx.session_data
@@ -206,7 +204,6 @@ function NanoHandler.body_filter(conf)
     local session_id = ctx.session_id
     local session_data = ctx.session_data
     
-    -- If blocked in header_filter, send custom response
     if ctx.blocked then
         kong.log.err("Sending custom block response in body_filter")
         if ctx.block_response then
@@ -237,12 +234,12 @@ function NanoHandler.body_filter(conf)
     end
 
     if nano.is_session_finalized(session_data) then
-        kong.log.info("Session has already been inspected, no need for further inspection")
+        kong.log.err("Session has already been inspected, no need for further inspection")
         return
     end
     
     if ctx.cleanup_needed then
-        kong.log.debug("cleanup chunk without inspection, passing through")
+        kong.log.err("cleanup chunk without inspection, passing through")
         return
     end
 
