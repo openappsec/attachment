@@ -89,13 +89,14 @@ function NanoHandler.access(conf)
                         local chunk_size = 8192
                         local chunk_count = 0
                         local start_time = ngx.now()
+                        local timeout_sec = nano.get_request_processing_timeout_sec()
                         
                         while true do
                             ngx.update_time()
                             local current_time = ngx.now()
                             local elapsed = current_time - start_time
                             
-                            if elapsed > 3 then
+                            if elapsed > timeout_sec then
                                 kong.log.warn("Request body reading timeout after ", elapsed, " seconds")
                                 file:close()
                                 return
@@ -245,9 +246,10 @@ function NanoHandler.body_filter(conf)
 
     if not ctx.body_filter_start_time then
         ctx.body_filter_start_time = ngx.now()
+        ctx.body_filter_timeout_sec = nano.get_response_processing_timeout_sec()
     end
     local elapsed_time = ngx.now() - ctx.body_filter_start_time
-    if elapsed_time > 3 then
+    if elapsed_time > ctx.body_filter_timeout_sec then
         kong.log.warn("Body filter timeout after ", elapsed_time, " seconds - failing open")
         ctx.cleanup_needed = true
         -- Send buffered chunks before timeout
@@ -316,7 +318,6 @@ function NanoHandler.body_filter(conf)
     if eof then
         kong.log.err("End of response body reached in body_filter, eof=true")
         
-        -- Call end_inspection if we haven't gotten ACCEPT verdict yet
         if ctx.body_seen or ctx.expect_body == false then
             kong.log.err("Calling end_inspection for response")
             local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)

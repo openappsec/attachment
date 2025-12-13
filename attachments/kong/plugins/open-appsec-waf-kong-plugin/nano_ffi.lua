@@ -489,4 +489,30 @@ function nano.end_inspection(session_id, session_data, chunk_type)
     return verdict, response
 end
 
+function nano.get_request_processing_timeout_sec()
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.warn("Attachment not available for worker ", worker_id, " - using default timeout")
+        return 3
+    end
+
+    local timeout_msec = nano_attachment.get_request_processing_timeout_msec(attachment)
+    return timeout_msec / 1000.0
+end
+
+function nano.get_response_processing_timeout_sec()
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.warn("Attachment not available for worker ", worker_id, " - using default timeout")
+        return 3
+    end
+
+    local timeout_msec = nano_attachment.get_response_processing_timeout_msec(attachment)
+    return timeout_msec / 1000.0
+end
+
 return nano
