@@ -90,6 +90,7 @@ function NanoHandler.access(conf)
                         local chunk_count = 0
                         local start_time = ngx.now()
                         local timeout_sec = nano.get_request_processing_timeout_sec()
+                        kong.log.err("Request body reading timeout set to ", timeout_sec, " seconds")
                         
                         while true do
                             ngx.update_time()
@@ -247,6 +248,7 @@ function NanoHandler.body_filter(conf)
     if not ctx.body_filter_start_time then
         ctx.body_filter_start_time = ngx.now()
         ctx.body_filter_timeout_sec = nano.get_response_processing_timeout_sec()
+        kong.log.err("vody_filter timeout set to ", ctx.body_filter_timeout_sec, " seconds")
     end
     local elapsed_time = ngx.now() - ctx.body_filter_start_time
     if elapsed_time > ctx.body_filter_timeout_sec then
