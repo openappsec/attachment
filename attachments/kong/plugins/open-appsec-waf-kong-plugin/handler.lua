@@ -185,10 +185,15 @@ function NanoHandler.header_filter(conf)
             kong.log.debug("DROP verdict in header_filter - will replace response in body_filter")
             ctx.blocked = true
             ctx.block_response = response
+        else
+            kong.log.debug("ACCEPT verdict in header_filter - clearing Content-Length for chunked encoding")
+            ngx.header["Content-Length"] = nil
         end
         return
     end
 
+    ngx.header["Content-Length"] = nil
+    
     ctx.expect_body = not (status_code == 204 or status_code == 304 or (100 <= status_code and status_code < 200) or content_length == 0)
 end
 
