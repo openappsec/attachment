@@ -111,7 +111,7 @@ function nano.get_custom_response_data(session_data, response)
 
     local block_page = nano_attachment.get_block_page(attachment, session_data, response)
     if not block_page then
-        kong.log.err("Failed to retrieve custom block page for session ", session_data)
+        kong.log.debug("Failed to retrieve custom block page for session ", session_data)
         return 403, "", {}
     end
     local code = nano_attachment.get_response_code(response)
@@ -193,7 +193,6 @@ function nano.init_attachment()
         if attachment then
             break
         end
-
         kong.log.err("Worker ", worker_id, " failed to initialize attachment (attempt ", attempt, "/", retries, "): ", err)
     end
 
@@ -235,7 +234,7 @@ function nano.is_session_finalized(session_data)
     local attachment = nano.attachments[worker_id]
 
     if not attachment or not session_data then
-        kong.log.err("Cannot check session finalization: Invalid attachment or session_data")
+        kong.log.debug("Cannot check session finalization: Invalid attachment or session_data")
         return true
     end
 
@@ -264,7 +263,6 @@ function nano.handle_start_transaction()
 
     table.insert(nano.allocated_metadata, metadata)
     collectgarbage("stop")
-    kong.log.err("Generated start transaction metadata: ", metadata)
 
     return metadata
 end
@@ -302,8 +300,6 @@ function nano.handleHeaders(headers)
     end
 
     nano_attachment.setHeaderCount(header_data, index)
-    kong.log.err("Processed headers into header_data : ", header_data)
-
     return header_data
 end
 
@@ -476,7 +472,7 @@ function nano.end_inspection(session_id, session_data, chunk_type)
     end
 
     if not session_data then
-        kong.log.err("Cannot end inspection: Invalid session_data for session ", session_id)
+        kong.log.debug("Cannot end inspection: Invalid session_data for session ", session_id)
         return nano.AttachmentVerdict.INSPECT, nil
     end
 
