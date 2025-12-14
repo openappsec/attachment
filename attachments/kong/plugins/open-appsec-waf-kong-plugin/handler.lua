@@ -249,7 +249,11 @@ function NanoHandler.body_filter(conf)
         kong.log.warn("Body filter timeout after ", elapsed_time, " seconds - failing open")
         ctx.cleanup_needed = true
         if ctx.response_buffer and #ctx.response_buffer > 0 then
-            ngx.arg[1] = table.concat(ctx.response_buffer)
+            local buffered_data = table.concat(ctx.response_buffer)
+            local original_content_length = tonumber(ngx.header["Content-Length"]) or #buffered_data
+            local total_diff = ctx.content_length_diff or 0
+            ngx.header["Content-Length"] = original_content_length + total_diff
+            ngx.arg[1] = buffered_data
         end
         return
     end
@@ -260,6 +264,7 @@ function NanoHandler.body_filter(conf)
 
     if chunk and #chunk > 0 then
         ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
+        ctx.content_length_diff = ctx.content_length_diff or 0
         ctx.body_seen = true
 
         table.insert(ctx.response_buffer, chunk)
@@ -267,7 +272,10 @@ function NanoHandler.body_filter(conf)
         local verdict, response, modifications = nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
         
         if modifications then
+            local original_length = #chunk
             chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
+            local modified_length = #chunk
+            ctx.content_length_diff = ctx.content_length_diff + (modified_length - original_length)
             ctx.response_buffer[#ctx.response_buffer] = chunk
         end
 
@@ -329,7 +337,9 @@ function NanoHandler.body_filter(conf)
         
         if ctx.response_buffer and #ctx.response_buffer > 0 then
             local buffered_data = table.concat(ctx.response_buffer)
-            ngx.header["Content-Length"] = #buffered_data
+            local original_content_length = tonumber(ngx.header["Content-Length"]) or #buffered_data
+            local total_diff = ctx.content_length_diff or 0
+            ngx.header["Content-Length"] = original_content_length + total_diff
             ngx.arg[1] = buffered_data
         else
             kong.log.debug("No buffered chunks to flush (empty response)")
