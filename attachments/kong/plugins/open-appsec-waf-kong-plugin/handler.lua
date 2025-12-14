@@ -185,7 +185,6 @@ function NanoHandler.body_filter(conf)
     local ctx = kong.ctx.plugin
     local chunk = ngx.arg[1]
     local eof = ngx.arg[2]
-    kong.response.exit(403, "2Blocked by Open AppSec WAF Kong Plugin", { ["Content-Type"] = "text/plain" })
     
     local session_id = ctx.session_id
     local session_data = ctx.session_data
