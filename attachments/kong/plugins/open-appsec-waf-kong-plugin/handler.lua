@@ -300,6 +300,9 @@ function NanoHandler.body_filter(conf)
                 return
             else
                 local buffered_data = table.concat(ctx.response_buffer)
+                local original_content_length = tonumber(ngx.header["Content-Length"]) or #buffered_data
+                local total_diff = ctx.content_length_diff or 0
+                ngx.header["Content-Length"] = original_content_length + total_diff
                 ngx.arg[1] = buffered_data
                 ctx.response_buffer = nil
                 return
