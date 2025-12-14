@@ -16,7 +16,6 @@ return {
         type = "record",
         fields = {
           { debug = { type = "boolean", default = false } },
-          { res_body_thread_timeout_msec = { type = "number", default = 150, gt = 0 } },
         },
       },
     },
