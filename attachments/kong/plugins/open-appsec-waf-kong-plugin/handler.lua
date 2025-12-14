@@ -204,35 +204,22 @@ function NanoHandler.body_filter(conf)
         ctx.body_filter_timeout_sec = nano.get_response_processing_timeout_sec()
         kong.log.debug("body_filter timeout set to ", ctx.body_filter_timeout_sec, " seconds")
     end
+    
     local elapsed_time = ngx.now() - ctx.body_filter_start_time
     if elapsed_time > ctx.body_filter_timeout_sec then
         kong.log.warn("Body filter timeout after ", elapsed_time, " seconds - failing open")
         ctx.cleanup_needed = true
-        if ctx.response_buffer and #ctx.response_buffer > 0 then
-            local buffered_data = table.concat(ctx.response_buffer)
-            ngx.header["Content-Length"] = nil
-            ngx.arg[1] = buffered_data
-            ctx.response_buffer = nil
-        end
         return
-    end
-
-    if not ctx.response_buffer then
-        ctx.response_buffer = {}
     end
 
     if chunk and #chunk > 0 then
         ctx.body_buffer_chunk = ctx.body_buffer_chunk or 0
         ctx.body_seen = true
 
-        table.insert(ctx.response_buffer, chunk)
-
         local verdict, response, modifications = nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_RESPONSE_BODY)
         
         if modifications then
             chunk = nano.handle_body_modifications(chunk, modifications, ctx.body_buffer_chunk)
-            local modified_length = #chunk
-            ctx.response_buffer[#ctx.response_buffer] = chunk
         end
 
         ctx.body_buffer_chunk = ctx.body_buffer_chunk + 1
@@ -240,68 +227,35 @@ function NanoHandler.body_filter(conf)
         if verdict ~= nano.AttachmentVerdict.INSPECT then
             ctx.cleanup_needed = true
             if verdict == nano.AttachmentVerdict.DROP then
-                local code, body, headers = nano.get_custom_response_data(session_data, response)
-                ngx.status = code
-                for header_name, header_value in pairs(headers) do
-                    ngx.header[header_name] = header_value
-                end
-                if body and #body > 0 then
-                    ngx.header["Content-Length"] = #body
-                    ngx.arg[1] = body
-                else
-                    ngx.header["Content-Length"] = 0
-                    ngx.arg[1] = ""
-                end
+                kong.log.debug("DROP verdict during response streaming - closing connection")
+                ngx.header["Connection"] = "close"
+                ngx.arg[1] = ""
                 ngx.arg[2] = true
-                return
-            else
-                local buffered_data = table.concat(ctx.response_buffer)
-                ngx.header["Content-Length"] = nil
-                ngx.arg[1] = buffered_data
-                ctx.response_buffer = nil
                 return
             end
         end
-        ngx.arg[1] = ""
+        
+        ngx.arg[1] = chunk
         return
     end
 
     if eof then
         if ctx.body_seen or ctx.expect_body == false then
+            ctx.cleanup_needed = true
             local verdict, response = nano.end_inspection(session_id, session_data, nano.HttpChunkType.HTTP_RESPONSE_END)
             if verdict ~= nano.AttachmentVerdict.INSPECT then
                 kong.log.debug("Final verdict after end_inspection: ", verdict)
                 ctx.cleanup_needed = true
                 if verdict == nano.AttachmentVerdict.DROP then
-                    kong.log.warn("DROP verdict at EOF - replacing with custom response")
-                    local code, body, headers = nano.get_custom_response_data(session_data, response)
-                    ngx.status = code
-                    for header_name, header_value in pairs(headers) do
-                        ngx.header[header_name] = header_value
-                    end
-                    if body and #body > 0 then
-                        ngx.header["Content-Length"] = #body
-                        ngx.arg[1] = body
-                    else
-                        ngx.header["Content-Length"] = 0
-                        ngx.arg[1] = ""
-                    end
+                    kong.log.debug("DROP verdict at EOF - closing connection")
+                    ngx.header["Connection"] = "close"
+                    ngx.arg[1] = ""
                     ngx.arg[2] = true
                     return
                 end
             end
         end
         
-        if ctx.response_buffer and #ctx.response_buffer > 0 then
-            local buffered_data = table.concat(ctx.response_buffer)
-            ngx.header["Content-Length"] = #buffered_data
-            ngx.arg[1] = buffered_data
-        else
-            kong.log.debug("No buffered chunks to flush (empty response)")
-            ngx.header["Content-Length"] = 0
-        end
-        ngx.arg[2] = true
-        ctx.cleanup_needed = true
     end
 end
 
