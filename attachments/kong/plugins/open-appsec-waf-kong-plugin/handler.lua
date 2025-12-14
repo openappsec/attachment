@@ -140,8 +140,6 @@ end
 
 function NanoHandler.header_filter(conf)
     local ctx = kong.ctx.plugin
-    kong.log.err("-------------------- header_filter -------------------")
-    kong.response.exit(403, "Blocked by Open AppSec WAF Kong Plugin", { ["Content-Type"] = "text/plain" })
     if nano.is_session_finalized(ctx.session_data) then
         kong.log.debug("Session has already been inspected, no need for further inspection")
         return
@@ -171,11 +169,10 @@ function NanoHandler.header_filter(conf)
     if verdict ~= nano.AttachmentVerdict.INSPECT then
         ctx.cleanup_needed = true
         if verdict == nano.AttachmentVerdict.DROP then
-            kong.log.warn("DROP verdict in header_filter - sending block response immediately")
+            kong.log.debug("DROP verdict in header_filter - sending block response immediately")
             return nano.handle_custom_response(session_data, response)
-        else
-            ngx.header["Content-Length"] = nil
         end
+        ngx.header["Content-Length"] = nil
         return
     end
 
@@ -188,7 +185,7 @@ function NanoHandler.body_filter(conf)
     local ctx = kong.ctx.plugin
     local chunk = ngx.arg[1]
     local eof = ngx.arg[2]
-
+    kong.response.exit(403, "2Blocked by Open AppSec WAF Kong Plugin", { ["Content-Type"] = "text/plain" })
     
     local session_id = ctx.session_id
     local session_data = ctx.session_data
