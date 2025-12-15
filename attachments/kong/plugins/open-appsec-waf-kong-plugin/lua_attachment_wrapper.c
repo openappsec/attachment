@@ -507,6 +507,30 @@ static int lua_free_verdict_response(lua_State *L) {
     return 0;
 }
 
+static int lua_get_request_processing_timeout_msec(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
+    if (!attachment) {
+        lua_pushinteger(L, 3000);
+        return 1;
+    }
+
+    uint32_t timeout = GetRequestProcessingTimeout(attachment);
+    lua_pushinteger(L, timeout);
+    return 1;
+}
+
+static int lua_get_response_processing_timeout_msec(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
+    if (!attachment) {
+        lua_pushinteger(L, 3000);
+        return 1;
+    }
+
+    uint32_t timeout = GetResponseProcessingTimeout(attachment);
+    lua_pushinteger(L, timeout);
+    return 1;
+}
+
 static const struct luaL_Reg nano_attachment_lib[] = {
     {"init_nano_attachment", lua_init_nano_attachment},
     {"get_web_response_type", lua_get_web_response_type},
@@ -529,6 +553,8 @@ static const struct luaL_Reg nano_attachment_lib[] = {
     {"free_verdict_response", lua_free_verdict_response},
     {"send_body", lua_send_body},
     {"end_inspection", lua_end_inspection},
+    {"get_request_processing_timeout_msec", lua_get_request_processing_timeout_msec},
+    {"get_response_processing_timeout_msec", lua_get_response_processing_timeout_msec},
     {NULL, NULL}
 };
 
