@@ -140,6 +140,8 @@ end
 
 function NanoHandler.header_filter(conf)
     local ctx = kong.ctx.plugin
+    ngx.header["Content-Length"] = nil
+    
     if nano.is_session_finalized(ctx.session_data) then
         kong.log.debug("Session has already been inspected, no need for further inspection")
         return
@@ -164,7 +166,6 @@ function NanoHandler.header_filter(conf)
 
     local status_code = kong.response.get_status()
     local content_length = tonumber(headers["content-length"]) or 0
-    
     local verdict, response = nano.send_response_headers(session_id, session_data, header_data, status_code, content_length)
     if verdict ~= nano.AttachmentVerdict.INSPECT then
         ctx.cleanup_needed = true
@@ -172,11 +173,8 @@ function NanoHandler.header_filter(conf)
             kong.log.debug("DROP verdict in header_filter - sending block response immediately")
             return nano.handle_custom_response(session_data, response)
         end
-        ngx.header["Content-Length"] = nil
         return
     end
-
-    ngx.header["Content-Length"] = nil
     
     ctx.expect_body = not (status_code == 204 or status_code == 304 or (100 <= status_code and status_code < 200) or content_length == 0)
 end
@@ -234,7 +232,6 @@ function NanoHandler.body_filter(conf)
                 return
             end
         end
-        
         ngx.arg[1] = chunk
         return
     end
@@ -255,7 +252,6 @@ function NanoHandler.body_filter(conf)
                 end
             end
         end
-        
     end
 end
 
