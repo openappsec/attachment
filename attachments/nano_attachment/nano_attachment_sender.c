@@ -636,6 +636,31 @@ SendResponseBody(NanoAttachment *attachment, AttachmentData *data)
         ctx.res
     );
 
+    if (session_data_p->verdict == TRAFFIC_VERDICT_DELAYED) {
+        write_dbg(attachment, session_id, DBG_LEVEL_DEBUG, "spawn SendDelayedVerdictRequestThread");
+        res = NanoRunInThreadTimeout(
+            attachment,
+            data,
+            SendDelayedVerdictRequestThread,
+            (void *)&ctx,
+            attachment->waiting_for_verdict_thread_timeout_msec,
+            "SendDelayedVerdictRequestThread",
+            RESPONSE
+        );
+        if (!res) {
+            updateMetricField(attachment, HOLD_THREAD_TIMEOUT, 1);
+            return SendThreadTimeoutVerdict(attachment, session_id, &ctx);
+        }
+
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_DEBUG,
+            "finished SendDelayedVerdictRequestThread successfully. res=%d",
+            ctx.res
+        );
+    }
+
     if (ctx.res != NANO_HTTP_FORBIDDEN && ctx.res != NANO_OK) {
         return FinalizeFailedResponse(attachment, session_id, &ctx);
     }
