@@ -89,6 +89,8 @@ InitNanoAttachment(uint8_t attachment_type, int worker_id, int num_of_workers, i
     attachment->res_header_thread_timeout_msec = 100;
     attachment->res_body_thread_timeout_msec = 150;
     attachment->waiting_for_verdict_thread_timeout_msec = 150;
+    attachment->hold_verdict_retries = 10;
+    attachment->hold_verdict_polling_time = 1;
     attachment->metric_timeout_timeout = 100;
     attachment->inspection_mode = NON_BLOCKING_THREAD;
     attachment->num_of_nano_ipc_elements = 200;

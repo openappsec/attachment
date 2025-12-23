@@ -291,6 +291,70 @@ FinalizeFailedResponse(NanoAttachment *attachment, SessionID session_id, HttpEve
     return response;
 }
 
+///
+/// @brief Handles delayed verdict by spawning SendDelayedVerdictRequestThread and waiting for the verdict.
+///
+/// @param attachment Pointer to the NanoAttachment struct representing the attachment.
+/// @param data Pointer to the AttachmentData struct containing the attachment data.
+/// @param session_id The session ID associated with the attachment.
+/// @param ctx Pointer to the HttpEventThreadCtx struct containing the HTTP event context.
+/// @param transaction_type The transaction type (REQUEST or RESPONSE).
+/// @return 1 if timeout occurred (caller should handle timeout response), 0 if successful (continue processing).
+///
+static int
+HandleDelayedVerdict(
+    NanoAttachment *attachment,
+    AttachmentData *data,
+    SessionID session_id,
+    HttpEventThreadCtx *ctx,
+    TransactionType transaction_type
+)
+{
+    int res;
+    unsigned int i;
+
+    for (i = 0; i < attachment->hold_verdict_retries; i++) {
+        sleep(attachment->hold_verdict_polling_time);
+        write_dbg(attachment, session_id, DBG_LEVEL_DEBUG, "spawn SendDelayedVerdictRequestThread");
+        res = NanoRunInThreadTimeout(
+            attachment, 
+            data,
+            SendDelayedVerdictRequestThread,
+            (void *)ctx,
+            attachment->waiting_for_verdict_thread_timeout_msec,
+            "SendDelayedVerdictRequestThread",
+            transaction_type
+        );
+        if (!res) {
+            updateMetricField(attachment, HOLD_THREAD_TIMEOUT, 1);
+            return 1;
+        }
+
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_DEBUG,
+            "finished SendDelayedVerdictRequestThread successfully. res=%d",
+            ctx->res
+        );
+
+        if (ctx->session_data_p->verdict != TRAFFIC_VERDICT_DELAYED) {
+            return 0;
+        }
+    }
+
+    write_dbg(
+        attachment,
+        session_id,
+        DBG_LEVEL_WARNING,
+        "SendDelayedVerdictRequestThread timed out after %d retries",
+        attachment->hold_verdict_retries
+    );
+
+    ctx->res = NANO_ERROR;
+    return 0;
+}
+
 AttachmentVerdictResponse
 SendRequestFilter(NanoAttachment *attachment, AttachmentData *data)
 {
@@ -446,28 +510,9 @@ SendRequestHeaders(NanoAttachment *attachment, AttachmentData *data)
     );
 
     if (session_data_p->verdict == TRAFFIC_VERDICT_DELAYED) {
-        write_dbg(attachment, session_id, DBG_LEVEL_DEBUG, "spawn SendDelayedVerdictRequestThread");
-        res = NanoRunInThreadTimeout(
-            attachment,
-            data,
-            SendDelayedVerdictRequestThread,
-            (void *)&ctx,
-            attachment->waiting_for_verdict_thread_timeout_msec,
-            "SendDelayedVerdictRequestThread",
-            REQUEST
-        );
-        if (!res) {
-            updateMetricField(attachment, HOLD_THREAD_TIMEOUT, 1);
+        if (HandleDelayedVerdict(attachment, data, session_id, &ctx, REQUEST)) {
             return SendThreadTimeoutVerdict(attachment, session_id, &ctx);
         }
-
-        write_dbg(
-            attachment,
-            session_id,
-            DBG_LEVEL_DEBUG,
-            "finished SendDelayedVerdictRequestThread successfully. res=%d",
-            ctx.res
-        );
     }
 
     if (ctx.res != NANO_HTTP_FORBIDDEN && ctx.res != NANO_OK) {
@@ -567,28 +612,9 @@ SendRequestBody(NanoAttachment *attachment, AttachmentData *data)
     );
 
     if (session_data_p->verdict == TRAFFIC_VERDICT_DELAYED) {
-        write_dbg(attachment, session_id, DBG_LEVEL_DEBUG, "spawn SendDelayedVerdictRequestThread");
-        res = NanoRunInThreadTimeout(
-            attachment,
-            data,
-            SendDelayedVerdictRequestThread,
-            (void *)&ctx,
-            attachment->waiting_for_verdict_thread_timeout_msec,
-            "SendDelayedVerdictRequestThread",
-            REQUEST
-        );
-        if (!res) {
-            updateMetricField(attachment, HOLD_THREAD_TIMEOUT, 1);
+        if (HandleDelayedVerdict(attachment, data, session_id, &ctx, REQUEST)) {
             return SendThreadTimeoutVerdict(attachment, session_id, &ctx);
         }
-
-        write_dbg(
-            attachment,
-            session_id,
-            DBG_LEVEL_DEBUG,
-            "finished SendDelayedVerdictRequestThread successfully. res=%d",
-            ctx.res
-        );
     }
 
     if (ctx.res != NANO_HTTP_FORBIDDEN && ctx.res != NANO_OK) {
@@ -637,28 +663,9 @@ SendResponseBody(NanoAttachment *attachment, AttachmentData *data)
     );
 
     if (session_data_p->verdict == TRAFFIC_VERDICT_DELAYED) {
-        write_dbg(attachment, session_id, DBG_LEVEL_DEBUG, "spawn SendDelayedVerdictRequestThread");
-        res = NanoRunInThreadTimeout(
-            attachment,
-            data,
-            SendDelayedVerdictRequestThread,
-            (void *)&ctx,
-            attachment->waiting_for_verdict_thread_timeout_msec,
-            "SendDelayedVerdictRequestThread",
-            RESPONSE
-        );
-        if (!res) {
-            updateMetricField(attachment, HOLD_THREAD_TIMEOUT, 1);
+        if (HandleDelayedVerdict(attachment, data, session_id, &ctx, RESPONSE)) {
             return SendThreadTimeoutVerdict(attachment, session_id, &ctx);
         }
-
-        write_dbg(
-            attachment,
-            session_id,
-            DBG_LEVEL_DEBUG,
-            "finished SendDelayedVerdictRequestThread successfully. res=%d",
-            ctx.res
-        );
     }
 
     if (ctx.res != NANO_HTTP_FORBIDDEN && ctx.res != NANO_OK) {
@@ -713,28 +720,9 @@ SendRequestEnd(NanoAttachment *attachment, AttachmentData *data)
     );
 
     if (session_data_p->verdict == TRAFFIC_VERDICT_DELAYED) {
-        write_dbg(attachment, session_id, DBG_LEVEL_DEBUG, "spawn SendDelayedVerdictRequestThread");
-        res = NanoRunInThreadTimeout(
-            attachment,
-            data,
-            SendDelayedVerdictRequestThread,
-            (void *)&ctx,
-            attachment->waiting_for_verdict_thread_timeout_msec,
-            "SendDelayedVerdictRequestThread",
-            RESPONSE
-        );
-        if (!res) {
-            updateMetricField(attachment, HOLD_THREAD_TIMEOUT, 1);
+        if (HandleDelayedVerdict(attachment, data, session_id, &ctx, REQUEST)) {
             return SendThreadTimeoutVerdict(attachment, session_id, &ctx);
         }
-
-        write_dbg(
-            attachment,
-            session_id,
-            DBG_LEVEL_DEBUG,
-            "finished SendDelayedVerdictRequestThread successfully. res=%d",
-            ctx.res
-        );
     }
 
     if (ctx.res != NANO_HTTP_FORBIDDEN && ctx.res != NANO_OK) {
