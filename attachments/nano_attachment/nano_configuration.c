@@ -72,6 +72,8 @@ init_attachment_config(NanoAttachment *attachment, const char *conf_path)
     attachment->res_header_thread_timeout_msec = getResHeaderThreadTimeout();
     attachment->res_body_thread_timeout_msec = getResBodyThreadTimeout();
     attachment->waiting_for_verdict_thread_timeout_msec = getWaitingForVerdictThreadTimeout();
+    attachment->hold_verdict_retries = getHoldVerdictRetries();
+    attachment->hold_verdict_polling_time = getHoldVerdictPollingTime();
 
     attachment->num_of_nano_ipc_elements = getNumOfNginxIpcElements();
     attachment->keep_alive_interval_msec = getKeepAliveIntervalMsec();
@@ -105,6 +107,8 @@ init_attachment_config(NanoAttachment *attachment, const char *conf_path)
         "res header thread timeout: %u msec, "
         "res body thread timeout: %u msec, "
         "delayed thread timeout: %u msec, "
+        "hold verdict retries: %u, "
+        "hold verdict polling time: %u msec, "
         "static resources path: %s, "
         "num of nginx ipc elements: %u, "
         "keep alive interval msec: %u msec",
@@ -125,6 +129,8 @@ init_attachment_config(NanoAttachment *attachment, const char *conf_path)
         attachment->res_header_thread_timeout_msec,
         attachment->res_body_thread_timeout_msec,
         attachment->waiting_for_verdict_thread_timeout_msec,
+        attachment->hold_verdict_retries,
+        attachment->hold_verdict_polling_time,
         getStaticResourcesPath(),
         attachment->num_of_nano_ipc_elements,
         attachment->keep_alive_interval_msec

@@ -155,6 +155,18 @@ getWaitingForVerdictThreadTimeout()
     return conf_data.getNumericalValue("waiting_for_verdict_thread_timeout_msec");
 }
 
+unsigned int
+getHoldVerdictRetries()
+{
+    return conf_data.getNumericalValue("hold_verdict_retries");
+}
+
+unsigned int
+getHoldVerdictPollingTime()
+{
+    return conf_data.getNumericalValue("hold_verdict_polling_time");
+}
+
 int
 isIPAddress(c_str ip_str)
 {

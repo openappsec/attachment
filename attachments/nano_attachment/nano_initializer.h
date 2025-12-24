@@ -72,6 +72,8 @@ typedef struct NanoAttachment {
     unsigned int res_header_thread_timeout_msec; ///< Response header processing timeout in milliseconds.
     unsigned int res_body_thread_timeout_msec; ///< Response body processing timeout in milliseconds.
     unsigned int waiting_for_verdict_thread_timeout_msec; ///< Wait thread processing timeout in milliseconds.
+    unsigned int hold_verdict_retries; ///< Number of retries when handling delayed verdict.
+    unsigned int hold_verdict_polling_time; ///< Polling time in milliseconds between retries when handling delayed verdict.
     unsigned int metric_timeout_timeout; ///< Metric timeout in milliseconds.
     NanoHttpInspectionMode inspection_mode; ///< Default inspection mode.
     unsigned int num_of_nano_ipc_elements; ///< Number of NANO IPC elements.

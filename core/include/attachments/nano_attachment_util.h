@@ -56,6 +56,8 @@ unsigned int getResHeaderThreadTimeout();
 unsigned int getResBodyThreadTimeout();
 
 unsigned int getWaitingForVerdictThreadTimeout();
+unsigned int getHoldVerdictRetries();
+unsigned int getHoldVerdictPollingTime();
 
 int isIPAddress(c_str ip_str);
 int isSkipSource(c_str ip_str);
