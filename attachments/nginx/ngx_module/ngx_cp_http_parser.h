@@ -56,6 +56,12 @@ typedef struct {
 
     /// Decompression stream
     CompressionStream *decompression_stream;
+
+    /// Pool for temporary decompression buffers (destroyed after each chunk's re-compression)
+    ngx_pool_t *decompression_pool;
+
+    /// Pool for re-compression buffers (reset at start of each chunk to prevent accumulation)
+    ngx_pool_t *recompression_pool;
 } ngx_http_response_data;
 
 ///

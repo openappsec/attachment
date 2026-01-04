@@ -484,7 +484,7 @@ finalize_static_resource_response(
 }
 
 ngx_int_t
-handle_static_resource_request(uint32_t session_id, ngx_http_cp_verdict_e *verdict, ngx_http_request_t *request)
+handle_static_resource_request(uint32_t session_id, ServiceVerdict *verdict, ngx_http_request_t *request)
 {
     ngx_str_t null_terminated_uri;
     ngx_str_t static_resource_name;

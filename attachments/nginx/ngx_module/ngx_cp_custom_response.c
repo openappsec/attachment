@@ -181,16 +181,36 @@ ngx_http_cp_file_response_sender(
 ///
 /// @brief Adds event ID to the provided NGINX request.
 /// @param[in, out] request NGINX request.
-/// 
+///
 void
 ngx_add_event_id_to_header(ngx_http_request_t *request)
 {
     u_char *uuid = (u_char *)get_web_response_uuid();
+    if (uuid == NULL) {
+        write_dbg(DBG_LEVEL_WARNING, "web_response_uuid is NULL, skipping X-Event-ID header");
+        return;
+    }
+
     ngx_uint_t uuid_size = get_web_response_uuid_size();
+    if (uuid_size == 0) {
+        write_dbg(DBG_LEVEL_WARNING, "web_response_uuid_size is 0, skipping X-Event-ID header");
+        return;
+    }
+
+    // Validate that UUID contains actual data, not just null bytes
+    if (uuid[0] == '\0') {
+        write_dbg(
+            DBG_LEVEL_WARNING,
+            "web_response_uuid is empty (contains null bytes) despite size %d, skipping X-Event-ID header",
+            uuid_size
+        );
+        return;
+    }
+
     static u_char uuid_key[] = { 'X', '-', 'E', 'v', 'e', 'n', 't', '-', 'I', 'D' };
 
     write_dbg(
-        DBG_LEVEL_WARNING,
+        DBG_LEVEL_TRACE,
         "Adding instance ID to header. Incident ID: %s, Incident ID size: %d",
         uuid,
         uuid_size
@@ -202,6 +222,71 @@ ngx_add_event_id_to_header(ngx_http_request_t *request)
         uuid_size,
         uuid
     );
+}
+
+ngx_int_t
+ngx_http_cp_finalize_custom_response_request(ngx_http_request_t *request)
+{
+    ngx_chain_t out_chain[1];
+    ngx_int_t rc;
+    uint16_t response_code;
+
+    write_dbg(DBG_LEVEL_TRACE, "Finalizing Custom JSON Response request");
+
+    // Get JSON response data
+    response_code = get_response_code_json();
+    
+    rc = get_response_page_json(request, &out_chain);
+    if (rc != NGX_OK) {
+        write_dbg(DBG_LEVEL_WARNING, "Failed to get JSON response page");
+        goto CUSTOM_RESPONSE_OUT;
+    }
+
+    request->keepalive = 0;
+    request->headers_out.status = response_code;
+    request->headers_out.status_line.len = 0;
+
+    delete_headers_list(&request->headers_out.headers);
+    
+    if (get_response_content_type() == CONTENT_TYPE_TEXT_HTML) {
+        static u_char text_html[] = {'t', 'e', 'x', 't', '/', 'h', 't', 'm', 'l'};
+        request->headers_out.content_type.len = sizeof(text_html);
+        request->headers_out.content_type.data = text_html;
+        request->headers_out.content_type_len = request->headers_out.content_type.len;
+    } else {
+        static u_char json_content_type[] = {'a', 'p', 'p', 'l', 'i', 'c', 'a', 't', 'i', 'o', 'n', '/', 'j', 's', 'o', 'n'};
+        request->headers_out.content_type.len = sizeof(json_content_type);
+        request->headers_out.content_type.data = json_content_type;
+        request->headers_out.content_type_len = request->headers_out.content_type.len;
+
+    }
+    
+    // Set content length
+    request->headers_out.content_length_n = get_response_page_length_json();
+
+    rc = ngx_http_send_header(request);
+    if (rc == NGX_ERROR || rc > NGX_OK) {
+        write_dbg(
+            DBG_LEVEL_WARNING,
+            "Failed to send Custom JSON Response headers (result: %d)",
+            rc
+        );
+        goto CUSTOM_RESPONSE_OUT;
+    }
+
+    write_dbg(DBG_LEVEL_TRACE, "Successfully sent Custom JSON Response headers");
+
+    // Send the JSON response body using the chain data
+    rc = ngx_http_output_filter(request, out_chain);
+    if (rc != NGX_OK && rc != NGX_AGAIN) {
+        write_dbg(DBG_LEVEL_WARNING, "Failed to send Custom JSON Response");
+    } else {
+        write_dbg(DBG_LEVEL_TRACE, "Custom JSON Response sent successfully");
+    }
+
+CUSTOM_RESPONSE_OUT:
+    ngx_http_finalize_request(request, NGX_HTTP_CLOSE);
+    return NGX_HTTP_CLOSE;
 }
 
 ngx_int_t
@@ -241,6 +326,7 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request, int is_respon
         goto CUSTOM_RES_OUT;
     }
 
+    delete_headers_list(&request->headers_out.headers);
     if (get_response_code() == NGX_HTTP_TEMPORARY_REDIRECT) {
         // Handling redirect web response.
         write_dbg(
@@ -275,7 +361,7 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request, int is_respon
 
     ngx_add_event_id_to_header(request);
 
-    if (get_response_page_length() == 0) {
+    if (get_response_page_length_web_page() == 0) {
         // Page details were not provided.
         write_dbg(
             DBG_LEVEL_WARNING,
@@ -289,9 +375,7 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request, int is_respon
     request->headers_out.content_type.len = size_of_text_html;
     request->headers_out.content_type_len = request->headers_out.content_type.len;
     request->headers_out.content_type.data = text_html;
-    request->headers_out.content_length_n = get_response_page_length();
-
-    delete_headers_list(&request->headers_out.headers);
+    request->headers_out.content_length_n = get_response_page_length_web_page();
 
     write_dbg(DBG_LEVEL_TRACE, "Sending response headers for rejected request");
     rc = ngx_http_send_header(request);
@@ -313,7 +397,7 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request, int is_respon
 
     if (send_response_custom_body) {
         // Sending response custom body.
-        if (get_response_page(request, &out_chain) != NGX_OK) {
+        if (get_block_page_response(request, &out_chain) != NGX_OK) {
             // Failed to generate custom response page.
             write_dbg(
                 DBG_LEVEL_DEBUG,
@@ -611,7 +695,7 @@ perform_header_modification(
     ngx_list_t *headers,
     ngx_http_cp_list_iterator *headers_iterator,
     ngx_http_cp_modification_list *modification,
-    ngx_http_modification_type_e type,
+    HttpModificationType type,
     ngx_flag_t is_content_length
 )
 {
@@ -674,7 +758,7 @@ perform_header_modification(
 ///      - #NULL if failed to get the next element.
 ///
 static ngx_http_cp_modification_list *
-get_next_header_modification(ngx_http_cp_modification_list *modification, ngx_http_modification_type_e type)
+get_next_header_modification(ngx_http_cp_modification_list *modification, HttpModificationType type)
 {
     switch (type) {
         case APPEND:
@@ -698,7 +782,7 @@ get_next_header_modification(ngx_http_cp_modification_list *modification, ngx_ht
 static void
 free_header_modification(
     ngx_http_cp_modification_list *modification,
-    ngx_http_modification_type_e type,
+    HttpModificationType type,
     ngx_pool_t *pool
 )
 {
@@ -731,7 +815,7 @@ ngx_http_cp_header_modifier(
     ngx_flag_t is_content_length
 )
 {
-    ngx_http_modification_type_e type;
+    HttpModificationType type;
     ngx_http_cp_modification_list *next_modification;
     ngx_http_cp_list_iterator headers_iterator;
     init_list_iterator(headers, &headers_iterator);
@@ -785,75 +869,106 @@ ngx_http_cp_body_modifier(
     ngx_pool_t *pool
 )
 {
+    static const size_t MAX_MODIFICATIONS_PER_CHUNK = 64;
     ngx_http_cp_modification_list *next_modification;
     ngx_uint_t cur_body_chunk = 0;
     ngx_chain_t *chain_iter;
-    ngx_chain_t *injected_chain_elem;
-    ngx_uint_t num_appended_elements;
     size_t cur_chunk_size = 0;
 
     for (chain_iter = body_chain; chain_iter; chain_iter = chain_iter->next, cur_body_chunk++) {
-        // Iterates of the body chains
         if (curr_modification == NULL) return NGX_OK;
-        if (curr_modification->modification.orig_buff_index != cur_body_chunk) continue;
-
+        
         cur_chunk_size = chain_iter->buf->last - chain_iter->buf->pos;
+        
         if (cur_chunk_size == 0) {
             write_dbg(DBG_LEVEL_TRACE, "No need to modify body chunk of size 0. Chunk index: %d", cur_body_chunk);
             continue;
         }
 
-        write_dbg(
-            DBG_LEVEL_DEBUG,
-            "Handling current modification. "
-            "Injection position: %d, injection size: %d, original buffer index: %d, modification buffer: %s",
-            curr_modification->modification.injection_pos,
-            curr_modification->modification.injection_size,
-            curr_modification->modification.orig_buff_index,
-            curr_modification->modification_buffer
-        );
-        // Create a chain element.
-        injected_chain_elem = create_chain_elem(
-            curr_modification->modification.injection_size,
-            curr_modification->modification_buffer,
-            pool
-        );
+        ngx_http_cp_modification_list *modifications_for_chunk[MAX_MODIFICATIONS_PER_CHUNK];
+        ngx_uint_t modification_count = 0;
+        ngx_http_cp_modification_list *temp_mod = curr_modification;
 
-        if (injected_chain_elem == NULL) {
+        while (temp_mod != NULL && temp_mod->modification.orig_buff_index == cur_body_chunk 
+                && modification_count < MAX_MODIFICATIONS_PER_CHUNK) {
+            modifications_for_chunk[modification_count] = temp_mod;
+            modification_count++;
+            temp_mod = temp_mod->next;
+        }
+        
+        if (modification_count == 0) {
+            continue;
+        }
+        
+        size_t original_size = chain_iter->buf->last - chain_iter->buf->pos;
+        size_t total_injection_size = 0;
+        
+        for (ngx_uint_t i = 0; i < modification_count; i++) {
+            total_injection_size += modifications_for_chunk[i]->modification.injection_size;
+        }
+        
+        size_t new_buffer_size = original_size + total_injection_size;
+        
+        u_char *new_buffer = ngx_palloc(pool, new_buffer_size);
+        if (new_buffer == NULL) {
             free_modifications_list(curr_modification, pool);
             return NGX_ERROR;
         }
-
-        write_dbg(DBG_LEVEL_DEBUG, "Handling modification of chain element number %d", cur_body_chunk);
-        // Handling modification of a chain element.
-        if (curr_modification->modification.injection_pos == 0) {
-            // Pre appends chain element.
-            prepend_chain_elem(chain_iter, injected_chain_elem);
-            chain_iter = chain_iter->next;
-            num_appended_elements = 0;
-        } else if (curr_modification->modification.injection_pos == chain_iter->buf->last - chain_iter->buf->pos + 1) {
-            // Prepend a chain element.
-            append_chain_elem(chain_iter, injected_chain_elem);
-            chain_iter = chain_iter->next;
-            num_appended_elements = 1;
-        } else {
-            if (split_chain_elem(chain_iter, curr_modification->modification.injection_pos, pool) != NGX_OK) {
-                // Failed to iterate over the modification.
-                free_modifications_list(curr_modification, pool);
-                return NGX_ERROR;
+        
+        u_char *original_data = chain_iter->buf->pos;
+        
+        // Sort modifications by injection position in DESCENDING order
+        for (ngx_uint_t i = 0; i < modification_count - 1; i++) {
+            for (ngx_uint_t j = 0; j < modification_count - i - 1; j++) {
+                if (modifications_for_chunk[j]->modification.injection_pos < 
+                    modifications_for_chunk[j + 1]->modification.injection_pos) {
+                    ngx_http_cp_modification_list *temp = modifications_for_chunk[j];
+                    modifications_for_chunk[j] = modifications_for_chunk[j + 1];
+                    modifications_for_chunk[j + 1] = temp;
+                }
             }
+        }
+        
+        // Start with original buffer and apply modifications from end to beginning
+        u_char *current_buffer = original_data;
+        size_t current_size = original_size;
+        
+        for (ngx_uint_t i = 0; i < modification_count; i++) {
+            ngx_http_cp_modification_list *mod = modifications_for_chunk[i];
+            size_t injection_pos = mod->modification.injection_pos;
+            
+            if (injection_pos > current_size) {
+                continue;
+            }
+            
+            size_t new_size = current_size + mod->modification.injection_size;
+            
+            u_char *target_buffer = (i == 0) ? new_buffer : ngx_palloc(pool, new_size);
+            if (target_buffer == NULL) {
+                continue;
+            }
+            
+            // Copy: [start...injection_pos] + [injection_data] + [injection_pos...end]
+            ngx_memcpy(target_buffer, current_buffer, injection_pos);
+            ngx_memcpy(target_buffer + injection_pos, mod->modification_buffer, mod->modification.injection_size);
+            ngx_memcpy(target_buffer + injection_pos + mod->modification.injection_size, 
+                      current_buffer + injection_pos, current_size - injection_pos);
 
-            append_chain_elem(chain_iter, injected_chain_elem);
-            chain_iter = chain_iter->next->next;
-            num_appended_elements = 2;
+            current_buffer = target_buffer;
+            current_size = new_size;
         }
 
-        // Moves to the next modification element and frees the modifier.
-        next_modification = curr_modification->next;
-        ngx_pfree(pool, curr_modification);
-        curr_modification = next_modification;
+        chain_iter->buf->pos = current_buffer;
+        chain_iter->buf->last = current_buffer + current_size;
+        chain_iter->buf->start = current_buffer;
+        chain_iter->buf->end = current_buffer + current_size;
 
-        cur_body_chunk += num_appended_elements;
+        for (ngx_uint_t i = 0; i < modification_count; i++) {
+            next_modification = modifications_for_chunk[i]->next;
+            ngx_pfree(pool, modifications_for_chunk[i]->modification_buffer);
+            ngx_pfree(pool, modifications_for_chunk[i]);
+            curr_modification = next_modification;
+        }
     }
     return NGX_OK;
 }

@@ -37,7 +37,7 @@ reset_metric_data()
 /// @param[in] value Value to increment the metric type.
 ///
 static void
-updateCounterMetricField(ngx_http_plugin_metric_type_e metric_type, uint64_t value)
+updateCounterMetricField(AttachmentMetricType metric_type, uint64_t value)
 {
     metric_data[metric_type] += value;
 }
@@ -48,7 +48,7 @@ updateCounterMetricField(ngx_http_plugin_metric_type_e metric_type, uint64_t val
 /// @param[in] value Value to add to the average metric.
 ///
 static void
-updateAverageMetricField(ngx_http_plugin_metric_type_e metric_type, uint64_t value)
+updateAverageMetricField(AttachmentMetricType metric_type, uint64_t value)
 {
     metric_data[metric_type] =
         (((metric_data[metric_type] * metric_average_data_divisor[metric_type]) + value) / (metric_average_data_divisor[metric_type] + 1));
@@ -61,7 +61,7 @@ updateAverageMetricField(ngx_http_plugin_metric_type_e metric_type, uint64_t val
 /// @param[in] value Value to set.
 ///
 static void
-updateMaxMetricField(ngx_http_plugin_metric_type_e metric_type, uint64_t value)
+updateMaxMetricField(AttachmentMetricType metric_type, uint64_t value)
 {
     if (metric_data[metric_type] < value) metric_data[metric_type] = value;
 }
@@ -72,7 +72,7 @@ updateMaxMetricField(ngx_http_plugin_metric_type_e metric_type, uint64_t value)
 /// @param[in] value Value to set.
 ///
 static void
-updateMinMetricField(ngx_http_plugin_metric_type_e metric_type, uint64_t value)
+updateMinMetricField(AttachmentMetricType metric_type, uint64_t value)
 {
     if (metric_data[metric_type] == 0) {
         metric_data[metric_type] = value;
@@ -82,7 +82,7 @@ updateMinMetricField(ngx_http_plugin_metric_type_e metric_type, uint64_t value)
 }
 
 void
-updateMetricField(ngx_http_plugin_metric_type_e metric_type, uint64_t value)
+updateMetricField(AttachmentMetricType metric_type, uint64_t value)
 {
     switch (metric_type) {
         case CPU_USAGE:

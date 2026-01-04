@@ -20,12 +20,14 @@
 #include <dirent.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <fcntl.h>
 
 #include <ngx_log.h>
 #include <ngx_core.h>
 #include <ngx_string.h>
 #include <ngx_files.h>
 
+#include "nano_attachment_common.h"
 #include "nginx_attachment_common.h"
 #include "ngx_cp_io.h"
 #include "ngx_cp_utils.h"
@@ -33,6 +35,7 @@
 #include "ngx_cp_compression.h"
 #include "attachment_types.h"
 #include "ngx_http_cp_attachment_module.h"
+#include "async/ngx_cp_async_core.h"
 
 typedef enum ngx_cp_attachment_registration_state {
     NOT_REGISTERED,
@@ -41,6 +44,7 @@ typedef enum ngx_cp_attachment_registration_state {
 } ngx_cp_attachment_registration_state_e; ///< Indicates the current attachment registation stage.
 
 char unique_id[MAX_NGINX_UID_LEN] = ""; // Holds the unique identifier for this instance.
+uint32_t unique_id_integer = 0; // Holds the integer representation of the unique identifier.
 char shared_verdict_signal_path[128]; // Holds the path associating the attachment and service.
 
 int registration_socket = -1; // Holds the file descriptor used for registering the instance.
@@ -239,7 +243,7 @@ init_signaling_socket()
         close(comm_socket);
         comm_socket = -1;
         write_dbg(
-            DBG_LEVEL_DEBUG,
+            DBG_LEVEL_WARNING,
             "Could not connect to nano service. Path: %s, Error: %s",
             server.sun_path,
             strerror(errno)
@@ -295,6 +299,39 @@ init_signaling_socket()
         return NGX_ERROR;
     }
 
+    // Calculate and send target core for affinity pairing
+    int32_t target_core = -1; // Use signed int, -1 indicates affinity disabled
+    if (paired_affinity_enabled) {
+        // Use hash of the container ID part only (before underscore) as offset to distribute containers across CPU cores
+        char container_id[256];
+        strncpy(container_id, unique_id, sizeof(container_id) - 1);
+        container_id[sizeof(container_id) - 1] = '\0';
+
+        char *underscore_pos = strrchr(container_id, '_');
+        if (underscore_pos != NULL) {
+            *underscore_pos = '\0'; // Truncate at underscore to get container ID only
+        }
+
+        uint32_t affinity_offset = hash_string(container_id);
+        int num_cores = sysconf(_SC_NPROCESSORS_CONF);
+        target_core = ((unique_id_integer - 1) + affinity_offset) % num_cores;
+        write_dbg(DBG_LEVEL_INFO, "Calculated target core for service affinity: worker_id=%d, offset=%u, num_cores=%d, target_core=%d (from container_id: %s, full unique_id: %s)", unique_id_integer, affinity_offset, num_cores, target_core, container_id, unique_id);
+    } else {
+        write_dbg(DBG_LEVEL_INFO, "Paired affinity disabled, sending target_core=-1 to service");
+    }
+
+    res = exchange_communication_data_with_service(
+        comm_socket,
+        &target_core,
+        sizeof(int32_t),
+        WRITE_TO_SOCKET,
+        &timeout
+    );
+    if (res <= 0) {
+        write_dbg(DBG_LEVEL_WARNING, "Failed to send target core");
+        return NGX_ERROR;
+    }
+
     // Get an acknowledgement form the service that communication has been established.
     timeout = get_timeout_val_sec(1);
     res = exchange_communication_data_with_service(
@@ -309,7 +346,7 @@ init_signaling_socket()
         return NGX_ERROR;
     }
 
-    write_dbg(DBG_LEVEL_DEBUG, "Successfully connected on client socket %d", comm_socket);
+    write_dbg(DBG_LEVEL_WARNING, "Successfully connected on client socket %d", comm_socket);
     return NGX_OK;
 }
 
@@ -343,12 +380,21 @@ get_docker_id(char **_docker_id)
     size_t len = 0;
     while (getline(&line, &len, file) != -1) {
         char *docker_ptr = strstr(line, "docker/");
-        if (docker_ptr == NULL) continue;
+        char *containerd_ptr = strstr(line, "cri-containerd-");
 
-        // We've found a line with "docker/" so the identifier will be right after that.
-        docker_ptr += strlen("docker/");
-        snprintf(docker_id, MAX_CONTAINER_LEN + 1, "%s", docker_ptr);
-        break;
+        if (docker_ptr != NULL) {
+            // We've found a line with "docker/" so the identifier will be right after that.
+            docker_ptr += strlen("docker/");
+            snprintf(docker_id, MAX_CONTAINER_LEN + 1, "%s", docker_ptr);
+            break;
+        }
+
+        if (containerd_ptr != NULL) {
+            // We've found a line with "cri-containerd-" so the identifier will be right after that.
+            containerd_ptr += strlen("cri-containerd-");
+            snprintf(docker_id, MAX_CONTAINER_LEN + 1, "%s", containerd_ptr);
+            break;
+        }
     }
     free(line);
     fclose(file);
@@ -570,12 +616,21 @@ set_unique_id()
     size_t len = 0;
     while (getline(&line, &len, file) != -1) {
         char *docker_ptr = strstr(line, "docker/");
-        if (docker_ptr == NULL) continue;
+        char *containerd_ptr = strstr(line, "cri-containerd-");
 
-        is_container_env = 1;
-        docker_ptr += strlen("docker/");
-        snprintf(docker_id, max_container_id_len + 1, "%s", docker_ptr);
-        break;
+        if (docker_ptr != NULL) {
+            is_container_env = 1;
+            docker_ptr += strlen("docker/");
+            snprintf(docker_id, max_container_id_len + 1, "%s", docker_ptr);
+            break;
+        }
+
+        if (containerd_ptr != NULL) {
+            is_container_env = 1;
+            containerd_ptr += strlen("cri-containerd-");
+            snprintf(docker_id, max_container_id_len + 1, "%s", containerd_ptr);
+            break;
+        }
     }
     free(line);
     fclose(file);
@@ -588,7 +643,10 @@ set_unique_id()
         snprintf(unique_id, unique_id_size, "%lu", ngx_worker_id);
     }
 
-    write_dbg(DBG_LEVEL_INFO, "Successfully set attachment's unique_id: '%s'", unique_id);
+    // Set integer representation
+    unique_id_integer = (uint32_t)ngx_worker_id;
+
+    write_dbg(DBG_LEVEL_INFO, "Successfully set attachment's unique_id: '%s' (int: %u)", unique_id, unique_id_integer);
     return NGX_OK;
 }
 
@@ -634,7 +692,7 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
         set_need_registration(REGISTERED);
     }
 
-    if (comm_socket < 0) {
+    if (comm_socket < 0 || is_async_toggled_in_last_reconfig()) {
         write_dbg(DBG_LEVEL_DEBUG, "Registering to nano service");
         if (init_signaling_socket() == NGX_ERROR) {
             write_dbg(DBG_LEVEL_DEBUG, "Failed to register to the Nano Service");
@@ -696,6 +754,28 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
     // we want to indicate about successful registration only once in default level
     write_dbg(dbg_is_needed ? DBG_LEVEL_DEBUG : DBG_LEVEL_INFO, "NGINX attachment (UID='%s') successfully registered to nano service after %d attempts.", unique_id, num_of_connection_attempts);
 
+    // Set affinity to core based on UID (worker id) only if paired affinity is enabled
+    if (paired_affinity_enabled) {
+        // Use hash of the container ID part only (before underscore) as offset to distribute containers across CPU cores
+        // This ensures workers within same container are distributed evenly, but different containers get different offsets
+        char container_id[256];
+        strncpy(container_id, unique_id, sizeof(container_id) - 1);
+        container_id[sizeof(container_id) - 1] = '\0';
+
+        char *underscore_pos = strrchr(container_id, '_');
+        if (underscore_pos != NULL) {
+            *underscore_pos = '\0'; // Truncate at underscore to get container ID only
+        }
+
+        uint32_t affinity_offset = hash_string(container_id);
+        int num_cores = sysconf(_SC_NPROCESSORS_CONF);
+        write_dbg(DBG_LEVEL_INFO, "Setting CPU affinity for NGINX attachment with UID: %d, offset: %u, num_cores: %d (from container_id: %s, full unique_id: %s)", unique_id_integer, affinity_offset, num_cores, container_id, unique_id);
+        int err = set_affinity_by_uid_with_offset_fixed_cores(unique_id_integer, affinity_offset, num_cores);
+        if (err != NGX_OK) {
+            write_dbg(DBG_LEVEL_WARNING, "Failed to set affinity for worker %d, err %d", ngx_worker, err);
+        }
+    }
+
     dbg_is_needed = 1;
     num_of_connection_attempts = 0;
 
@@ -735,6 +815,10 @@ disconnect_communication()
         destroyIpc(nano_service_ipc, 0);
         nano_service_ipc = NULL;
     }
+
+#ifdef NGINX_ASYNC_SUPPORTED
+    disable_ipc_verdict_event_handler();
+#endif
 
     set_need_registration(NOT_REGISTERED);
 }

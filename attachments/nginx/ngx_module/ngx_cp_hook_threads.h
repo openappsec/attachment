@@ -42,6 +42,7 @@ struct ngx_http_cp_event_thread_ctx_t
 
     /// Should context continue to the next filter.
     int should_return_next_filter;
+    int chain_part_number;
 
     ngx_http_cp_modification_list *modifications; ///< Context's modification.
     ngx_str_t waf_tag; ///< WAF tag value for the location block.
@@ -183,7 +184,7 @@ void * ngx_http_cp_res_body_filter_thread(void *_ctx);
 
 ///
 /// @brief Sends a request to the attachment's service to update the earlier provided "WAIT" verdict.
-/// @details Communicates with the attachment service by sending a HOLD_DATA request to the attachment's service
+/// @details Communicates with the attachment service by sending a REQUEST_DELAYED_VERDICT request to the attachment's service
 /// and modifies _ctx by the received response.
 /// @note _ctx needs to be properly initialized by init_thread_ctx() and
 /// be called after another call returned wait verdict.

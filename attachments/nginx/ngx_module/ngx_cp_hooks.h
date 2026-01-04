@@ -24,7 +24,7 @@
 #include <unistd.h>
 
 #include "ngx_cp_http_parser.h"
-#include "nginx_attachment_common.h"
+#include "nano_attachment_common.h"
 #include "ngx_cp_hook_threads.h"
 
 static const int registration_failure_weight = 2; ///< Registration failure weight.
@@ -36,7 +36,7 @@ static const ngx_int_t METRIC_TIMEOUT_VAL = METRIC_PERIODIC_TIMEOUT;
 /// @details Such as to save verdict and session ID between the request and the response
 typedef struct ngx_http_cp_session_data {
     ngx_int_t              was_request_fully_inspected; ///< Holds if the request fully inspected.
-    ngx_http_cp_verdict_e  verdict; ///< Holds the session's verdict from the Nano Service.
+    ServiceVerdict         verdict; ///< Holds the session's verdict from the Nano Service.
     uint32_t               session_id; ///< Current session's Id.
     ngx_int_t              remaining_messages_to_reply; ///< Remaining messages left for the agent to respond to.
     ngx_http_response_data response_data; ///< Holds session's response data.
@@ -46,6 +46,9 @@ typedef struct ngx_http_cp_session_data {
     uint64_t               processed_req_body_size; ///< Holds session's request body's size.
     uint64_t               processed_res_body_size; ///< Holds session's response body's size'.
     ngx_int_t              is_res_body_inspected; ///< Holds if the response body was inspected
+    ngx_int_t              async_processing_needed; ///< Holds if async processing is needed in filters
+    ngx_int_t              body_processed; ///< Holds if request body processing is complete
+    ngx_int_t              initial_async_mode; ///< Initial async mode for this request (0=sync, 1=async, -1=unset)
 } ngx_http_cp_session_data;
 
 ///
@@ -100,7 +103,7 @@ ngx_int_t ngx_http_cp_req_header_handler(ngx_http_request_t *request);
 
 ///
 /// @brief Sends a request to the nano service to update the verdict.
-/// @note Should be called after the nano service provided the verdict TRAFFIC_VERDICT_WAIT to get the updated verdict.
+/// @note Should be called after the nano service provided the verdict TRAFFIC_VERDICT_DELAYED to get the updated verdict.
 /// @param[in, out] request Event thread context to be updated.
 /// @returns ngx_int_t
 ///         - #1 if request was properly communicated with the nano service and provided an updated response.
@@ -121,12 +124,12 @@ ngx_int_t was_transaction_timedout(ngx_http_cp_session_data *ctx);
 
 ///
 /// @brief Enforces the sessions rate.
-/// @returns ngx_http_cp_verdict_e
+/// @returns ServiceVerdict
 ///         - #TRAFFIC_VERDICT_INSPECT
 ///         - #TRAFFIC_VERDICT_ACCEPT
 ///         - #TRAFFIC_VERDICT_DROP
 ///
-ngx_http_cp_verdict_e enforce_sessions_rate();
+ServiceVerdict enforce_sessions_rate();
 
 
 ///
@@ -136,5 +139,26 @@ ngx_http_cp_verdict_e enforce_sessions_rate();
 ///         - #NGX_DECLINED
 ///
 ngx_int_t ngx_http_cp_request_and_response_size_handler(ngx_http_request_t *request);
+
+// Session management functions
+ngx_http_cp_session_data *init_cp_session_data(ngx_http_request_t *request);
+ngx_http_cp_session_data *recover_cp_session_data(ngx_http_request_t *request);
+
+// Utility functions
+void calcProcessingTime(ngx_http_cp_session_data *session_data_p, struct timespec *hook_time_begin, int is_req);
+ngx_int_t ngx_http_cp_finalize_request_headers_hook(
+    ngx_http_request_t *request,
+    ngx_http_cp_session_data *session_data_p,
+    ngx_http_cp_modification_list *modifications,
+    ngx_int_t final_res);
+
+// Sync and async handlers
+ngx_int_t ngx_http_cp_req_header_handler_sync(ngx_http_request_t *request);
+ngx_int_t ngx_http_cp_req_body_filter_sync(ngx_http_request_t *request, ngx_chain_t *request_body_chain);
+
+#ifdef NGINX_ASYNC_SUPPORTED
+ngx_int_t ngx_http_cp_req_header_handler_async(ngx_http_request_t *request);
+ngx_int_t ngx_http_cp_req_body_filter_async(ngx_http_request_t *request, ngx_chain_t *request_body_chain);
+#endif
 
 #endif // __NGX_CP_HOOKS_H__

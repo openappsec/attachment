@@ -16,7 +16,7 @@
 #ifndef __NGX_CP_METRIC_H__
 #define __NGX_CP_METRIC_H__
 
-#include <nginx_attachment_common.h>
+#include <nano_attachment_common.h>
 #include <ngx_config.h>
 #include <ngx_core.h>
 
@@ -25,7 +25,7 @@
 /// @param[in] metric_type Metric type to update.
 /// @param[in] value Value to set.
 ///
-void updateMetricField(ngx_http_plugin_metric_type_e metric_type, uint64_t value);
+void updateMetricField(AttachmentMetricType metric_type, uint64_t value);
 
 ///
 /// @brief Goes over all the metrics and resets them to 0.

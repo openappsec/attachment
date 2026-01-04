@@ -166,28 +166,39 @@ ngx_chain_remove_empty_chunks(ngx_chain_t **chain, ngx_pool_t *pool)
 {
     ngx_chain_t *prev = NULL;
     ngx_chain_t *curr = *chain;
-    size_t chunk_num = 0;
+    size_t chunk_index = 0;
 
-    while (curr != NULL) {
-        size_t size = curr->buf->last - curr->buf->pos;
-        if (size == 0) {
-            write_dbg(DBG_LEVEL_WARNING, "Removing empty chunk from the chain, chunk number: %d", chunk_num);
-            if (prev == NULL) {
-                *chain = curr->next;
-            } else {
-                prev->next = curr->next;
-            }
-            ngx_chain_t *tmp = curr;
+    while (curr) {
+        ngx_buf_t *b = curr->buf;
+
+        /* Keep special links (flush/last_buf/sync) even if size is 0 */
+        if (ngx_buf_special(b)) {
+            prev = curr;
             curr = curr->next;
+            chunk_index++;
+            continue;
+        }
+
+        off_t buf_size = curr->buf->last - curr->buf->pos;
+        if (buf_size <= 0) {
+            ngx_chain_t *tmp = curr;
+            write_dbg(DBG_LEVEL_WARNING,
+                "Removing empty chunk from the chain, index: %zu", chunk_index);
+            curr = curr->next;
+            if (prev == NULL) {
+                *chain = curr;
+            } else {
+                prev->next = curr;
+            }
             ngx_free_chain(pool, tmp);
             continue;
         }
         prev = curr;
         curr = curr->next;
-        chunk_num++;
+        chunk_index++;
     }
 
-    if (chunk_num == 0) {
+    if (*chain == NULL) {
         write_dbg(DBG_LEVEL_WARNING, "Empty chain after removing empty chunks");
         return NGX_ERROR;
     }
@@ -426,16 +437,13 @@ compression_chain_filter(
             return NGX_ERROR;
         }
 
-        if (curr_original_contents_link != NULL) {
+        // Save ONLY first buffer of original body if requested (prevents memory spikes)
+        if (curr_original_contents_link != NULL && curr_original_contents_link->buf == NULL) {
+            // Only save the FIRST buffer, don't accumulate subsequent chunks
             curr_original_contents_link->buf = ngx_calloc_buf(pool);
             ngx_memcpy(curr_original_contents_link->buf, curr_input_link->buf, sizeof(ngx_buf_t));
-
-            if (curr_input_link->next != NULL) {
-                // Allocates next chain.
-                curr_original_contents_link->next = ngx_alloc_chain_link(pool);
-                ngx_memset(curr_original_contents_link->next, 0, sizeof(ngx_chain_t));
-                curr_original_contents_link = curr_original_contents_link->next;
-            }
+            curr_original_contents_link->next = NULL;  // No accumulation
+            write_dbg(DBG_LEVEL_TRACE, "Saved first chunk of original body (no accumulation)");
         }
 
         ngx_memcpy(curr_input_link->buf, output_buffer, sizeof(ngx_buf_t));
@@ -522,7 +530,7 @@ decompress_chain(
 ngx_int_t
 decompress_body(
     CompressionStream *decompression_stream,
-    const ngx_http_chunk_type_e chunk_type,
+    const AttachmentDataType chunk_type,
     int *is_last_decompressed_part,
     ngx_chain_t **body,
     ngx_chain_t **original_body_contents,
@@ -563,7 +571,7 @@ ngx_int_t
 compress_body(
     CompressionStream *compression_stream,
     const CompressionType compression_type,
-    const ngx_http_chunk_type_e chunk_type,
+    const AttachmentDataType chunk_type,
     const int is_last_part,
     ngx_chain_t **body,
     ngx_chain_t **original_body_contents,
@@ -581,21 +589,31 @@ compress_body(
         return NGX_ERROR;
     }
 
-    if (compression_type == BROTLI) {
-        // Brotli compression is not supported.
-        // This if statement serves a case that the compression type is set to BROTLI
-        // For now, we should not reach inside this function with a compression type of BROTLI.
-        write_dbg(DBG_LEVEL_WARNING, "Brotli compression is not supported");
-        return NGX_ERROR;
+    body_type = chunk_type == REQUEST_BODY ? "request" : "response";
+
+    const char* format_name = "unknown";
+    switch (compression_type) {
+        case GZIP:
+            format_name = "gzip";
+            break;
+        case ZLIB:
+            format_name = "zlib";
+            break;
+        case BROTLI:
+            format_name = "brotli";
+            break;
+        default:
+            write_dbg(DBG_LEVEL_WARNING, "Unknown compression type: %d", compression_type);
+            return NGX_ERROR;
     }
 
-    body_type = chunk_type == REQUEST_BODY ? "request" : "response";
     write_dbg(
         DBG_LEVEL_TRACE,
         "Compressing plain-text %s body in the format \"%s\"",
         body_type,
-        compression_type == GZIP ? "gzip" : "zlib"
+        format_name
     );
+
     // Checks if the compression was successful.
     compress_res = compress_chain(
         compression_stream,

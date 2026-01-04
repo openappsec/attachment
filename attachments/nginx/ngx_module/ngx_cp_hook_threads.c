@@ -25,7 +25,7 @@
 #include "nginx_attachment_util.h"
 #include "shmem_ipc.h"
 #include "compression_utils.h"
-#include "nginx_attachment_common.h"
+#include "nano_attachment_common.h"
 #include "ngx_cp_io.h"
 #include "ngx_cp_utils.h"
 #include "ngx_cp_initializer.h"
@@ -104,6 +104,7 @@ init_thread_ctx(
     ctx->res = NGX_OK;
     ctx->should_return = 0;
     ctx->should_return_next_filter = 0;
+    ctx->chain_part_number = 0;
     ctx->chain = chain;
     ctx->modifications = NULL;
 }
@@ -253,11 +254,13 @@ ngx_http_cp_req_body_filter_thread(void *_ctx)
     ngx_int_t is_last_part;
     ngx_int_t send_body_result;
     ngx_uint_t num_messages_sent = 0;
+    ngx_int_t part_count = 0;
 
     send_body_result = ngx_http_cp_body_sender(
         ctx->chain,
         REQUEST_BODY,
         session_data_p,
+        &part_count,
         &is_last_part,
         &num_messages_sent,
         &ctx->chain
@@ -275,7 +278,7 @@ ngx_http_cp_req_body_filter_thread(void *_ctx)
         }
         THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
     }
-    session_data_p->remaining_messages_to_reply += num_messages_sent;
+        session_data_p->remaining_messages_to_reply += num_messages_sent;
 
     // Fetch nano services' results.
     ctx->res = ngx_http_cp_reply_receiver(
@@ -318,7 +321,8 @@ ngx_http_cp_req_end_transaction_thread(void *_ctx)
     session_data_p->remaining_messages_to_reply += num_messages_sent;
 
     if (session_data_p->verdict != TRAFFIC_VERDICT_ACCEPT &&
-        session_data_p->verdict != TRAFFIC_VERDICT_DROP) {
+        session_data_p->verdict != TRAFFIC_VERDICT_DROP &&
+        session_data_p->verdict != TRAFFIC_VERDICT_CUSTOM_RESPONSE) {
         // Fetch nano services' results.
         ctx->res = ngx_http_cp_reply_receiver(
             &session_data_p->remaining_messages_to_reply,
@@ -454,6 +458,7 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
 {
     struct ngx_http_cp_event_thread_ctx_t *ctx = (struct ngx_http_cp_event_thread_ctx_t *)_ctx;
     ngx_http_request_t *request = ctx->request;
+    ngx_int_t part_number = ctx->chain_part_number;
     ngx_http_cp_session_data *session_data_p = ctx->session_data_p;
     ngx_int_t send_body_result;
     ngx_uint_t num_messages_sent = 0;
@@ -470,6 +475,7 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
         ctx->chain,
         RESPONSE_BODY,
         session_data_p,
+        &part_number,
         &is_last_response_part,
         &num_messages_sent,
         &ctx->chain
@@ -519,7 +525,7 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
     );
 
 
-    if (session_data_p->verdict == TRAFFIC_VERDICT_WAIT) {
+    if (session_data_p->verdict == TRAFFIC_VERDICT_DELAYED) {
         if (!ngx_http_cp_hold_verdict(ctx)) {
             session_data_p->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
             updateMetricField(HOLD_THREAD_TIMEOUT, 1);
@@ -585,7 +591,7 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
             session_data_p->session_id
         );
 
-        if (session_data_p->verdict == TRAFFIC_VERDICT_WAIT) {
+        if (session_data_p->verdict == TRAFFIC_VERDICT_DELAYED) {
             if (!ngx_http_cp_hold_verdict(ctx)) {
                 session_data_p->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
                 updateMetricField(HOLD_THREAD_TIMEOUT, 1);
@@ -632,7 +638,7 @@ ngx_http_cp_hold_verdict_thread(void *_ctx)
         session_data_p->session_id,
         request,
         &ctx->modifications,
-        HOLD_DATA,
+        REQUEST_DELAYED_VERDICT,
         0
     );
 

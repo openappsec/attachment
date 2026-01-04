@@ -20,10 +20,15 @@
 #include <pthread.h>
 
 #include "ngx_cp_hooks.h"
+#ifdef NGINX_ASYNC_SUPPORTED
+#include "async/ngx_cp_async_core.h"
+#include "async/ngx_cp_async_headers.h"
+#include "async/ngx_cp_async_body.h"
+#endif
 #include "ngx_cp_utils.h"
 #include "ngx_cp_initializer.h"
 #include "ngx_http_cp_attachment_module.h"
-#include "nginx_attachment_common.h"
+#include "nano_attachment_common.h"
 
 extern ngx_uint_t current_config_version; ///< NGINX configuration version.
 
@@ -85,6 +90,15 @@ static ngx_int_t ngx_cp_attachment_init_worker(ngx_cycle_t *cycle);
 ///
 static void ngx_cp_attachment_fini_worker(ngx_cycle_t *cycle);
 
+///
+/// @brief Initialize global environment variable cache for async mode.
+/// @details Called once during module initialization to cache the CP_ASYNC_MODE environment variable.
+///
+static void ngx_cp_init_env_async_mode(void);
+
+// Global variable to cache environment variable check
+static ngx_int_t g_env_async_mode = 0; ///< Cached environment async mode setting
+
 ngx_http_output_header_filter_pt ngx_http_next_response_header_filter; ///< NGINX response header filter.
 ngx_http_request_body_filter_pt ngx_http_next_request_body_filter; ///< NGINX request body filter.
 ngx_http_output_body_filter_pt ngx_http_next_response_body_filter; ///< NGINX output body filter.
@@ -123,6 +137,16 @@ static ngx_command_t ngx_cp_attachment_commands[] = {
         offsetof(ngx_cp_attachment_conf_t, waf_tag),
         NULL
     },
+#ifdef NGINX_ASYNC_SUPPORTED
+    {
+        ngx_string("ngx_cp_async_mode"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_cp_attachment_conf_t, async_mode),
+        NULL
+    },
+#endif
     ngx_null_command
 };
 
@@ -213,6 +237,9 @@ ngx_cp_attachment_create_conf(ngx_conf_t *conf)
     module_conf->enable = NGX_CONF_UNSET;
     module_conf->num_of_workers = 0;
     module_conf->current_loc_config_version =  current_config_version;
+#ifdef NGINX_ASYNC_SUPPORTED
+    module_conf->async_mode = NGX_CONF_UNSET;
+#endif
     ngx_str_null(&module_conf->waf_tag);
     write_dbg(DBG_LEVEL_TRACE, "Successfully created attachment module configuration");
     return module_conf;
@@ -265,6 +292,37 @@ ngx_cp_set_module_loc_conf(ngx_http_request_t *request, ngx_flag_t new_state)
     write_dbg(DBG_LEVEL_INFO, "Configuration set to be %s", conf->enable ? "enabled" : "disabled");
 }
 
+ngx_int_t
+is_ngx_cp_async_mode_enabled_for_request(ngx_http_request_t *request)
+{
+#ifndef NGINX_ASYNC_SUPPORTED
+    // For nginx versions below 1.20, async mode is not supported
+    (void)request;
+    is_async_mode_enabled = 0;
+    return 0;
+#else
+    if (is_async_mode_enabled) {
+        return 1;
+    }
+
+    if (g_env_async_mode) {
+        is_async_mode_enabled = 1;
+        return 1;
+    }
+    
+    ngx_cp_attachment_conf_t *conf = ngx_http_get_module_loc_conf(request, ngx_http_cp_attachment_module);
+    if (conf != NULL && conf->async_mode != NGX_CONF_UNSET) {
+        if (conf->async_mode) {
+            is_async_mode_enabled = 1;
+            return 1;
+        }
+    }
+
+    is_async_mode_enabled = 0;
+    return 0;
+#endif
+}
+
 static char *
 ngx_cp_attachment_merge_conf(ngx_conf_t *configure, void *curr, void *next)
 {
@@ -274,6 +332,9 @@ ngx_cp_attachment_merge_conf(ngx_conf_t *configure, void *curr, void *next)
 
     ngx_conf_merge_value(conf->enable, prev->enable, NGX_CONF_UNSET);
     ngx_conf_merge_value(conf->num_of_workers, prev->num_of_workers, ngx_ncpu);
+#ifdef NGINX_ASYNC_SUPPORTED
+    ngx_conf_merge_value(conf->async_mode, prev->async_mode, 0);
+#endif
     ngx_conf_merge_str_value(conf->waf_tag, prev->waf_tag, "");
 
     write_dbg(DBG_LEVEL_TRACE, "Successfully set attachment module configuration in nginx configuration chain");
@@ -460,7 +521,20 @@ ngx_cp_attachment_init_worker(ngx_cycle_t *cycle)
             timer_interval_msec
         );
 
+        ngx_cp_init_env_async_mode();
         init_attachment_registration_thread();
+        
+#ifdef NGINX_ASYNC_SUPPORTED
+        if (g_env_async_mode || is_async_mode_enabled) {
+            if (ngx_cp_async_init() != NGX_OK) {
+                write_dbg(DBG_LEVEL_WARNING, "Failed to initialize async connection management");
+            }
+        } else {
+            write_dbg(DBG_LEVEL_INFO, "Async mode disabled, skipping async connection management initialization");
+        }
+#else
+        write_dbg(DBG_LEVEL_INFO, "Nginx version does not support async mode");
+#endif
     }
     return NGX_OK;
 }
@@ -476,6 +550,11 @@ ngx_cp_attachment_fini_worker(ngx_cycle_t *cycle)
 
     reset_attachment_registration();
 
+#ifdef NGINX_ASYNC_SUPPORTED
+    // Cleanup async connection management
+    ngx_cp_async_cleanup();
+#endif
+
     (void)cycle;
     if (is_timer_active) ngx_del_timer(&ngx_keep_alive_event);
     write_dbg(DBG_LEVEL_INFO, "Timer successfully deleted");
@@ -488,6 +567,7 @@ ngx_cp_attachment_init(ngx_conf_t *conf)
     ngx_http_handler_pt *handler;
     ngx_http_handler_pt *size_metrics_handler;
     ngx_http_core_main_conf_t *http_core_main_conf;
+    
     write_dbg(DBG_LEVEL_TRACE, "Setting the memory pool used in the current context");
     if (conf->pool == NULL) {
         write_dbg(
@@ -510,13 +590,16 @@ ngx_cp_attachment_init(ngx_conf_t *conf)
         write_dbg(DBG_LEVEL_WARNING, "Failed to set HTTP request headers' handler");
         return NGX_ERROR;
     }
+
+    // Set handler based on async mode configuration
+    write_dbg(DBG_LEVEL_DEBUG, "Setting unified handlers with dynamic async mode support");
     *handler = ngx_http_cp_req_header_handler;
+    
+    ngx_http_next_request_body_filter = ngx_http_top_request_body_filter;
+    ngx_http_top_request_body_filter = ngx_http_cp_req_body_filter;
 
     ngx_http_next_response_header_filter = ngx_http_top_header_filter;
     ngx_http_top_header_filter = ngx_http_cp_res_header_filter;
-
-    ngx_http_next_request_body_filter = ngx_http_top_request_body_filter;
-    ngx_http_top_request_body_filter = ngx_http_cp_req_body_filter;
 
     ngx_http_next_response_body_filter = ngx_http_top_body_filter;
     ngx_http_top_body_filter = ngx_http_cp_res_body_filter;
@@ -532,4 +615,26 @@ ngx_cp_attachment_init(ngx_conf_t *conf)
     write_dbg(DBG_LEVEL_TRACE, "Successfully set attachment module's hooks");
 
     return NGX_OK;
+}
+
+///
+/// @brief Initialize global environment variable cache for async mode.
+/// @details Called once during module initialization to cache the CP_ASYNC_MODE environment variable.
+///
+static void
+ngx_cp_init_env_async_mode(void)
+{
+#ifdef NGINX_ASYNC_SUPPORTED
+    char *env_async_mode = getenv("CP_ASYNC_MODE");
+    if (env_async_mode != NULL) {
+        if (strcmp(env_async_mode, "true") == 0 || strcmp(env_async_mode, "1") == 0) {
+            g_env_async_mode = 1;
+        } else {
+            g_env_async_mode = 0;
+        }
+    }
+#else
+    // For nginx versions below 1.20, async mode is not supported
+    g_env_async_mode = 0;
+#endif
 }

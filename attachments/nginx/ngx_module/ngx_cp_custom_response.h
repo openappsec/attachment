@@ -20,13 +20,13 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
-#include "nginx_attachment_common.h"
+#include "nano_attachment_common.h"
 
 /// @struct ngx_http_cp_modification_list
 /// @brief A node that holds all the information regarding modifications.
 typedef struct ngx_http_cp_modification_list {
     struct ngx_http_cp_modification_list *next; ///< Next node.
-    ngx_http_cp_inject_data_t modification; ///< Modification data.
+    HttpInjectData modification; ///< Modification data.
     char *modification_buffer; ///< Modification buffer used to store extra needed data.
 } ngx_http_cp_modification_list;
 
@@ -82,6 +82,14 @@ ngx_http_cp_file_response_sender(
 ///      - #NGX_ERROR
 ///
 ngx_int_t ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request, int is_response_phase);
+
+///
+/// @brief Finalizing a Custom Response request with JSON success response.
+/// @param[in, out] request NGINX request.
+/// @return ngx_int_t
+///      - #NGX_HTTP_CLOSE
+///
+ngx_int_t ngx_http_cp_finalize_custom_response_request(ngx_http_request_t *request);
 
 ///
 /// @brief Modifies headers with the provided modifiers.

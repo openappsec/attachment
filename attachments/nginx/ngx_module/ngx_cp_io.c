@@ -22,6 +22,8 @@
 #include <stdbool.h>
 #include <arpa/inet.h>
 #include <limits.h>
+#include <errno.h>
+#include <string.h>
 
 #include "ngx_cp_utils.h"
 #include "ngx_cp_initializer.h"
@@ -91,7 +93,7 @@ ngx_http_cp_signal_to_service(uint32_t cur_session_id)
 ///         - #NGX_AGAIN
 ///
 static ngx_int_t
-ngx_http_cp_wait_for_service(uint32_t cur_session_id, ngx_http_chunk_type_e chunk_type, ngx_int_t tout_retries)
+ngx_http_cp_wait_for_service(uint32_t cur_session_id, AttachmentDataType chunk_type, ngx_int_t tout_retries)
 {
     static int dbg_count = 0;
     static clock_t clock_start = (clock_t) 0;
@@ -100,7 +102,7 @@ ngx_http_cp_wait_for_service(uint32_t cur_session_id, ngx_http_chunk_type_e chun
     uint32_t reply_from_service;
     ngx_int_t retry;
     int is_fail_open_disabled = (inspection_mode != NON_BLOCKING_THREAD);
-    ngx_uint_t timeout = chunk_type == HOLD_DATA ? fail_open_hold_timeout : fail_open_timeout;
+    ngx_uint_t timeout = chunk_type == REQUEST_DELAYED_VERDICT ? fail_open_hold_timeout : fail_open_timeout;
 
     res = ngx_http_cp_signal_to_service(cur_session_id);
     if (res != NGX_OK) return res;
@@ -197,7 +199,7 @@ ngx_http_cp_send_data_to_service(
     uint8_t num_of_data_elem,
     uint32_t cur_session_id,
     int *was_waiting,
-    ngx_http_chunk_type_e chunk_type,
+    AttachmentDataType chunk_type,
     ngx_int_t tout_retries
 )
 {
@@ -245,11 +247,11 @@ ngx_http_cp_send_data_to_service(
 
 ///
 /// @brief Receieves data from service.
-/// @returns ngx_http_cp_reply_from_service_t
-///         - #A valid ngx_http_cp_reply_from_service_t pointer if valid.
+/// @returns HttpReplyFromService
+///         - #A valid HttpReplyFromService pointer if valid.
 ///         - #NULL if failed.
 ///
-static ngx_http_cp_reply_from_service_t *
+static HttpReplyFromService *
 ngx_http_cp_receive_data_from_service()
 {
     ngx_int_t res, retry;
@@ -275,7 +277,7 @@ ngx_http_cp_receive_data_from_service()
             continue;
         }
 
-        return (ngx_http_cp_reply_from_service_t *)reply_data;
+        return (HttpReplyFromService *)reply_data;
     }
     return NULL;
 }
@@ -286,7 +288,31 @@ ngx_http_cp_receive_data_from_service()
 static void
 free_data_from_service()
 {
-    popData(nano_service_ipc);
+    if (nano_service_ipc && isDataAvailable(nano_service_ipc)) {
+        write_dbg(DBG_LEVEL_TRACE, "Freeing data from nano service");
+        popData(nano_service_ipc);
+    }
+}
+
+///
+/// @brief Create a custom JSON response by the provided data
+/// @param[in] json_response_data JSON response data.
+/// @returns ngx_int_t
+///         - #NGX_OK
+///
+ngx_int_t
+handle_custom_json_response(HttpJsonResponseData *json_response_data)
+{
+    ngx_str_t json_body;
+
+    write_dbg(DBG_LEVEL_TRACE, "Preparing to set custom JSON response");
+
+    json_body.len = json_response_data->body_size;
+    json_body.data = (u_char *)json_response_data->body;
+
+    set_custom_response_json(&json_body, json_response_data->response_code, json_response_data->content_type);
+
+    return NGX_OK;
 }
 
 ///
@@ -294,8 +320,8 @@ free_data_from_service()
 /// @details If web_response_type is set to REDIRECT_WEB_RESPONSE, it will set a redirect response.
 /// @param[in] web_response_data Web response data.
 ///
-static void
-handle_custom_web_response(ngx_http_cp_web_response_data_t *web_response_data)
+void
+handle_custom_web_response(HttpWebResponseData *web_response_data)
 {
     ngx_str_t title;
     ngx_str_t body;
@@ -304,7 +330,7 @@ handle_custom_web_response(ngx_http_cp_web_response_data_t *web_response_data)
 
     uuid.len = web_response_data->uuid_size;
 
-    if (web_response_data->web_repsonse_type == REDIRECT_WEB_RESPONSE) {
+    if (web_response_data->web_response_type == REDIRECT_WEB_RESPONSE) {
         // Settings a redirected web response.
         write_dbg(DBG_LEVEL_TRACE, "Preparing to set redirect web response");
         redirect_location.len = web_response_data->response_data.redirect_data.redirect_location_size;
@@ -328,7 +354,7 @@ handle_custom_web_response(ngx_http_cp_web_response_data_t *web_response_data)
         body.data = (u_char *)web_response_data->response_data.custom_response_data.data + title.len;
     }
     uuid.data = (u_char *)web_response_data->response_data.custom_response_data.data + title.len + body.len;
-    set_custom_response(&title, &body, &uuid, web_response_data->response_data.custom_response_data.response_code);
+    set_custom_response_block_page(&title, &body, &uuid, web_response_data->response_data.custom_response_data.response_code);
 }
 
 ///
@@ -364,8 +390,8 @@ create_modification_buffer(char **target, uint16_t data_size, char *data, ngx_po
 ///         - #ngx_http_cp_modification_list pointer on success.
 ///         - #NULL if the creation failed.
 ///
-static ngx_http_cp_modification_list *
-create_modification_node(ngx_http_cp_inject_data_t *modification, ngx_http_request_t *request)
+ngx_http_cp_modification_list *
+create_modification_node(HttpInjectData *modification, ngx_http_request_t *request)
 {
     ngx_int_t res;
     ngx_http_cp_modification_list *modification_node = (ngx_http_cp_modification_list *)ngx_pcalloc(
@@ -423,7 +449,7 @@ create_modification_node(ngx_http_cp_inject_data_t *modification, ngx_http_reque
 ngx_int_t
 ngx_http_cp_is_reconf_needed()
 {
-    ngx_http_cp_reply_from_service_t *reply_p;
+    HttpReplyFromService *reply_p;
     ngx_int_t res;
     const char *reply_data;
     uint16_t reply_size;
@@ -439,7 +465,7 @@ ngx_http_cp_is_reconf_needed()
         return NGX_ERROR;
     }
 
-    reply_p = (ngx_http_cp_reply_from_service_t *)reply_data;
+    reply_p = (HttpReplyFromService *)reply_data;
     if (reply_p->verdict == TRAFFIC_VERDICT_RECONF) {
         write_dbg(DBG_LEVEL_DEBUG, "Verdict reconf was received from the nano service. Performing reconf on the nginx worker attachment");
         reset_attachment_config();
@@ -452,19 +478,19 @@ ngx_http_cp_is_reconf_needed()
 ngx_int_t
 ngx_http_cp_reply_receiver(
     ngx_int_t *expected_replies,
-    ngx_http_cp_verdict_e *verdict,
+    ServiceVerdict *verdict,
     ngx_int_t *inspect_all_response_headers,
     uint32_t cur_session_id,
     ngx_http_request_t *request,
     ngx_http_cp_modification_list **modification_list,
-    ngx_http_chunk_type_e chunk_type,
+    AttachmentDataType chunk_type,
     uint64_t processed_body_size
 )
 {
-    ngx_http_cp_reply_from_service_t *reply_p;
+    HttpReplyFromService *reply_p;
     ngx_http_cp_modification_list *new_modification = NULL;
     ngx_http_cp_modification_list *current_modification = NULL;
-    ngx_http_cp_inject_data_t *current_inject_data = NULL;
+    HttpInjectData *current_inject_data = NULL;
     ngx_int_t res;
     ngx_int_t tout_retries = min_retries_for_verdict;
     uint8_t modification_count;
@@ -537,9 +563,9 @@ ngx_http_cp_reply_receiver(
                         current_modification = current_modification->next;
                     }
                     // Saving injected data.
-                    current_inject_data = (ngx_http_cp_inject_data_t *)(
+                    current_inject_data = (HttpInjectData *)(
                             (char *)current_inject_data +
-                            sizeof(ngx_http_cp_inject_data_t) +
+                            sizeof(HttpInjectData) +
                             current_inject_data->injection_size
                     );
                 }
@@ -596,7 +622,7 @@ ngx_http_cp_reply_receiver(
                 break;
             }
 
-            case TRAFFIC_VERDICT_WAIT: {
+            case TRAFFIC_VERDICT_DELAYED: {
                 // After a wait verdict, query the nano agent again to get an updated verdict.
                 write_dbg(DBG_LEVEL_DEBUG, "Verdict wait received from the nano service");
                 updateMetricField(HOLD_VERDICTS_COUNT, 1);
@@ -607,6 +633,23 @@ ngx_http_cp_reply_receiver(
                 write_dbg(DBG_LEVEL_DEBUG, "Verdict ignore response headers received from the nano service");
                 *inspect_all_response_headers = 0;
                 break;
+            }
+
+            case TRAFFIC_VERDICT_CUSTOM_RESPONSE: {
+                // Custom Response verdict received from the nano service.
+                write_dbg(DBG_LEVEL_INFO, "Verdict Custom Response received from the nano service");
+
+                handle_custom_json_response(reply_p->modify_data->json_response_data);
+
+                *expected_replies = 0;
+                free_data_from_service();
+                while (*modification_list) {
+                    current_modification = *modification_list;
+                    *modification_list = (*modification_list)->next;
+                    ngx_pfree(request->pool, current_modification->modification.data);
+                    ngx_pfree(request->pool, current_modification);
+                }
+                return NGX_OK;
             }
         }
 
@@ -625,7 +668,7 @@ ngx_http_cp_reply_receiver(
 /// @param[in] size Size to be set into the meta_data_sizes array.
 /// @param[in] idx Index of the arrays to set the data and size into.
 ///
-static void
+void
 set_fragment_elem(char **meta_data_elems, uint16_t *meta_data_sizes, void *data, uint16_t size, uint idx)
 {
     meta_data_elems[idx] = data;
@@ -640,7 +683,7 @@ set_fragment_elem(char **meta_data_elems, uint16_t *meta_data_sizes, void *data,
 /// @param[in] data_type Data type identifier to be set.
 /// @param[in] cur_request_id Request's Id.
 ///
-static void
+void
 set_fragments_identifiers(
     char **meta_data_elems,
     uint16_t *meta_data_sizes,
@@ -656,7 +699,7 @@ set_fragments_identifiers(
 /// @param[in, out] sockaddr Socker to convert.
 /// @param[in, out] ip_addr Output location of the conversion.
 ///
-static void
+void
 convert_sock_addr_to_string(const struct sockaddr *sa, char *ip_addr)
 {
     void *ip = NULL;
@@ -834,7 +877,7 @@ ngx_http_cp_meta_data_sender(ngx_http_request_t *request, uint32_t cur_request_i
 
 ngx_int_t
 ngx_http_cp_end_transaction_sender(
-    ngx_http_chunk_type_e end_transaction_type,
+    AttachmentDataType end_transaction_type,
     uint32_t cur_request_id,
     ngx_uint_t *num_messages_sent
 )
@@ -869,7 +912,7 @@ ngx_http_cp_wait_sender(uint32_t cur_request_id, ngx_uint_t *num_messages_sent)
 
     char *fragments[end_transaction_num_fragments];
     uint16_t fragments_sizes[end_transaction_num_fragments];
-    ngx_http_chunk_type_e transaction_type = HOLD_DATA;
+    AttachmentDataType transaction_type = REQUEST_DELAYED_VERDICT;
     ngx_int_t res;
 
     set_fragments_identifiers(fragments, fragments_sizes, (uint16_t *)&transaction_type, &cur_request_id);
@@ -940,7 +983,7 @@ ngx_http_cp_content_length_sender(uint64_t content_length_n, uint32_t cur_req_id
 /// @param[in] header Header to add to the fragment array.
 /// @param[in] index Index of the arrays to set the header into.
 ///
-static inline void
+void
 add_header_to_bulk(char **fragments, uint16_t *fragments_sizes, ngx_table_elt_t *header, ngx_uint_t index)
 {
     ngx_uint_t pos = index * HEADER_DATA_COUNT;
@@ -1024,7 +1067,7 @@ send_empty_header_list(
 ngx_int_t
 ngx_http_cp_header_sender(
     ngx_list_part_t *headers_list,
-    ngx_http_chunk_type_e header_type,
+    AttachmentDataType header_type,
     uint32_t cur_request_id,
     ngx_uint_t *num_messages_sent
 )
@@ -1111,8 +1154,9 @@ ngx_http_cp_header_sender(
 ngx_int_t
 ngx_http_cp_body_sender(
     ngx_chain_t *input,
-    ngx_http_chunk_type_e body_type,
+    AttachmentDataType body_type,
     ngx_http_cp_session_data *session_data,
+    ngx_int_t *part_number,
     ngx_int_t *is_last_part,
     ngx_uint_t *num_messages_sent,
     ngx_chain_t **next_elem_to_inspect
@@ -1147,7 +1191,7 @@ ngx_http_cp_body_sender(
     set_fragments_identifiers(fragments, fragments_sizes, (uint16_t *)&body_type, &session_data->session_id);
 
     num_parts_sent = 0;
-    part_count = 0;
+    part_count = (body_type == RESPONSE_BODY) ? *part_number : 0;
     
     for (chain_iter = input; chain_iter && chunks_processed < max_chunks_to_process; chain_iter = chain_iter->next) {
         // For each NGINX buffer, fragment the buffer and then send the fragments to the nano service.
@@ -1235,14 +1279,13 @@ ngx_http_cp_metric_data_sender()
     write_dbg(DBG_LEVEL_DEBUG, "Sending metric data to service");
 
     fragment_type = METRIC_DATA_FROM_PLUGIN;
-    ngx_http_cp_metric_data_t data_to_send;
+    NanoHttpMetricData data_to_send;
     data_to_send.data_type = fragment_type;
     memcpy(data_to_send.data, metric_data, METRIC_TYPES_COUNT * sizeof(data_to_send.data[0]));
     fragments = (char *)&data_to_send;
-    fragments_sizes = sizeof(ngx_http_cp_metric_data_t);
+    fragments_sizes = sizeof(NanoHttpMetricData);
 
     res = ngx_http_cp_send_data_to_service(&fragments, &fragments_sizes, 1, 0, NULL, fail_open_timeout, min_retries_for_verdict);
     reset_metric_data();
     return res;
 }
-
