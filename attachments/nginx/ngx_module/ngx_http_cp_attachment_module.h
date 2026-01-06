@@ -32,6 +32,7 @@ typedef struct {
     ngx_int_t num_of_workers; ///< Number of workers.
     ngx_uint_t current_loc_config_version; ///< NGINX configuration version.
     ngx_str_t waf_tag; ///< WAF tag value for the location block.
+    ngx_flag_t async_mode; ///< Flags if async mode is enabled (default: true).
 } ngx_cp_attachment_conf_t;
 
 ///
@@ -62,5 +63,12 @@ ngx_uint_t get_num_of_workers(ngx_http_request_t *request);
 /// @param[in] new_state NGINX flag to set.
 ///
 void ngx_cp_set_module_loc_conf(ngx_http_request_t *request, ngx_flag_t new_state);
+
+///
+/// @brief Check if async mode is enabled for a specific request.
+/// @param[in] request NGINX request.
+/// @returns ngx_int_t 1 if async mode is enabled, 0 if disabled.
+///
+ngx_int_t is_ngx_cp_async_mode_enabled_for_request(ngx_http_request_t *request);
 
 #endif // __NGX_HTTP_CP_ATTACHMENT_MODULE_H__

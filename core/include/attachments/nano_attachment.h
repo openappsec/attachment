@@ -225,35 +225,35 @@ void FreeAttachmentResponseContent(
 );
 
 ///
-/// @brief Compresses HttpBody and return allocated compressed body.
+/// @brief Compresses NanoHttpBody and return allocated compressed body.
 ///
 /// @param attachment The NanoAttachment object associated with the session.
 /// @param session_data The HttpSessionData object representing the session.
 /// @param bodies The bodies pointer to be compressed.
 ///
-HttpBody * compressBody(
+NanoHttpBody * compressBody(
     NanoAttachment *attachment,
     HttpSessionData *session_data,
-    HttpBody *bodies
+    NanoHttpBody *bodies
 );
 
 ///
-/// @brief Compresses HttpBody and return allocated compressed body.
+/// @brief Compresses NanoHttpBody and return allocated compressed body.
 ///
 /// @param attachment The NanoAttachment object associated with the session.
 /// @param session_data The HttpSessionData object representing the session.
 /// @param bodies The bodies pointer to be decompressed.
 ///
-HttpBody * decompressBody(
+NanoHttpBody * decompressBody(
     NanoAttachment *attachment,
     HttpSessionData *session_data,
-    HttpBody *bodies
+    NanoHttpBody *bodies
 );
 
 ///
 /// @brief Free allocated compressed body.
 ///
-/// This function frees the allocated resources of HttpBody object.
+/// This function frees the allocated resources of NanoHttpBody object.
 ///
 /// @param attachment The NanoAttachment object associated with the session.
 /// @param session_data The HttpSessionData object representing the session.
@@ -263,31 +263,7 @@ void
 freeCompressedBody(
     NanoAttachment *attachment,
     HttpSessionData *session_data,
-    HttpBody *bodies
+    NanoHttpBody *bodies
 );
-
-///
-/// @brief Gets the request processing timeout in milliseconds.
-///
-/// This function retrieves the configured timeout value for request processing
-/// from the NanoAttachment configuration.
-///
-/// @param attachment A pointer to the NanoAttachment structure.
-///
-/// @return The request processing timeout in milliseconds.
-///
-uint32_t GetRequestProcessingTimeout(NanoAttachment *attachment);
-
-///
-/// @brief Gets the response processing timeout in milliseconds.
-///
-/// This function retrieves the configured timeout value for response processing
-/// from the NanoAttachment configuration.
-///
-/// @param attachment A pointer to the NanoAttachment structure.
-///
-/// @return The response processing timeout in milliseconds.
-///
-uint32_t GetResponseProcessingTimeout(NanoAttachment *attachment);
 
 #endif // __NANO_ATTACHMENT_H__

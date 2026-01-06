@@ -1560,7 +1560,7 @@ nano_header_sender(
 void
 nano_body_sender(
     NanoAttachment *attachment,
-    HttpBody *bodies,
+    NanoHttpBody *bodies,
     HttpEventThreadCtx *ctx,
     AttachmentDataType body_type,
     uint32_t cur_request_id,

@@ -28,8 +28,13 @@
 
 #include "nginx_attachment_util.h"
 #include "ngx_cp_initializer.h"
-#include "nginx_attachment_common.h"
+#include "nano_attachment_common.h"
 #include "ngx_cp_metric.h"
+#ifdef NGINX_ASYNC_SUPPORTED
+#include "async/ngx_cp_async_core.h"
+#endif
+
+extern void disconnect_communication(void);
 
 #define USERCHECK_TITLE_START "<!-- CHECK_POINT_USERCHECK_TITLE_PLACEHOLDER-->"
 #define USERCHECK_BODY_START "<!-- CHECK_POINT_USERCHECK_BODY_PLACEHOLDER-->"
@@ -73,6 +78,9 @@ static uint32_t cur_session_id = 0; ///< Current session ID.
 
 static uint pid = 0;
 
+static uint is_async_mode_toggled_on_in_last_reconfig = 0;
+static uint is_async_mode_toggled_off_in_last_reconfig = 0;
+
 ngx_http_cp_sessions_per_minute_limit sessions_per_minute_limit_info = {
     .sessions_per_second = {0},
     .last_minute_sessions_sum = 0,
@@ -87,7 +95,7 @@ ngx_int_t dbg_is_needed = 0; ///< Debug flag.
 ngx_int_t num_of_connection_attempts = 0; ///< Maximum number of attempted connections.
 ngx_uint_t fail_open_timeout = 50; ///< Fail open timeout in milliseconds.
 ngx_uint_t fail_open_hold_timeout = 150; ///< Fail open wait timeout in milliseconds.
-ngx_http_cp_verdict_e sessions_per_minute_limit_verdict = TRAFFIC_VERDICT_ACCEPT;
+ServiceVerdict sessions_per_minute_limit_verdict = TRAFFIC_VERDICT_ACCEPT;
 ngx_uint_t max_sessions_per_minute = 0; ///< Masimum session per minute.
 ngx_uint_t req_max_proccessing_ms_time = 3000; ///< Total Request processing timeout in milliseconds.
 ngx_uint_t res_max_proccessing_ms_time = 3000; ///< Total Response processing timeout in milliseconds.
@@ -97,8 +105,8 @@ ngx_uint_t req_body_thread_timeout_msec = 150; ///< Request body processing time
 ngx_uint_t res_header_thread_timeout_msec = 100; ///< Response header processing timeout in milliseconds.
 ngx_uint_t res_body_thread_timeout_msec = 150; ///< Response body processing timeout in milliseconds.
 ngx_uint_t waiting_for_verdict_thread_timeout_msec = 150; ///< Wait thread processing timeout in milliseconds.
-ngx_http_inspection_mode_e inspection_mode = NON_BLOCKING_THREAD; ///< Default inspection mode.
-ngx_uint_t num_of_nginx_ipc_elements = 200; ///< Number of NGINX IPC elements.
+NanoHttpInspectionMode inspection_mode = NON_BLOCKING_THREAD; ///< Default inspection mode.
+ngx_uint_t num_of_nginx_ipc_elements = 2048; ///< Number of NGINX IPC elements.
 ngx_msec_t keep_alive_interval_msec = DEFAULT_KEEP_ALIVE_INTERVAL_MSEC;
 ngx_uint_t min_retries_for_verdict = 3; ///< Minimum number of retries for verdict.
 ngx_uint_t max_retries_for_verdict = 15; ///< Maximum number of retries for verdict.
@@ -106,6 +114,16 @@ ngx_uint_t hold_verdict_retries = 3; ///< Number of retries for hold verdict.
 ngx_uint_t hold_verdict_polling_time = 1; ///< Polling time for hold verdict.
 ngx_uint_t body_size_trigger = 200000; ///< Request body size in bytes to switch to maximum retries for verdict.
 ngx_uint_t remove_res_server_header = 0; ///< Remove server header flag.
+ngx_uint_t paired_affinity_enabled = 0; ///< Paired affinity enabled flag.
+ngx_uint_t decompression_pool_size = 262144; ///< Decompression pool size in bytes (256KB for high compression rates).
+ngx_uint_t recompression_pool_size = 16384; ///< Recompression pool size in bytes.
+ngx_uint_t is_async_mode_enabled = 0; ///< Async mode enabled flag.
+ngx_uint_t is_brotli_inspection_enabled = 0; ///< Brotli inspection enabled flag.
+
+// JSON response support
+static ngx_str_t json_response_body = {0, NULL};
+static ngx_uint_t json_response_code = NGX_HTTP_FORBIDDEN;
+static AttachmentContentType json_response_content_type = CONTENT_TYPE_APPLICATION_JSON;
 
 static struct timeval
 getCurrTimeFast()
@@ -521,7 +539,7 @@ get_timeout_val_msec(const int delta_time_in_msec)
 }
 
 void
-set_custom_response(const ngx_str_t *title, const ngx_str_t *body, const ngx_str_t *uuid, ngx_uint_t response_code)
+set_custom_response_block_page(const ngx_str_t *title, const ngx_str_t *body, const ngx_str_t *uuid, ngx_uint_t response_code)
 {
     write_dbg(
         DBG_LEVEL_TRACE,
@@ -539,6 +557,9 @@ set_custom_response(const ngx_str_t *title, const ngx_str_t *body, const ngx_str
     web_response_body_size = body->len;
     web_response_uuid_size = uuid->len;
 
+    memcpy(web_response_uuid, uuid->data, web_response_uuid_size);
+    web_response_uuid[web_response_uuid_size] = 0;
+
     if (web_response_title_size == 0 || web_response_body_size == 0) return;
     // Copies the provided variables into their respective response variables.
     memcpy(web_response_title, title->data, web_response_title_size);
@@ -546,8 +567,6 @@ set_custom_response(const ngx_str_t *title, const ngx_str_t *body, const ngx_str
     if (web_response_uuid_size >= sizeof(web_response_uuid)) {
         web_response_uuid_size = sizeof(web_response_uuid) - 1;
     }
-    memcpy(web_response_uuid, uuid->data, web_response_uuid_size);
-    web_response_uuid[web_response_uuid_size] = 0;
 }
 
 void
@@ -601,7 +620,7 @@ set_response_page_chain_elem(ngx_buf_t **part, ngx_str_t *content, ngx_chain_t *
 }
 
 ngx_int_t
-get_response_page(ngx_http_request_t *request, ngx_chain_t (*out_chain)[7])
+get_block_page_response(ngx_http_request_t *request, ngx_chain_t (*out_chain)[7])
 {
     ngx_int_t idx;
     ngx_chain_t *tmp_next;
@@ -651,7 +670,7 @@ get_response_page(ngx_http_request_t *request, ngx_chain_t (*out_chain)[7])
 }
 
 ngx_uint_t
-get_response_page_length(void)
+get_response_page_length_web_page(void)
 {
     ngx_uint_t idx;
     ngx_uint_t total_length = 0;
@@ -673,6 +692,79 @@ ngx_uint_t
 get_response_code(void)
 {
     return web_triggers_response_code;
+}
+
+void
+set_custom_response_json(const ngx_str_t *body, ngx_uint_t response_code, AttachmentContentType content_type)
+{
+    write_dbg(
+        DBG_LEVEL_INFO,
+        "Setting JSON response: response_code = %d, body size = %d, uuid size = %d",
+        response_code,
+        body->len
+    );
+    
+    json_response_code = response_code;
+    json_response_content_type = content_type;
+    
+    if (json_response_body.data && memory_pool) {
+        ngx_pfree(memory_pool, json_response_body.data);
+        json_response_body.data = NULL;
+        json_response_body.len = 0;
+    }
+    
+    if (memory_pool && body->len > 0) {
+        json_response_body.len = body->len;
+        json_response_body.data = ngx_pcalloc(memory_pool, body->len + 1);
+        if (json_response_body.data) {
+            ngx_memcpy(json_response_body.data, body->data, body->len);
+            json_response_body.data[body->len] = 0;
+        }
+    }
+}
+
+ngx_int_t
+get_response_page_json(ngx_http_request_t *request, ngx_chain_t (*out_chain)[1])
+{
+    ngx_buf_t *buf = ngx_calloc_buf(request->pool);
+    if (buf == NULL) {
+        write_dbg(DBG_LEVEL_WARNING, "Failed to allocate new buffer element for JSON response");
+        return NGX_ERROR_ERR;
+    }
+    
+    if (json_response_body.data == NULL || json_response_body.len == 0) {
+        write_dbg(DBG_LEVEL_INFO, "JSON response body is empty or not set");
+        return NGX_ERROR_ERR;
+    }
+    
+    buf->pos = json_response_body.data;
+    buf->last = buf->pos + json_response_body.len;
+    buf->memory = 1;
+    buf->last_buf = 1;
+    buf->last_in_chain = 1;
+    
+    (*out_chain)[0].buf = buf;
+    (*out_chain)[0].next = NULL;
+    
+    return NGX_OK;
+}
+
+ngx_uint_t
+get_response_page_length_json(void)
+{
+    return json_response_body.len;
+}
+
+ngx_uint_t
+get_response_code_json(void)
+{
+    return json_response_code;
+}
+
+AttachmentContentType
+get_response_content_type(void)
+{
+    return json_response_content_type;
 }
 
 const char *
@@ -718,7 +810,7 @@ get_number_of_digits(int num)
     return num_of_digits;
 }
 
-ngx_http_cp_verdict_e
+ServiceVerdict
 get_sessions_per_minute_limit_verdict()
 {
     return sessions_per_minute_limit_verdict;
@@ -914,6 +1006,31 @@ reset_dbg_ctx()
     is_ctx_match = 1;
 }
 
+void
+reset_async_mode_toggled()
+{
+    is_async_mode_toggled_on_in_last_reconfig = 0;
+    is_async_mode_toggled_off_in_last_reconfig = 0;
+}
+
+ngx_int_t
+is_async_toggled_on_in_last_reconfig()       
+{
+    return is_async_mode_toggled_on_in_last_reconfig;
+}
+
+ngx_int_t
+is_async_toggled_off_in_last_reconfig()
+{
+    return is_async_mode_toggled_off_in_last_reconfig;
+}
+
+ngx_int_t
+is_async_toggled_in_last_reconfig()
+{
+    return is_async_toggled_off_in_last_reconfig() || is_async_toggled_on_in_last_reconfig();
+}
+
 ngx_int_t
 init_general_config(const char *conf_path)
 {
@@ -973,9 +1090,30 @@ init_general_config(const char *conf_path)
     max_retries_for_verdict = getMaxRetriesForVerdict();
     body_size_trigger = getReqBodySizeTrigger();
     remove_res_server_header = getRemoveResServerHeader();
+    decompression_pool_size = getDecompressionPoolSize();
+    recompression_pool_size = getRecompressionPoolSize();
+    is_brotli_inspection_enabled = getIsBrotliInspectionEnabled();
 
     num_of_nginx_ipc_elements = getNumOfNginxIpcElements();
     keep_alive_interval_msec = (ngx_msec_t) getKeepAliveIntervalMsec();
+    paired_affinity_enabled = isPairedAffinityEnabled();
+
+#ifdef NGINX_ASYNC_SUPPORTED
+    ngx_uint_t current_async_mode_enabled = is_async_mode_enabled;
+    is_async_mode_enabled = isAsyncModeEnabled();
+
+    if (is_async_mode_enabled && (is_async_mode_enabled != current_async_mode_enabled)) {
+        write_dbg(DBG_LEVEL_INFO, "Enabling async mode");
+        is_async_mode_toggled_on_in_last_reconfig = 1;
+        is_async_mode_toggled_off_in_last_reconfig = 0;
+    }
+
+    if (!is_async_mode_enabled && (is_async_mode_enabled != current_async_mode_enabled)) {
+        write_dbg(DBG_LEVEL_INFO, "Disabling async mode");
+        is_async_mode_toggled_off_in_last_reconfig = 1;
+        is_async_mode_toggled_on_in_last_reconfig = 0;
+    }
+#endif    
 
     set_static_resources_path(getStaticResourcesPath());
     is_configuration_updated = NGX_OK;
@@ -1001,12 +1139,15 @@ init_general_config(const char *conf_path)
         "wait thread timeout: %u msec, "
         "static resources path: %s, "
         "num of nginx ipc elements: %u, "
-        "keep alive interval msec: %u msec"
-        "min retries for verdict: %u"
-        "max retries for verdict: %u"
-        "num retries for hold verdict: %u"
-        "polling time for hold verdict: %u"
-        "body size trigger for request: %u",
+        "keep alive interval msec: %u msec, "
+        "min retries for verdict: %u, "
+        "max retries for verdict: %u, "
+        "num retries for hold verdict: %u, "
+        "polling time for hold verdict: %u, "
+        "body size trigger for request: %u, "
+        "decompression pool size: %u bytes, "
+        "recompression pool size: %u bytes, "
+        "async mode: %d",
         inspection_mode,
         new_dbg_level,
         (fail_mode_verdict == NGX_OK ? "fail-open" : "fail-close"),
@@ -1030,7 +1171,10 @@ init_general_config(const char *conf_path)
         max_retries_for_verdict,
         hold_verdict_retries,
         hold_verdict_polling_time,
-        body_size_trigger
+        body_size_trigger,
+        decompression_pool_size,
+        recompression_pool_size,
+        is_async_mode_enabled
     );
 
 
@@ -1224,10 +1368,23 @@ print_buffer_chain(ngx_chain_t *chain, char *msg, int num_bytes, int _dbg_level)
     for (ngx_chain_t *chain_elem = chain; chain_elem != NULL; chain_elem = chain_elem->next) {
         write_dbg(
             DBG_LEVEL_WARNING,
-            "%s chain elem: size: %d, is last buf: %d",
+            "%s chain elem: size=%d "
+            "[tmp:%d mem:%d mmap:%d in_file:%d "
+            "flush:%d sync:%d recycled:%d "
+            "last_buf:%d last_in_chain:%d last_shadow:%d temp_file:%d]",
             msg,
-            chain_elem->buf->last - chain_elem->buf->pos,
-            chain_elem->buf->last_buf
+            (int)(chain_elem->buf->last - chain_elem->buf->pos),
+            chain_elem->buf->temporary,
+            chain_elem->buf->memory,
+            chain_elem->buf->mmap,
+            chain_elem->buf->in_file,
+            chain_elem->buf->flush,
+            chain_elem->buf->sync,
+            chain_elem->buf->recycled,
+            chain_elem->buf->last_buf,
+            chain_elem->buf->last_in_chain,
+            chain_elem->buf->last_shadow,
+            chain_elem->buf->temp_file
         );
         print_buffer(chain_elem->buf, num_bytes, _dbg_level);
     }

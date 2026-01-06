@@ -20,7 +20,7 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
-#include "nginx_attachment_common.h"
+#include "nano_attachment_common.h"
 
 #define NOT_A_STATIC_RESOURCE NGX_DECLINED
 
@@ -55,7 +55,7 @@ ngx_int_t is_static_resources_table_initialized(void);
 ///
 ngx_int_t handle_static_resource_request(
     uint32_t session_id,
-    ngx_http_cp_verdict_e *verdict,
+    ServiceVerdict *verdict,
     ngx_http_request_t *request
 );
 

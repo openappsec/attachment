@@ -229,7 +229,7 @@ void *
 SendRequestBodyThread(void *_ctx)
 {
     HttpEventThreadCtx *ctx = (HttpEventThreadCtx *)_ctx;
-    HttpBody *bodies = (HttpBody*)ctx->data->data;
+    NanoHttpBody *bodies = (NanoHttpBody*)ctx->data->data;
     NanoAttachment *attachment = ctx->attachment;
     HttpSessionData *session_data_p = ctx->session_data_p;
 
@@ -249,7 +249,7 @@ void *
 SendResponseBodyThread(void *_ctx)
 {
     HttpEventThreadCtx *ctx = (HttpEventThreadCtx *)_ctx;
-    HttpBody *bodies = (HttpBody*)ctx->data->data;
+    NanoHttpBody *bodies = (NanoHttpBody*)ctx->data->data;
     NanoAttachment *attachment = ctx->attachment;
     HttpSessionData *session_data_p = ctx->session_data_p;
 

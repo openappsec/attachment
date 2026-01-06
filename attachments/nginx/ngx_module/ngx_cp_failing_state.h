@@ -19,7 +19,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 
-#include "nginx_attachment_common.h"
+#include "nano_attachment_common.h"
 #include "ngx_cp_hooks.h"
 
 ///

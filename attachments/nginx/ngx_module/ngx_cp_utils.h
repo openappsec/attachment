@@ -23,7 +23,7 @@
 #include <sys/time.h>
 #include <assert.h>
 
-#include "nginx_attachment_common.h"
+#include "nano_attachment_common.h"
 
 #ifndef __FILENAME__
 #define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
@@ -60,7 +60,7 @@ extern ngx_uint_t req_body_thread_timeout_msec;
 extern ngx_uint_t res_header_thread_timeout_msec;
 extern ngx_uint_t res_body_thread_timeout_msec;
 extern ngx_uint_t waiting_for_verdict_thread_timeout_msec;
-extern ngx_http_inspection_mode_e inspection_mode;
+extern NanoHttpInspectionMode inspection_mode;
 extern ngx_uint_t num_of_nginx_ipc_elements;
 extern ngx_uint_t min_retries_for_verdict;
 extern ngx_uint_t max_retries_for_verdict;
@@ -68,6 +68,11 @@ extern ngx_uint_t hold_verdict_retries;
 extern ngx_uint_t hold_verdict_polling_time;
 extern ngx_uint_t body_size_trigger;
 extern ngx_uint_t remove_res_server_header;
+extern ngx_uint_t paired_affinity_enabled;
+extern ngx_uint_t decompression_pool_size;
+extern ngx_uint_t recompression_pool_size;
+extern ngx_uint_t is_async_mode_enabled;
+extern ngx_uint_t is_brotli_inspection_enabled;
 
 ///
 /// @struct ngx_http_cp_list_iterator
@@ -232,13 +237,20 @@ const char *get_web_response_uuid(void);
 ngx_uint_t get_web_response_uuid_size(void);
 
 ///
-/// @brief Sets a custom response page by modifying web_response_title/body/uuid variables.
+/// @brief Sets a custom web page response by modifying web_response_title/body/uuid variables.
 /// @param[in] title Sets the web response title.
-/// @param[in] message Sets the response body.
+/// @param[in] body Sets the response body.
 /// @param[in] uuid Sets the uuid of the custom response.
-/// @param[in, out] response_code Sets the response code of the custom response.
+/// @param[in] response_code Sets the response code of the custom response.
 ///
-void set_custom_response(const ngx_str_t *title, const ngx_str_t *message, const ngx_str_t *uuid, ngx_uint_t response_code);
+void set_custom_response_block_page(const ngx_str_t *title, const ngx_str_t *body, const ngx_str_t *uuid, ngx_uint_t response_code);
+
+///
+/// @brief Sets a custom JSON response.
+/// @param[in] body Sets the JSON response body.
+/// @param[in] response_code Sets the response code of the custom response.
+///
+void set_custom_response_json(const ngx_str_t *body, ngx_uint_t response_code, AttachmentContentType content_type);
 
 ///
 /// @brief Sets a redirect response by modifying redirect triggers, redirect_location and web_response_uuid.
@@ -295,26 +307,50 @@ struct timeval get_timeout_val_usec(const int delta_time_in_usec);
 struct timeval get_timeout_val_msec(const int delta_time_in_msec);
 
 ///
-/// @brief Get the currently set response page.
-/// @param[in, out] request NGINX request, used to get the NGINX pool to allocate buffer needed for out_chain.
-/// @param[in, out] out_chain NGINX chain that the response page data will be written to.
-/// @returns ngx_int_t
-///         - #NGX_OK.
-///         - #NGX_ERROR_ERR.
-///
-ngx_int_t get_response_page(ngx_http_request_t *request, ngx_chain_t (*out_chain)[7]);
-
-///
-/// @brief Get currently set response page length.
-/// @returns ngx_uint_t length of the response page.
-///
-ngx_uint_t get_response_page_length(void);
-
-///
 /// @brief Get currently set response code.
 /// @returns ngx_uint_t web_triggers_response_code variable.
 ///
 ngx_uint_t get_response_code(void);
+
+///
+/// @brief Get JSON response page.
+/// @param[in] request NGINX request.
+/// @param[out] out_chain NGINX chain to fill with JSON response data.
+/// @returns ngx_int_t NGX_OK if successful, NGX_ERROR_ERR if failed.
+///
+ngx_int_t get_response_page_json(ngx_http_request_t *request, ngx_chain_t (*out_chain)[1]);
+
+///
+/// @brief Get currently set JSON response page length.
+/// @returns ngx_uint_t length of the JSON response body.
+///
+ngx_uint_t get_response_page_length_json(void);
+
+///
+/// @brief Get currently set JSON response code.
+/// @returns ngx_uint_t JSON response code variable.
+///
+ngx_uint_t get_response_code_json(void);
+
+///
+/// @brief Get currently set JSON content type.
+/// @returns AttachmentContentType JSON content type variable.
+///
+AttachmentContentType get_response_content_type(void);
+
+///
+/// @brief Get JSON response page for web page format.
+/// @param[in] request NGINX request.
+/// @param[out] out_chain NGINX chain to fill with web page response data.
+/// @returns ngx_int_t NGX_OK if successful, NGX_ERROR_ERR if failed.
+///
+ngx_int_t get_block_page_response(ngx_http_request_t *request, ngx_chain_t (*out_chain)[7]);
+
+///
+/// @brief Get currently set web page response length.
+/// @returns ngx_uint_t length of the web page response.
+///
+ngx_uint_t get_response_page_length_web_page(void);
 
 ///
 /// @brief Get currently set static resource path.
@@ -343,9 +379,9 @@ unsigned int get_number_of_digits(int num);
 
 ///
 /// @brief Get sessions per minute limit verdict.
-/// @returns ngx_http_cp_verdict_e sessions_per_minute_limit_verdict variable.
+/// @returns ServiceVerdict sessions_per_minute_limit_verdict variable.
 ///
-ngx_http_cp_verdict_e get_sessions_per_minute_limit_verdict(void);
+ServiceVerdict get_sessions_per_minute_limit_verdict(void);
 
 ///
 /// @brief Get maximum sessions per minute.
@@ -460,5 +496,9 @@ void print_buffer(ngx_buf_t *buf, int num_bytes, int _dbg_level);
 ///
 void print_buffer_chain(ngx_chain_t *chain, char *msg, int num_bytes, int _dbg_level);
 
+ngx_int_t is_async_toggled_on_in_last_reconfig();
+ngx_int_t is_async_toggled_off_in_last_reconfig();
+ngx_int_t is_async_toggled_in_last_reconfig();
+void reset_async_mode_toggled();
 
 #endif // __NGX_CP_UTILS_H__

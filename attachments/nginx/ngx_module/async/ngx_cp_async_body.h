@@ -12,24 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// @file ngx_cp_metric.h
-#ifndef __NGX_CP_METRIC_H__
-#define __NGX_CP_METRIC_H__
+/// @file ngx_cp_async_body.h
+/// 
+/// Body async filter processing for Check Point Nano Agent NGINX module.
+/// 
 
-#include <nano_attachment_common.h>
+#ifndef __NGX_CP_ASYNC_BODY_H__
+#define __NGX_CP_ASYNC_BODY_H__
+
 #include <ngx_config.h>
 #include <ngx_core.h>
+#include <ngx_http.h>
+#include <ngx_event.h>
 
-///
-/// @brief Depending on the metric type, set the provided value in the metric.
-/// @param[in] metric_type Metric type to update.
-/// @param[in] value Value to set.
-///
-void updateMetricField(AttachmentMetricType metric_type, uint64_t value);
+ngx_int_t ngx_http_cp_req_body_filter_async(ngx_http_request_t *r, ngx_chain_t *in);
 
-///
-/// @brief Goes over all the metrics and resets them to 0.
-///
-void reset_metric_data();
-
-#endif // __NGX_CP_METRIC_H__
+#endif // __NGX_CP_ASYNC_BODY_H__

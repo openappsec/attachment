@@ -297,6 +297,9 @@ initIpc(
 void
 resetIpc(SharedMemoryIPC *ipc, uint16_t num_of_data_segments)
 {
+    if (!ipc || !ipc->rx_queue || !ipc->tx_queue) {
+        return;
+    }
     writeDebug(&(ipc->logging_data), TraceLevel, "Reseting IPC queues\n");
     resetRingQueue(&(ipc->logging_data), ipc->rx_queue, num_of_data_segments);
     resetRingQueue(&(ipc->logging_data), ipc->tx_queue, num_of_data_segments);
@@ -335,6 +338,9 @@ destroyIpc(SharedMemoryIPC *shmem, int is_owner)
 void
 dumpIpcMemory(SharedMemoryIPC *ipc)
 {
+    if (!ipc) {
+        return;
+    }
     writeDebug(&(ipc->logging_data), WarningLevel, "Ipc memory dump:\n");
     writeDebug(&(ipc->logging_data), WarningLevel, "RX queue:\n");
     dumpRingQueueShmem(&(ipc->logging_data), ipc->rx_queue);
@@ -345,6 +351,9 @@ dumpIpcMemory(SharedMemoryIPC *ipc)
 int
 sendData(SharedMemoryIPC *ipc, const uint16_t data_to_send_size, const char *data_to_send)
 {
+    if (!ipc || !ipc->tx_queue) {
+        return -1;
+    }
     writeDebug(&(ipc->logging_data), TraceLevel, "Sending data of size %u\n", data_to_send_size);
     return pushToQueue(&(ipc->logging_data), ipc->tx_queue, ipc->global_data, data_to_send, data_to_send_size);
 }
@@ -357,6 +366,10 @@ sendChunkedData(
     const uint8_t num_of_data_elem
 )
 {
+    if (!ipc || !ipc->tx_queue) {
+        return -1;
+    }
+    
     writeDebug(&(ipc->logging_data), TraceLevel, "Sending %u chunks of data\n", num_of_data_elem);
 
     return pushBuffersToQueue(
@@ -372,6 +385,10 @@ sendChunkedData(
 int
 receiveData(SharedMemoryIPC *ipc, uint16_t *received_data_size, const char **received_data)
 {
+    if (!ipc) {
+        return -1;
+    }
+
     int res = peekToQueue(&(ipc->logging_data), ipc->rx_queue, ipc->global_data, received_data, received_data_size);
     writeDebug(
         &(ipc->logging_data),
@@ -386,6 +403,10 @@ receiveData(SharedMemoryIPC *ipc, uint16_t *received_data_size, const char **rec
 int
 popData(SharedMemoryIPC *ipc)
 {
+    if (!ipc || !ipc->rx_queue) {
+        return -1;
+    }
+
     int res = popFromQueue(&(ipc->logging_data), ipc->rx_queue, ipc->global_data);
     writeDebug(&(ipc->logging_data), TraceLevel, "Popped data from queue. Res: %d\n", res);
     return res;
@@ -394,6 +415,10 @@ popData(SharedMemoryIPC *ipc)
 int
 isDataAvailable(SharedMemoryIPC *ipc)
 {
+    if (!ipc || !ipc->rx_queue) {
+        return 0;
+    }
+
     int res = !isQueueEmpty(ipc->rx_queue);
     writeDebug(&(ipc->logging_data), TraceLevel, "Checking if there is data pending to be read. Res: %d\n", res);
     return res;
@@ -402,6 +427,10 @@ isDataAvailable(SharedMemoryIPC *ipc)
 int
 isCorruptedShmem(SharedMemoryIPC *ipc, int is_owner)
 {
+    if (!ipc) {
+        return 1;
+    }
+
     if (isCorruptedQueue(&(ipc->logging_data), ipc->rx_queue, ipc->global_data, isTowardsOwner(is_owner, 0)) ||
         isCorruptedQueue(&(ipc->logging_data), ipc->tx_queue, ipc->global_data, isTowardsOwner(is_owner, 1))
     ) {

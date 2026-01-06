@@ -18,7 +18,7 @@
 
 #include <ngx_core.h>
 
-#include "nginx_attachment_common.h"
+#include "nano_attachment_common.h"
 #include "compression_utils.h"
 
 /// @struct ngx_cp_http_compression_params
@@ -58,7 +58,7 @@ void initialize_compression_debug_printing();
 ngx_int_t
 decompress_body(
     CompressionStream *decompression_stream,
-    const ngx_http_chunk_type_e chunk_type,
+    const AttachmentDataType chunk_type,
     int *is_last_decompressed_part,
     ngx_chain_t **body,
     ngx_chain_t **original_body_contents,
@@ -91,7 +91,7 @@ ngx_int_t
 compress_body(
     CompressionStream *compression_stream,
     const CompressionType compression_type,
-    const ngx_http_chunk_type_e chunk_type,
+    const AttachmentDataType chunk_type,
     const int is_last_part,
     ngx_chain_t **body,
     ngx_chain_t **original_body_contents,

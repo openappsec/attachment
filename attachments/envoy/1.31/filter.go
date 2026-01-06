@@ -1,6 +1,9 @@
 package main
 
 /*
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <pthread.h>
 
 unsigned long get_thread_id_2() {
@@ -257,7 +260,7 @@ func (f *filter) sendBody(buffer api.BufferInstance, is_req bool) C.AttachmentVe
 
 	}
 
-	http_chunks_array := C.HttpBody{
+	http_chunks_array := C.NanoHttpBody{
 		data:         f.request_structs.http_body_data,
 		bodies_count: C.size_t(num_of_buffers),
 	}

@@ -261,3 +261,9 @@ isSkipSource(c_str ip_str)
 
     return 0;
 }
+
+unsigned int
+isPairedAffinityEnabled()
+{
+    return conf_data.getNumericalValue("is_paired_affinity_enabled");
+}

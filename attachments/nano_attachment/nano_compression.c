@@ -7,15 +7,15 @@
 #include "compression_utils.h"
 #include "nano_utils.h"
 
-HttpBody *
+NanoHttpBody *
 nano_compress_body(
     NanoAttachment *attachment,
-    HttpBody *bodies,
+    NanoHttpBody *bodies,
     HttpSessionData *session_data_p
 )
 {
     CompressionResult compression_result;
-    HttpBody *compressed_body;
+    NanoHttpBody *compressed_body;
     size_t i;
 
     if (session_data_p->response_data.compression_type == NO_COMPRESSION) {
@@ -32,7 +32,7 @@ nano_compress_body(
         session_data_p->response_data.compression_stream = initCompressionStream();
     }
 
-    compressed_body = malloc(sizeof(HttpBody));
+    compressed_body = malloc(sizeof(NanoHttpBody));
     if (compressed_body == NULL) {
         return NULL;
     }
@@ -59,15 +59,15 @@ nano_compress_body(
     return compressed_body;
 }
 
-HttpBody *
+NanoHttpBody *
 nano_decompress_body(
     NanoAttachment *attachment,
-    HttpBody *bodies,
+    NanoHttpBody *bodies,
     HttpSessionData *session_data_p
 )
 {
     DecompressionResult decompression_result;
-    HttpBody *decompressed_body;
+    NanoHttpBody *decompressed_body;
     size_t i;
 
     if (session_data_p->response_data.compression_type == NO_COMPRESSION) {
@@ -84,7 +84,7 @@ nano_decompress_body(
         session_data_p->response_data.decompression_stream = initCompressionStream();
     }
 
-    decompressed_body = malloc(sizeof(HttpBody));
+    decompressed_body = malloc(sizeof(NanoHttpBody));
     if (decompressed_body == NULL) {
         return NULL;
     }
@@ -112,7 +112,7 @@ nano_decompress_body(
 void
 nano_free_compressed_body(
     NanoAttachment *attachment,
-    HttpBody *bodies,
+    NanoHttpBody *bodies,
     HttpSessionData *session_data_p
 )
 {

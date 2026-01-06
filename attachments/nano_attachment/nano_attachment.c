@@ -606,21 +606,21 @@ FreeAttachmentResponseContent(
     return;
 }
 
-HttpBody *
-compressBody(NanoAttachment *attachment, HttpSessionData *session_data, HttpBody *bodies)
+NanoHttpBody *
+compressBody(NanoAttachment *attachment, HttpSessionData *session_data, NanoHttpBody *bodies)
 {
     return nano_compress_body(attachment, bodies, session_data);
 }
 
 
-HttpBody *
-decompressBody(NanoAttachment *attachment, HttpSessionData *session_data, HttpBody *bodies)
+NanoHttpBody *
+decompressBody(NanoAttachment *attachment, HttpSessionData *session_data, NanoHttpBody *bodies)
 {
     return nano_decompress_body(attachment, bodies, session_data);
 }
 
 void
-freeCompressedBody(NanoAttachment *attachment, HttpSessionData *session_data, HttpBody *bodies)
+freeCompressedBody(NanoAttachment *attachment, HttpSessionData *session_data, NanoHttpBody *bodies)
 {
     nano_free_compressed_body(attachment, bodies, session_data);
 }

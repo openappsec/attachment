@@ -168,7 +168,7 @@ nano_header_sender(
 /// of messages sent.
 ///
 /// @param attachment Pointer to a NanoAttachment struct representing the attachment/module.
-/// @param bodies Pointer to an HttpBody struct containing the HTTP request/response body data.
+/// @param bodies Pointer to an NanoHttpBody struct containing the HTTP request/response body data.
 /// @param ctx Pointer to an HttpEventThreadCtx struct representing the HTTP event thread context.
 /// @param body_type Enum value indicating whether the body is a request or response body.
 /// @param cur_request_id Current request ID for logging and tracking purposes.
@@ -177,7 +177,7 @@ nano_header_sender(
 void
 nano_body_sender(
     NanoAttachment *attachment,
-    HttpBody *bodies,
+    NanoHttpBody *bodies,
     HttpEventThreadCtx *ctx,
     AttachmentDataType body_type,
     uint32_t cur_request_id,

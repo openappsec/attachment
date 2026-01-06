@@ -7,10 +7,16 @@
 #include <sys/types.h>
 #include <assert.h>
 
+#include <sched.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+
 #include "compression_utils.h"
 
 typedef uint32_t SessionID;
 typedef void* DataBuffer;
+typedef int64_t NanoHttpCpInjectPos;
 
 #define MAX_NGINX_UID_LEN 32
 #define MAX_SHARED_MEM_PATH_LEN 128
@@ -175,7 +181,9 @@ typedef enum AttachmentDataType
     RESPONSE_END,
     CONTENT_LENGTH,
     METRIC_DATA_FROM_PLUGIN,
-    REQUEST_DELAYED_VERDICT
+    REQUEST_DELAYED_VERDICT,
+
+    COUNT
 } AttachmentDataType;
 
 #ifdef __cplusplus
@@ -207,8 +215,22 @@ typedef enum ServiceVerdict
     TRAFFIC_VERDICT_INJECT,
     TRAFFIC_VERDICT_IRRELEVANT,
     TRAFFIC_VERDICT_RECONF,
-    TRAFFIC_VERDICT_DELAYED
+    TRAFFIC_VERDICT_DELAYED,
+    LIMIT_RESPONSE_HEADERS,
+    TRAFFIC_VERDICT_CUSTOM_RESPONSE
 } ServiceVerdict;
+
+#ifdef __cplusplus
+typedef enum class AttachmentContentType
+#else
+typedef enum AttachmentContentType
+#endif
+{
+    CONTENT_TYPE_APPLICATION_JSON,
+    CONTENT_TYPE_TEXT_HTML,
+    CONTENT_TYPE_TEXT_PLAIN,
+    CONTENT_TYPE_OTHER
+} AttachmentContentType;
 
 #ifdef __cplusplus
 typedef enum class AttachmentVerdict
@@ -234,7 +256,7 @@ typedef enum HttpModificationType
 } HttpModificationType;
 
 typedef struct __attribute__((__packed__)) HttpInjectData {
-    int64_t injection_pos;
+    NanoHttpCpInjectPos injection_pos;
     HttpModificationType mod_type;
     uint16_t injection_size;
     uint8_t is_header;
@@ -262,6 +284,13 @@ typedef struct __attribute__((__packed__)) HttpWebResponseData {
         } redirect_data;
     } response_data;
 } HttpWebResponseData;
+
+typedef struct __attribute__((__packed__)) HttpJsonResponseData {
+    uint16_t response_code;
+    uint16_t body_size;
+    AttachmentContentType content_type;
+    char body[0];
+} HttpJsonResponseData;
 
 typedef struct {
     size_t              len;
@@ -308,6 +337,8 @@ typedef enum HttpMetaDataType
     PARSED_HOST_DATA,
     PARSED_URI_SIZE,
     PARSED_URI_DATA,
+    WAF_TAG_SIZE,
+    WAF_TAG_DATA,
 
     META_DATA_COUNT
 } HttpMetaDataType;
@@ -402,10 +433,10 @@ typedef struct ResHttpHeaders {
     uint64_t content_length;
 } ResHttpHeaders;
 
-typedef struct HttpBody {
+typedef struct NanoHttpBody {
     nano_str_t *data;
     size_t bodies_count;
-} HttpBody;
+} NanoHttpBody;
 
 typedef struct AttachmentData {
     SessionID session_id;
@@ -417,6 +448,7 @@ typedef struct AttachmentData {
 typedef union __attribute__((__packed__)) HttpModifyData {
     HttpInjectData inject_data[0];
     HttpWebResponseData web_response_data[0];
+    HttpJsonResponseData json_response_data[0];
 } HttpModifyData;
 
 typedef struct __attribute__((__packed__)) HttpReplyFromService {
@@ -479,6 +511,12 @@ typedef struct NanoResponseModifications {
     NanoHttpModificationList *modifications;
 } NanoResponseModifications;
 
+typedef struct __attribute__((__packed__)) NanoHttpRequestData {
+    uint16_t data_type;
+    uint32_t session_id;
+    unsigned char data[0];
+} NanoHttpRequestData;
+
 typedef struct __attribute__((__packed__)) NanoHttpMetricData {
     uint16_t data_type;
 #ifdef __cplusplus
@@ -487,5 +525,148 @@ typedef struct __attribute__((__packed__)) NanoHttpMetricData {
     uint64_t data[METRIC_TYPES_COUNT];
 #endif
 } NanoHttpMetricData;
+
+// Simple but reliable hash function for generating consistent, well-distributed offsets
+// Uses a basic polynomial hash that avoids large intermediate values
+static inline uint32_t hash_string(const char *str) {
+    uint32_t hash = 0;
+    while (*str) {
+        hash = (hash * 31 + (unsigned char)*str++) % 10000; // Keep values under 10000
+    }
+    return hash; // Return bounded hash - modulo will be applied by caller
+}
+
+static inline int set_affinity_by_uid(uint32_t uid) {
+    int num_cores = sysconf(_SC_NPROCESSORS_CONF);
+    // Debug print for troubleshooting
+    fprintf(stderr, "[DEBUG] set_affinity_by_uid: num_cores=%d, uid=%u\n", num_cores, uid);
+    uint32_t core_num = (uid - 1) % num_cores; // Ensure core_num is within bounds
+    cpu_set_t mask, mask_check;
+    CPU_ZERO(&mask);
+    CPU_ZERO(&mask_check);
+    CPU_SET(core_num, &mask);
+    pid_t pid = getpid(); // Use process PID, not thread ID
+
+    if (sched_setaffinity(pid, sizeof(mask), &mask) != 0) {
+        return -1; // Error setting affinity
+    }
+    if (sched_getaffinity(pid, sizeof(mask_check), &mask_check) != 0) {
+        return -2; // Error getting affinity
+    }
+    // Compare mask and mask_check
+    int i;
+    for (i = 0; i < num_cores; ++i) {
+        if (CPU_ISSET(i, &mask) != CPU_ISSET(i, &mask_check)) {
+            return -3; // Affinity not set as expected
+        }
+    }
+    return 0; // Success
+}
+
+static inline int set_affinity_by_uid_with_offset(uint32_t uid, uint32_t offset) {
+    int num_cores = sysconf(_SC_NPROCESSORS_CONF);
+    // Debug print for troubleshooting
+    fprintf(
+        stderr, "[DEBUG] set_affinity_by_uid_with_offset: num_cores=%d, uid=%u, offset=%u\n", num_cores, uid, offset);
+    // Prevent integer overflow by applying modulo to offset first
+    uint32_t safe_offset = offset % num_cores;
+    uint32_t core_num = ((uid - 1) + safe_offset) % num_cores;
+    cpu_set_t mask, mask_check;
+    CPU_ZERO(&mask);
+    CPU_ZERO(&mask_check);
+    CPU_SET(core_num, &mask);
+    pid_t pid = getpid(); // Use process PID, not thread ID
+
+    if (sched_setaffinity(pid, sizeof(mask), &mask) != 0) {
+        return -1; // Error setting affinity
+    }
+    if (sched_getaffinity(pid, sizeof(mask_check), &mask_check) != 0) {
+        return -2; // Error getting affinity
+    }
+    // Compare mask and mask_check
+    int i;
+    for (i = 0; i < num_cores; ++i) {
+        if (CPU_ISSET(i, &mask) != CPU_ISSET(i, &mask_check)) {
+            return -3; // Affinity not set as expected
+        }
+    }
+    return 0; // Success
+}
+
+static inline int set_affinity_by_uid_with_offset_fixed_cores(uint32_t uid, uint32_t offset, int num_cores) {
+    // Debug print for troubleshooting
+    fprintf(
+        stderr,
+        "[DEBUG] set_affinity_by_uid_with_offset_fixed_cores: num_cores=%d, uid=%u, offset=%u\n",
+        num_cores,
+        uid,
+        offset
+    );
+    // Prevent integer overflow by applying modulo to offset first
+
+    uint32_t safe_offset = offset % num_cores;
+    uint32_t core_num = ((uid - 1) + safe_offset) % num_cores;
+    cpu_set_t mask, mask_check;
+    CPU_ZERO(&mask);
+    CPU_ZERO(&mask_check);
+    CPU_SET(core_num, &mask);
+    pid_t pid = getpid(); // Use process PID, not thread ID
+
+    if (sched_setaffinity(pid, sizeof(mask), &mask) != 0) {
+        return -1; // Error setting affinity
+    }
+    if (sched_getaffinity(pid, sizeof(mask_check), &mask_check) != 0) {
+        return -2; // Error getting affinity
+    }
+    // Compare mask and mask_check
+    int i;
+    for (i = 0; i < num_cores; ++i) {
+        if (CPU_ISSET(i, &mask) != CPU_ISSET(i, &mask_check)) {
+            return -3; // Affinity not set as expected
+        }
+    }
+    return 0; // Success
+}
+
+static inline int set_affinity_to_core(int target_core) {
+    // Debug print for troubleshooting
+    fprintf(stderr, "[DEBUG] set_affinity_to_core: target_core=%d\n", target_core);
+    cpu_set_t mask, mask_check;
+    CPU_ZERO(&mask);
+    CPU_ZERO(&mask_check);
+    CPU_SET(target_core, &mask);
+    pid_t pid = getpid(); // Use process PID, not thread ID
+
+    if (sched_setaffinity(pid, sizeof(mask), &mask) != 0) {
+        return -1; // Error setting affinity
+    }
+    if (sched_getaffinity(pid, sizeof(mask_check), &mask_check) != 0) {
+        return -2; // Error getting affinity
+    }
+    // Compare mask and mask_check
+    int num_cores = sysconf(_SC_NPROCESSORS_CONF);
+    int i;
+    for (i = 0; i < num_cores; ++i) {
+        if (CPU_ISSET(i, &mask) != CPU_ISSET(i, &mask_check)) {
+            return -3; // Affinity not set as expected
+        }
+    }
+    return 0; // Success
+}
+
+static inline int reset_affinity() {
+    int num_cores = sysconf(_SC_NPROCESSORS_CONF);
+    // Debug print for troubleshooting
+    fprintf(stderr, "[DEBUG] reset_affinity: num_cores=%d\n", num_cores);
+    cpu_set_t mask;
+    CPU_ZERO(&mask);
+    int i;
+    for (i = 0; i < num_cores; ++i) CPU_SET(i, &mask);
+    pid_t pid = getpid(); // Use process PID, not thread ID
+    if (sched_setaffinity(pid, sizeof(mask), &mask) != 0) {
+        return -1; // Error setting affinity
+    }
+    return 0; // Success
+}
 
 #endif // __NANO_ATTACHMENT_COMMON_H__

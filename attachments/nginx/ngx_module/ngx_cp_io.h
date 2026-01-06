@@ -22,7 +22,7 @@
 #include <unistd.h>
 
 #include "shmem_ipc.h"
-#include "nginx_attachment_common.h"
+#include "nano_attachment_common.h"
 #include "ngx_cp_custom_response.h"
 #include "ngx_cp_hooks.h"
 
@@ -57,12 +57,12 @@ extern int comm_socket; ///< Communication socket.
 ngx_int_t
 ngx_http_cp_reply_receiver(
     ngx_int_t *expected_replies,
-    ngx_http_cp_verdict_e *verdict,
+    ServiceVerdict *verdict,
     ngx_int_t *inspect_all_response_headers,
     uint32_t cur_session_id,
     ngx_http_request_t *request,
     ngx_http_cp_modification_list **modification_list,
-    ngx_http_chunk_type_e chunk_type,
+    AttachmentDataType chunk_type,
     uint64_t processed_body_size
 );
 
@@ -97,7 +97,7 @@ ngx_http_cp_meta_data_sender(
 ///
 ngx_int_t
 ngx_http_cp_end_transaction_sender(
-    ngx_http_chunk_type_e end_transaction_type,
+    AttachmentDataType end_transaction_type,
     uint32_t cur_request_id,
     ngx_uint_t *num_messages_sent
 );
@@ -148,7 +148,7 @@ ngx_http_cp_content_length_sender(
 ngx_int_t
 ngx_http_cp_header_sender(
     ngx_list_part_t *headers,
-    ngx_http_chunk_type_e header_type,
+    AttachmentDataType header_type,
     uint32_t cur_request_id,
     ngx_uint_t *num_messages_sent
 );
@@ -170,16 +170,17 @@ ngx_http_cp_header_sender(
 ngx_int_t
 ngx_http_cp_body_sender(
     ngx_chain_t *input,
-    ngx_http_chunk_type_e body_type,
+    AttachmentDataType body_type,
     ngx_http_cp_session_data *session_data,
+    ngx_int_t *part_number,
     ngx_int_t *is_last_part,
     ngx_uint_t *num_messages_sent,
     ngx_chain_t **next_elem_to_inspect
 );
 
 ///
-/// @brief Sends HOLD_DATA request to the nano service.
-/// @details HOLD_DATA request is a request that asks the nano service to provide with an updated verdict.
+/// @brief Sends REQUEST_DELAYED_VERDICT request to the nano service.
+/// @details REQUEST_DELAYED_VERDICT request is a request that asks the nano service to provide with an updated verdict.
 /// @param[in] cur_request_id Request session's Id.
 /// @param[in, out] num_messages_sent Number of messages sent will be saved onto this parameter.
 ///         - #NGX_OK
@@ -215,5 +216,44 @@ void ngx_http_cp_report_time_metrics(
     double req_proccesing_time,
     double res_proccesing_time
 );
+
+///
+/// @brief Create a modifications node.
+/// @param[in] modification Modification data.
+/// @param[in] request NGINX request.
+/// @returns modification_node
+///         - #ngx_http_cp_modification_list pointer on success.
+///         - #NULL if the creation failed.
+///
+ngx_http_cp_modification_list *
+create_modification_node(HttpInjectData *modification, ngx_http_request_t *request);
+
+///
+/// @brief Convert socket address to string
+/// @param[in] sa Socket address
+/// @param[out] ip_addr String buffer to write IP address to
+///
+void
+convert_sock_addr_to_string(const struct sockaddr *sa, char *ip_addr);
+
+///
+/// @brief Set fragments identifiers for data transmission
+/// @param[in,out] meta_data_elems Fragments data array
+/// @param[in,out] meta_data_sizes Fragments data sizes array
+/// @param[in] data_type Data type identifier to be set
+/// @param[in] cur_request_id Request's Id
+///
+void
+set_fragments_identifiers(
+    char **meta_data_elems,
+    uint16_t *meta_data_sizes,
+    uint16_t *data_type,
+    uint32_t *cur_request_id);
+
+void set_fragment_elem(char **meta_data_elems, uint16_t *meta_data_sizes, void *data, uint16_t size, uint idx);
+void add_header_to_bulk(char **fragments, uint16_t *fragments_sizes, ngx_table_elt_t *header, ngx_uint_t index);
+
+ngx_int_t handle_custom_json_response(HttpJsonResponseData *json_response_data);
+void handle_custom_web_response(HttpWebResponseData *web_response_data);
 
 #endif // __NGX_CP_IO_H__

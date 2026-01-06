@@ -1,6 +1,9 @@
 package main
 
 /*
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <string.h>
 #include "nano_attachment_common.h"
 #include "nano_attachment.h"

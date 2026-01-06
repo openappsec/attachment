@@ -1,14 +1,12 @@
 module gitlab.ngen.checkpoint.com/Ngen/agent-core/attachments/envoy
 
 // the version should >= 1.18
-go 1.22
-
-toolchain go1.22.5
+go 1.24
 
 // NOTICE: these lines could be generated automatically by "go mod tidy"
 require (
 	github.com/cncf/xds/go v0.0.0-20231128003011-0fa0005c9caa
-	github.com/envoyproxy/envoy v1.33.0
+	github.com/envoyproxy/envoy v1.33.1
 	google.golang.org/protobuf v1.36.1
 )
 
