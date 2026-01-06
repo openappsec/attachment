@@ -1,31 +1,32 @@
-package = "open-appsec-waf-kong-plugin"
+package = "cloudguard-waf-kong-plugin"
 version = "1.0.0-1"
-
+ 
 source = {
   url = "git://github.com/openappsec/attachment.git",
-  tag = "wiaam-fix-enum"
+  tag = "main"
 }
-
+ 
 description = {
-  summary = "Kong plugin for scanning headers",
+  summary = "CloudGuard WAF Kong plugin",
   detailed = [[
-    A Kong plugin that scans HTTP request headers using Nano Attachment.
+    This is the CloudGuard WAF plugin for Kong API gateway, built using the open-appsec engine.
+    It integrates advanced security features into Kong using CloudGuard branding while utilizing the open-appsec core.
   ]],
   homepage = "https://github.com/openappsec/attachment",
   license = "Apache"
 }
-
+ 
 dependencies = {
   "lua >= 2.1"
 }
-
+ 
 build = {
   type = "builtin",
-
+ 
   modules = {
-    ["kong.plugins.open-appsec-waf-kong-plugin.handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/handler.lua",
-    ["kong.plugins.open-appsec-waf-kong-plugin.nano_ffi"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/nano_ffi.lua",
-    ["kong.plugins.open-appsec-waf-kong-plugin.schema"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/schema.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/handler.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.nano_ffi"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/nano_ffi.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.schema"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/schema.lua",
     ["lua_attachment_wrapper"] = {
       sources = {
         "attachments/kong/plugins/open-appsec-waf-kong-plugin/lua_attachment_wrapper.c",
