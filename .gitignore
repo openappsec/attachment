@@ -42,3 +42,5 @@
 **/*.cbp
 **/CMakeScripts
 **/compile_commands.json
+
+!go.mod
