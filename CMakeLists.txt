@@ -5,6 +5,9 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -Wno-terminate")
 
 set(CMAKE_CXX_STANDARD 11)
 
+find_package(PkgConfig REQUIRED)
+find_package(Brotli REQUIRED MODULE)
+
 include_directories(external)
 include_directories(core/include/attachments)
 

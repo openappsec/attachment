@@ -5,6 +5,7 @@ USER root
 RUN apk update
 RUN apk add --no-cache -u busybox
 RUN apk add --no-cache -u zlib
+RUN apk add --no-cache -u brotli brotli-dev
 RUN apk add --no-cache libstdc++
 RUN mkdir -p /usr/lib/nginx/modules/
 RUN mkdir -p /usr/lib64/nginx/modules/
