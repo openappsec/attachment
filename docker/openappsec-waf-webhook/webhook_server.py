@@ -5,6 +5,7 @@ import base64
 import secretgen
 import sys
 import re
+import yaml
 import requests
 from kubernetes import client, config
 from flask import Flask, request, jsonify, Response
@@ -19,6 +20,7 @@ PROXY_KIND = os.getenv('PROXY_KIND', 'istio')
 INIT_CONTAINER_IMAGE = os.getenv('INIT_CONTAINER_IMAGE', 'ghcr.io/openappsec/openappsec-envoy-filters')
 INIT_CONTAINER_TAG = os.getenv('INIT_CONTAINER_TAG', 'latest')
 ISTIOD_PORT = os.getenv('ISTIOD_PORT', '15014')
+RELEASE_NAMESPACE = os.getenv('K8S_NAMESPACE', 'envoy-gateway-system')
 FULL_AGENT_IMAGE = f"{AGENT_IMAGE}:{AGENT_TAG}"
 FULL_INIT_CONTAINER_IMAGE = f"{INIT_CONTAINER_IMAGE}:{INIT_CONTAINER_TAG}"
 
@@ -27,6 +29,14 @@ config.load_incluster_config()
 def is_istio_agent():
     """Check if the current agent kind is Istio"""
     return PROXY_KIND.lower() == "istio"
+
+def is_envoy_gateway_agent():
+    """Check if the current agent kind is Envoy Gateway"""
+    return PROXY_KIND.lower() == "envoy_gateway"
+
+def is_envoy_based_proxy_agent():
+    """Check if the current agent kind is Istio or Envoy Gateway"""
+    return is_istio_agent() or is_envoy_gateway_agent()
 
 def configure_logging():
     # Read the DEBUG_LEVEL from environment variables, defaulting to WARNING
@@ -68,7 +78,7 @@ def get_sidecar_container():
     secret_ref = os.getenv("SECRET_REF")
     persistence_enabled = os.getenv("APPSEC_PERSISTENCE_ENABLED", "false").lower() == "true"
 
-    if is_istio_agent():
+    if is_envoy_based_proxy_agent():
         volume_mounts = [
             {"name": "envoy-attachment-shared", "mountPath": "/envoy/attachment/shared/"},
             {"name": "advanced-model", "mountPath": "/advanced-model"}
@@ -185,16 +195,38 @@ def get_envoy_version(envoy_sha):
     else:
         raise Exception(f"Failed to get Envoy version: {response.status_code}")
 
+def get_envoy_gateway_version(containers):
+    for container in containers:
+        if container.get('name') == 'envoy':
+            image = container.get('image', '')
+            app.logger.debug(f"Found envoy container with image: {image}")
 
-def get_init_container():
+            match = re.search(r':v?(\d+\.\d+)(?:\.\d+)?', image)
+            if match:
+                version = match.group(1)
+                app.logger.info(f"Extracted Envoy version from container image: {version}")
+                return version
+            else:
+                raise Exception(f"Could not parse version from image: {image}")
+
+    raise Exception("Envoy container not found in pod spec")
+
+def get_init_container(containers=None):
     # Define the initContainer you want to inject
-    istio_version = get_istio_version()
-    app.logger.debug(f"Istio Version: {istio_version}")
+    try:
+        if is_istio_agent():
+            istio_version = get_istio_version()
+            app.logger.debug(f"Istio Version: {istio_version}")
 
-    envoy_sha = get_envoy_sha(istio_version)
-    app.logger.debug(f"Envoy SHA: {envoy_sha}")
+            envoy_sha = get_envoy_sha(istio_version)
+            app.logger.debug(f"Envoy SHA: {envoy_sha}")
 
-    envoy_version = get_envoy_version(envoy_sha)
+            envoy_version = get_envoy_version(envoy_sha)
+        elif is_envoy_gateway_agent() and containers:
+            envoy_version = get_envoy_gateway_version(containers)
+    except Exception as e:
+        app.logger.warning(f"Failed to detect Envoy version: {e}. Using default: {envoy_version}")
+
     app.logger.info(f"Envoy Version: {envoy_version}")
 
     init_container = {
@@ -231,7 +263,7 @@ def get_volume_definition():
 
     persistence_enabled = os.getenv("APPSEC_PERSISTENCE_ENABLED", "false").lower() == "true"
 
-    if is_istio_agent():
+    if is_envoy_based_proxy_agent():
         volume_def = [
             {
                 "name": "envoy-attachment-shared",
@@ -398,6 +430,179 @@ def remove_env_variable(containers, container_name, env_var_name, patches):
             app.logger.debug(f"{env_var_name} does not exist, nothing to remove.")
     else:
         app.logger.warning(f"{container_name} container not found; no environment variable modification applied.")
+
+def ensure_envoy_gateway_extension_apis():
+    """Ensure the envoy-gateway-config ConfigMap has extensionApis.enableEnvoyPatchPolicy enabled"""
+    v1 = client.CoreV1Api()
+
+    try:
+        config_map = v1.read_namespaced_config_map(
+            name="envoy-gateway-config",
+            namespace=RELEASE_NAMESPACE
+        )
+
+        config_data_str = config_map.data.get('envoy-gateway.yaml', '')
+        try:
+            config_obj = yaml.safe_load(config_data_str)
+        except yaml.YAMLError as e:
+            app.logger.error(f"Failed to parse envoy-gateway.yaml: {e}")
+            return
+
+        # Check if extensionApis is already properly configured
+                extension_apis = config_obj.get('extensionApis', {})
+        if extension_apis.get('enableEnvoyPatchPolicy') is True:
+            app.logger.info("EnvoyPatchPolicy already enabled in envoy-gateway-config")
+            return
+
+        # Ensure extensionApis exists and add/update enableEnvoyPatchPolicy
+        if 'extensionApis' not in config_obj or config_obj['extensionApis'] is None:
+            config_obj['extensionApis'] = {}
+
+        config_obj['extensionApis']['enableEnvoyPatchPolicy'] = True
+
+        config_data_updated = yaml.dump(config_obj, default_flow_style=False, sort_keys=False)
+        config_map.data['envoy-gateway.yaml'] = config_data_updated
+        v1.replace_namespaced_config_map(
+            name="envoy-gateway-config",
+            namespace=RELEASE_NAMESPACE,
+                        body=config_map
+        )
+        app.logger.info("Updated envoy-gateway-config to enable EnvoyPatchPolicy")
+
+    except client.exceptions.ApiException as e:
+        if e.status == 404:
+            app.logger.warning("envoy-gateway-config ConfigMap not found")
+        else:
+            app.logger.error(f"Failed to update envoy-gateway-config: {e}")
+
+def create_or_update_envoy_patch_policy(name, gateway_name, gateway_namespace):
+    """Create or update EnvoyPatchPolicy for Envoy Gateway"""
+    api = client.CustomObjectsApi()
+
+    listener_name = f"{gateway_namespace}/{gateway_name}/http"
+
+    # Define the EnvoyPatchPolicy specification
+    envoy_patch_policy_spec = {
+        "apiVersion": "gateway.envoyproxy.io/v1alpha1",
+        "kind": "EnvoyPatchPolicy",
+        "metadata": {
+            "name": name,
+            "namespace": gateway_namespace,
+            "labels": {
+                "owner": "waf"
+            }
+        },
+        "spec": {
+            "targetRef": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": gateway_name
+            },
+            "type": "JSONPatch",
+            "jsonPatches": [
+                {
+                    "type": "type.googleapis.com/envoy.config.listener.v3.Listener",
+                    "name": listener_name,
+                    "operation": {
+                        "op": "add",
+                        "path": "/default_filter_chain/filters/0/typed_config/http_filters/0",
+                        "value": {
+                            "name": "envoy.filters.http.golang",
+                            "typed_config": {
+                                "@type": "type.googleapis.com/envoy.extensions.filters.http.golang.v3alpha.Config",
+                                "library_id": "cp_nano_filter",
+                                "plugin_name": "cp_nano_filter",
+                                "library_path": "/usr/lib/attachment/libenvoy_attachment.so",
+                                "plugin_config": {
+                                    "@type": "type.googleapis.com/xds.type.v3.TypedStruct",
+                                    "value": {
+                                        "prefix_localreply_body": "Configured local reply from go"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    }
+
+    # Check if the EnvoyPatchPolicy exists
+    try:
+        existing_policy = api.get_namespaced_custom_object(
+            group="gateway.envoyproxy.io",
+            version="v1alpha1",
+            namespace=gateway_namespace,
+            plural="envoypatchpolicies",
+            name=name
+        )
+
+        # Compare targetRef
+        existing_target = existing_policy.get("spec", {}).get("targetRef", {})
+        new_target = envoy_patch_policy_spec["spec"]["targetRef"]
+
+        if existing_target == new_target:
+            app.logger.info(f"EnvoyPatchPolicy '{name}' already exists with matching target.")
+            return
+        else:
+            # Update the existing EnvoyPatchPolicy
+            existing_policy["spec"] = envoy_patch_policy_spec["spec"]
+            api.replace_namespaced_custom_object(
+                group="gateway.envoyproxy.io",
+                version="v1alpha1",
+                namespace=gateway_namespace,
+                plural="envoypatchpolicies",
+                name=name,
+                body=existing_policy
+            )
+            app.logger.info(f"EnvoyPatchPolicy '{name}' updated successfully.")
+            return
+
+    except client.exceptions.ApiException as e:
+        if e.status == 404:
+            # EnvoyPatchPolicy doesn't exist, proceed with creation
+            api.create_namespaced_custom_object(
+                group="gateway.envoyproxy.io",
+                version="v1alpha1",
+                namespace=gateway_namespace,
+                plural="envoypatchpolicies",
+                body=envoy_patch_policy_spec
+            )
+            app.logger.info(f"EnvoyPatchPolicy '{name}' created successfully.")
+        else:
+            app.logger.error(f"Failed to create/update EnvoyPatchPolicy: {e}")
+
+def remove_envoy_patch_policy_by_gateway(gateway_namespace, gateway_name):
+    """Remove EnvoyPatchPolicy by gateway name"""
+    api = client.CustomObjectsApi()
+    try:
+        # List all EnvoyPatchPolicies in the namespace
+        existing_policies = api.list_namespaced_custom_object(
+            group="gateway.envoyproxy.io",
+            version="v1alpha1",
+            namespace=gateway_namespace,
+            plural="envoypatchpolicies"
+        )
+
+        # Check if there is any EnvoyPatchPolicy targeting the gateway
+        for item in existing_policies.get("items", []):
+            target_ref = item["spec"].get("targetRef", {})
+            if target_ref.get("name") == gateway_name and target_ref.get("kind") == "Gateway":
+                # Delete the matching EnvoyPatchPolicy
+                api.delete_namespaced_custom_object(
+                    group="gateway.envoyproxy.io",
+                    version="v1alpha1",
+                    namespace=gateway_namespace,
+                    plural="envoypatchpolicies",
+                    name=item["metadata"]["name"],
+                    body=client.V1DeleteOptions()
+                )
+                app.logger.info(f"EnvoyPatchPolicy '{item['metadata']['name']}' targeting gateway '{gateway_name}' deleted successfully.")
+                return
+        app.logger.info(f"No EnvoyPatchPolicy found targeting gateway '{gateway_name}'.")
+
+    except client.exceptions.ApiException as e:
+        app.logger.error(f"Failed to delete EnvoyPatchPolicy: {e}")
 
 def create_or_update_envoy_filter(name, namespace, selector_label_name, selector_label_value):
     api = client.CustomObjectsApi()
@@ -573,8 +778,8 @@ def mutate():
     app.logger.debug("Current containers in the pod: %s", json.dumps(containers, indent=2))
     sidecar_exists = any(container['name'] == 'open-appsec-nano-agent' for container in containers)
     init_container_exist = any(init_container['name'] == 'prepare-attachment' for init_container in init_containers)
-    # Only check for envoy-attachment-shared volume if agent kind is Istio
-    volume_exist = any(volume['name'] == 'envoy-attachment-shared' for volume in volumes) if is_istio_agent() else False
+    # Only check for envoy-attachment-shared volume if agent kind is Istio or Envoy Gateway
+    volume_exist = any(volume['name'] == 'envoy-attachment-shared' for volume in volumes) if is_envoy_based_proxy_agent() else False
     app.logger.debug("Does sidecar 'open-appsec-nano-agent' exist? %s", sidecar_exists)
     app.logger.debug("Agent kind: %s", PROXY_KIND)
 
@@ -583,6 +788,10 @@ def mutate():
     DEPLOY_FILTER = os.getenv('DEPLOY_ENVOY_FILTER', 'false').lower() == 'true'
 
     ISTIO_CONTAINER_NAME = os.getenv('ISTIO_CONTAINER_NAME', 'istio-proxy')
+    ENVOY_GATEWAY_CONTAINER_NAME = os.getenv('ENVOY_GATEWAY_CONTAINER_NAME', 'envoy')
+    ENVOY_BASED_PROXY_CONTAINER_NAME = ENVOY_GATEWAY_CONTAINER_NAME if is_envoy_gateway_agent() else ISTIO_CONTAINER_NAME
+    GATEWAY_NAME = os.getenv('GATEWAY_NAME', 'eg')
+    GATEWAY_NAMESPACE = os.getenv('GATEWAY_NAMESPACE', 'default')
     LIBRARY_PATH_VALUE = os.getenv('LIBRARY_PATH_VALUE', '/usr/lib/attachment')
     SELECTOR_LABEL_NAME = os.getenv("SELECTOR_LABEL_NAME")
     SELECTOR_LABEL_VALUE = os.getenv("SELECTOR_LABEL_VALUE")
@@ -592,21 +801,24 @@ def mutate():
     if REMOVE_WAF:
         app.logger.debug("Removing injected sidecar and associated resources.")
 
-        if is_istio_agent():
-            app.logger.debug("PROXY_KIND is istio, removing Istio-specific components.")
+        if is_envoy_based_proxy_agent():
+            app.logger.debug(f"PROXY_KIND is {PROXY_KIND}, removing {PROXY_KIND}-specific components.")
 
-            if DEPLOY_FILTER and SELECTOR_LABEL_NAME and SELECTOR_LABEL_VALUE:
-                remove_envoy_filter_by_selector(namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
+            if DEPLOY_FILTER:
+                if is_istio_agent() and SELECTOR_LABEL_NAME and SELECTOR_LABEL_VALUE:
+                    remove_envoy_filter_by_selector(namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
+                elif is_envoy_gateway_agent():
+                    remove_envoy_patch_policy_by_gateway(GATEWAY_NAMESPACE, GATEWAY_NAME)
 
-            if ISTIO_CONTAINER_NAME:
+            if ENVOY_BASED_PROXY_CONTAINER_NAME:
                 if CONCURRENCY_NUMBER_VALUE:
-                    remove_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONCURRENCY_NUMBER', patches)
+                    remove_env_variable(containers, ENVOY_BASED_PROXY_CONTAINER_NAME, 'CONCURRENCY_NUMBER', patches)
                 if CONFIG_PORT_VALUE:
-                    remove_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONFIG_PORT', patches)
+                    remove_env_variable(containers, ENVOY_BASED_PROXY_CONTAINER_NAME, 'CONFIG_PORT', patches)
                 if CONCURRENCY_CALC_VALUE:
-                    remove_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONCURRENCY_CALC', patches)
+                    remove_env_variable(containers, ENVOY_BASED_PROXY_CONTAINER_NAME, 'CONCURRENCY_CALC', patches)
                 if LIBRARY_PATH_VALUE:
-                    remove_env_variable(containers, ISTIO_CONTAINER_NAME, 'LD_LIBRARY_PATH', patches)
+                    remove_env_variable(containers, ENVOY_BASED_PROXY_CONTAINER_NAME, 'LD_LIBRARY_PATH', patches)
 
             if 'shareProcessNamespace' in obj.get('spec', {}):
                 patches.append({
@@ -641,7 +853,7 @@ def mutate():
         if sidecar_exists:
             for idx, container in enumerate(containers):
                 volume_mounts = container.get('volumeMounts', [])
-                if is_istio_agent():
+                if is_envoy_based_proxy_agent():
                     for idx_v, volume_mount in enumerate(volume_mounts):
                         if volume_mount['name'] == 'envoy-attachment-shared':
                             patches.append({
@@ -658,7 +870,7 @@ def mutate():
 
         if volume_exist:
             for idx, volume in enumerate(volumes):
-                if is_istio_agent() and volume['name'] == 'envoy-attachment-shared':
+                if is_envoy_based_proxy_agent() and volume['name'] == 'envoy-attachment-shared':
                     patches.append({
                        "op": "remove",
                        "path": f"/spec/volumes/{idx}"
@@ -673,26 +885,26 @@ def mutate():
 
         volume_def = get_volume_definition()
 
-        if is_istio_agent():
-            app.logger.debug("PROXY_KIND is istio, adding Istio-specific components.")
+        if is_envoy_based_proxy_agent():
+            app.logger.debug(f"PROXY_KIND is {PROXY_KIND}, adding {PROXY_KIND}-specific components.")
 
             init_container = get_init_container()
 
             volume_mount = get_volume_mount()
 
-            if ISTIO_CONTAINER_NAME:
-                add_env_if_not_exist(containers, ISTIO_CONTAINER_NAME, patches)
-                add_env_variable_value_from(containers, ISTIO_CONTAINER_NAME, 'OPENAPPSEC_UID', None, patches, value_from={"fieldRef": {"fieldPath": "metadata.uid"}})
+            if ENVOY_BASED_PROXY_CONTAINER_NAME:
+                add_env_if_not_exist(containers, ENVOY_BASED_PROXY_CONTAINER_NAME, patches)
+                add_env_variable_value_from(containers, ENVOY_BASED_PROXY_CONTAINER_NAME, 'OPENAPPSEC_UID', None, patches, value_from={"fieldRef": {"fieldPath": "metadata.uid"}})
                 if LIBRARY_PATH_VALUE:
-                    add_env_variable(containers, ISTIO_CONTAINER_NAME, 'LD_LIBRARY_PATH', LIBRARY_PATH_VALUE, patches)
+                    add_env_variable(containers, ENVOY_BASED_PROXY_CONTAINER_NAME, 'LD_LIBRARY_PATH', LIBRARY_PATH_VALUE, patches)
                 if CONCURRENCY_CALC_VALUE:
-                    add_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONCURRENCY_CALC', CONCURRENCY_CALC_VALUE, patches)
+                    add_env_variable(containers, ENVOY_BASED_PROXY_CONTAINER_NAME, 'CONCURRENCY_CALC', CONCURRENCY_CALC_VALUE, patches)
                 if CONFIG_PORT_VALUE:
-                    add_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONFIG_PORT', CONFIG_PORT_VALUE, patches)
+                    add_env_variable(containers, ENVOY_BASED_PROXY_CONTAINER_NAME, 'CONFIG_PORT', CONFIG_PORT_VALUE, patches)
                 if CONCURRENCY_NUMBER_VALUE:
-                    add_env_variable(containers, ISTIO_CONTAINER_NAME, 'CONCURRENCY_NUMBER', CONCURRENCY_NUMBER_VALUE, patches)
+                    add_env_variable(containers, ENVOY_BASED_PROXY_CONTAINER_NAME, 'CONCURRENCY_NUMBER', CONCURRENCY_NUMBER_VALUE, patches)
             else:
-                app.logger.debug("ISTIO_CONTAINER_NAME skipping environment variable addition")
+                app.logger.debug("ENVOY_BASED_PROXY_CONTAINER_NAME skipping environment variable addition")
 
             patches.append({
                 "op": "add",
@@ -706,7 +918,7 @@ def mutate():
                 "path": "/spec/containers/0/volumeMounts/-",
                 "value": volume_mount
             })
-            app.logger.debug("Added volume mount patch to istio-proxy: %s", patches[-1])
+            app.logger.debug("Added volume mount patch to envoy-based-proxy: %s", patches[-1])
 
             if not init_container_exist:
                 if 'initContainers' in obj['spec']:
@@ -720,10 +932,15 @@ def mutate():
                     "value": obj['spec']['initContainers']
                 })
 
-            if DEPLOY_FILTER and SELECTOR_LABEL_NAME and SELECTOR_LABEL_VALUE:
+            if DEPLOY_FILTER:
                 RELEASE_NAME = os.getenv('RELEASE_NAME', 'openappsec-waf-injected')
-                envoy_filter_name = RELEASE_NAME + "-waf-filter"
-                create_or_update_envoy_filter(envoy_filter_name, namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
+                if is_istio_agent() and SELECTOR_LABEL_NAME and SELECTOR_LABEL_VALUE:
+                    envoy_filter_name = RELEASE_NAME + "-waf-filter"
+                    create_or_update_envoy_filter(envoy_filter_name, namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
+                elif is_envoy_gateway_agent():
+                    ensure_envoy_gateway_extension_apis()
+                    policy_name = RELEASE_NAME + "-waf-patch-policy"
+                    create_or_update_envoy_patch_policy(policy_name, GATEWAY_NAME, GATEWAY_NAMESPACE)
         else:
             app.logger.debug(f"PROXY_KIND is {PROXY_KIND}, skipping Istio-specific components.")
 
@@ -775,7 +992,7 @@ def mutate():
                         app.logger.debug(f"Updated sidecar image patch: {patches[-1]}")
                     break
 
-        if is_istio_agent() and init_container_exist:
+        if is_envoy_based_proxy_agent() and init_container_exist:
             app.logger.debug("Before else: init-container 'prepare-attachment' already exists. Checking for image updates.")
 
             for idx, container in enumerate(init_containers):
