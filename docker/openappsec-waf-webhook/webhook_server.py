@@ -449,7 +449,7 @@ def ensure_envoy_gateway_extension_apis():
             return
 
         # Check if extensionApis is already properly configured
-                extension_apis = config_obj.get('extensionApis', {})
+        extension_apis = config_obj.get('extensionApis', {})
         if extension_apis.get('enableEnvoyPatchPolicy') is True:
             app.logger.info("EnvoyPatchPolicy already enabled in envoy-gateway-config")
             return
@@ -888,7 +888,7 @@ def mutate():
         if is_envoy_based_proxy_agent():
             app.logger.debug(f"PROXY_KIND is {PROXY_KIND}, adding {PROXY_KIND}-specific components.")
 
-            init_container = get_init_container()
+            init_container = get_init_container(containers)
 
             volume_mount = get_volume_mount()
 
