@@ -790,8 +790,8 @@ def mutate():
     ISTIO_CONTAINER_NAME = os.getenv('ISTIO_CONTAINER_NAME', 'istio-proxy')
     ENVOY_GATEWAY_CONTAINER_NAME = os.getenv('ENVOY_GATEWAY_CONTAINER_NAME', 'envoy')
     ENVOY_BASED_PROXY_CONTAINER_NAME = ENVOY_GATEWAY_CONTAINER_NAME if is_envoy_gateway_agent() else ISTIO_CONTAINER_NAME
-    GATEWAY_NAME = os.getenv('GATEWAY_NAME', 'eg')
-    GATEWAY_NAMESPACE = os.getenv('GATEWAY_NAMESPACE', 'default')
+    GATEWAY_RESOURCE_NAME = os.getenv('GATEWAY_RESOURCE_NAME', 'eg')
+    GATEWAY_RESOURCE_NAMESPACE = os.getenv('GATEWAY_RESOURCE_NAMESPACE', 'default')
     LIBRARY_PATH_VALUE = os.getenv('LIBRARY_PATH_VALUE', '/usr/lib/attachment')
     SELECTOR_LABEL_NAME = os.getenv("SELECTOR_LABEL_NAME")
     SELECTOR_LABEL_VALUE = os.getenv("SELECTOR_LABEL_VALUE")
@@ -808,7 +808,7 @@ def mutate():
                 if is_istio_agent() and SELECTOR_LABEL_NAME and SELECTOR_LABEL_VALUE:
                     remove_envoy_filter_by_selector(namespace, SELECTOR_LABEL_NAME, SELECTOR_LABEL_VALUE)
                 elif is_envoy_gateway_agent():
-                    remove_envoy_patch_policy_by_gateway(GATEWAY_NAMESPACE, GATEWAY_NAME)
+                    remove_envoy_patch_policy_by_gateway(GATEWAY_RESOURCE_NAMESPACE, GATEWAY_RESOURCE_NAME)
 
             if ENVOY_BASED_PROXY_CONTAINER_NAME:
                 if CONCURRENCY_NUMBER_VALUE:
@@ -940,7 +940,7 @@ def mutate():
                 elif is_envoy_gateway_agent():
                     ensure_envoy_gateway_extension_apis()
                     policy_name = RELEASE_NAME + "-waf-patch-policy"
-                    create_or_update_envoy_patch_policy(policy_name, GATEWAY_NAME, GATEWAY_NAMESPACE)
+                    create_or_update_envoy_patch_policy(policy_name, GATEWAY_RESOURCE_NAME, GATEWAY_RESOURCE_NAMESPACE)
         else:
             app.logger.debug(f"PROXY_KIND is {PROXY_KIND}, skipping Istio-specific components.")
 
