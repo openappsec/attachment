@@ -173,6 +173,7 @@ nano_header_sender(
 /// @param body_type Enum value indicating whether the body is a request or response body.
 /// @param cur_request_id Current request ID for logging and tracking purposes.
 /// @param num_messages_sent Pointer to an unsigned int to track the number of messages sent.
+/// @param is_verdict_requested Boolean value indicating if a verdict is requested.
 ///
 void
 nano_body_sender(
@@ -181,7 +182,8 @@ nano_body_sender(
     HttpEventThreadCtx *ctx,
     AttachmentDataType body_type,
     uint32_t cur_request_id,
-    unsigned int *num_messages_sent
+    unsigned int *num_messages_sent,
+    bool is_verdict_requested
 );
 
 ///
@@ -192,6 +194,7 @@ nano_body_sender(
 /// @param ctx Pointer to the HttpEventThreadCtx struct containing the context of the current thread.
 /// @param cur_request_id The ID of the current request.
 /// @param num_messages_sent Pointer to an unsigned integer to store the number of messages sent.
+/// @param is_verdict_requested Boolean value indicating if a verdict is requested.
 /// @return NANO_OK if the end transaction event was sent successfully, NANO_ERROR otherwise.
 ///
 void
@@ -200,7 +203,8 @@ nano_end_transaction_sender(
     AttachmentDataType end_transaction_type,
     HttpEventThreadCtx *ctx,
     SessionID cur_request_id,
-    unsigned int *num_messages_sent
+    unsigned int *num_messages_sent,
+    bool is_verdict_requested
 );
 
 ///

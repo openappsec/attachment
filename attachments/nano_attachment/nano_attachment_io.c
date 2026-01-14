@@ -1564,7 +1564,8 @@ nano_body_sender(
     HttpEventThreadCtx *ctx,
     AttachmentDataType body_type,
     uint32_t cur_request_id,
-    unsigned int *num_messages_sent
+    unsigned int *num_messages_sent,
+    bool is_verdict_requested
 )
 {
     char *fragments[BODY_DATA_COUNT];
@@ -1626,13 +1627,17 @@ nano_body_sender(
         bodies->bodies_count
     );
 
-    ctx->res = service_reply_receiver(
-        attachment,
-        ctx->session_data_p,
-        &ctx->web_response_data,
-        &ctx->modifications,
-        body_type
-    );
+    if (is_verdict_requested) {
+        ctx->res = service_reply_receiver(
+            attachment,
+            ctx->session_data_p,
+            &ctx->web_response_data,
+            &ctx->modifications,
+            body_type
+        );
+    } else {
+        ctx->res = NANO_OK;
+    }
 }
 
 void
@@ -1641,7 +1646,8 @@ nano_end_transaction_sender(
     AttachmentDataType end_transaction_type,
     HttpEventThreadCtx *ctx,
     SessionID cur_request_id,
-    unsigned int *num_messages_sent
+    unsigned int *num_messages_sent,
+    bool is_verdict_requested
 )
 {
     char *fragments[END_TRANSACTION_DATA_COUNT];
@@ -1679,13 +1685,17 @@ nano_end_transaction_sender(
 
     *num_messages_sent += 1;
 
-    ctx->res = service_reply_receiver(
-        attachment,
-        ctx->session_data_p,
-        &ctx->web_response_data,
-        &ctx->modifications,
-        end_transaction_type
-    );
+    if (is_verdict_requested) {
+        ctx->res = service_reply_receiver(
+            attachment,
+            ctx->session_data_p,
+            &ctx->web_response_data,
+            &ctx->modifications,
+            end_transaction_type
+        );
+    } else {
+        ctx->res = NANO_OK;
+    }
 }
 
 void
