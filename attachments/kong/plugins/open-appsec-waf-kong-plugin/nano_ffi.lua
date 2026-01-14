@@ -29,9 +29,11 @@ nano.HttpChunkType = {
 
 nano.WebResponseType = {
     CUSTOM_WEB_RESPONSE = 0,
-    RESPONSE_CODE_ONLY = 1,
-    REDIRECT_WEB_RESPONSE = 2,
-    NO_WEB_RESPONSE = 3,
+    CUSTOM_WEB_BLOCK_PAGE_RESPONSE = 1,
+    RESPONSE_CODE_ONLY = 2,
+    REDIRECT_WEB_RESPONSE = 3,
+    CUSTOM_RESPONSE_WITH_HEADERS = 4,
+    NO_WEB_RESPONSE = 5,
 }
 
 local ffi = require "ffi"
@@ -47,8 +49,10 @@ typedef enum HttpModificationType
 typedef enum NanoWebResponseType
 {
     CUSTOM_WEB_RESPONSE,
+    CUSTOM_WEB_BLOCK_PAGE_RESPONSE,
     RESPONSE_CODE_ONLY,
     REDIRECT_WEB_RESPONSE,
+    CUSTOM_RESPONSE_WITH_HEADERS,
     NO_WEB_RESPONSE
 } NanoWebResponseType;
 
@@ -107,6 +111,26 @@ function nano.get_custom_response_data(session_data, response)
         local location = nano_attachment.get_redirect_page(attachment, session_data, response)
         local code = nano_attachment.get_response_code(response) or 307
         return code, "", { ["Location"] = location }
+    end
+
+    if response_type == nano.WebResponseType.CUSTOM_RESPONSE_WITH_HEADERS then
+        local custom_response, err = nano_attachment.get_custom_response_with_headers(attachment, session_data, response)
+        if not custom_response then
+            kong.log.err("Failed to get custom response with headers: ", err)
+            return 500, "Internal Server Error"
+        end
+
+        local code = custom_response.response_code
+        if not code or code < 100 or code > 599 then
+            kong.log.warn("Invalid response code in custom response: ", code, " - using 403 instead")
+            code = 403
+        end
+
+        local headers = custom_response.headers or {}
+        local body = custom_response.body or ""
+
+        kong.log.debug("Custom response with headers: code=", code, ", headers_count=", #headers, ", body_size=", #body)
+        return code, body, headers
     end
 
     local block_page = nano_attachment.get_block_page(attachment, session_data, response)

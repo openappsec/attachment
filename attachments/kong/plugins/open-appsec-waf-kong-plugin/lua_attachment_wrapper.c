@@ -104,6 +104,49 @@ static int lua_get_redirect_page(lua_State *L) {
     return 1;
 }
 
+static int lua_get_custom_response_with_headers(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
+    HttpSessionData* session_data = (HttpSessionData*)lua_touserdata(L, 2);
+    AttachmentVerdictResponse* response = (AttachmentVerdictResponse*)lua_touserdata(L, 3);
+
+    if (!attachment || !session_data || !response) {
+        return luaL_error(L, "invalid args to get_custom_response_with_headers");
+    }
+
+    CustomResponseWithHeaders* custom_response = GetCustomResponseWithHeaders(attachment, session_data, response);
+    if (!custom_response) {
+        lua_pushnil(L);
+        lua_pushstring(L, "Failed to get custom response with headers");
+        return 2;
+    }
+
+    // Create a table to return the data
+    lua_newtable(L);
+
+    // Add response code
+    lua_pushinteger(L, custom_response->response_code);
+    lua_setfield(L, -2, "response_code");
+
+    // Add headers as a nested table
+    lua_newtable(L);
+    for (uint8_t i = 0; i < custom_response->headers_count; i++) {
+        lua_pushlstring(L, custom_response->headers[i].key, custom_response->headers[i].key_size);
+        lua_pushlstring(L, custom_response->headers[i].value, custom_response->headers[i].value_size);
+        lua_settable(L, -3);
+    }
+    lua_setfield(L, -2, "headers");
+
+    // Add body
+    if (custom_response->body_size > 0 && custom_response->body) {
+        lua_pushlstring(L, custom_response->body, custom_response->body_size);
+    } else {
+        lua_pushstring(L, "");
+    }
+    lua_setfield(L, -2, "body");
+
+    return 1;
+}
+
 static int lua_free_http_metadata(lua_State *L) {
     HttpMetaData *metadata = (HttpMetaData *)lua_touserdata(L, 1);
     if (!metadata) return 0;
@@ -537,6 +580,7 @@ static const struct luaL_Reg nano_attachment_lib[] = {
     {"get_response_code", lua_get_response_code},
     {"get_block_page", lua_get_block_page},
     {"get_redirect_page", lua_get_redirect_page},
+    {"get_custom_response_with_headers", lua_get_custom_response_with_headers},
     {"createNanoStrAlloc", lua_createNanoStrAlloc},
     {"freeNanoStr", lua_freeNanoStr},
     {"setHeaderElement", lua_setHeaderElement},
