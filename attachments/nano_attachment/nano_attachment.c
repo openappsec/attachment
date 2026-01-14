@@ -10,6 +10,7 @@
 
 #include "nano_attachment_sender.h"
 #include "nano_attachment_metric.h"
+#include "nano_attachment_bucket.h"
 #include "nano_initializer.h"
 #include "nano_configuration.h"
 #include "nano_utils.h"
@@ -120,6 +121,15 @@ RestartAttachmentConfiguration(NanoAttachment *attachment)
     return reset_attachment_config(attachment);
 };
 
+int
+GetCommSocket(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return -1;
+    }
+    return attachment->comm_socket;
+}
+
 HttpSessionData *
 InitSessionData(NanoAttachment *attachment, SessionID session_id)
 {
@@ -224,6 +234,74 @@ SendDataNanoAttachment(NanoAttachment *attachment, AttachmentData *data)
     };
     return response;
 }
+
+NanoCommunicationResult
+SendDataNanoAttachmentAsync(NanoAttachment *attachment, AttachmentData *data)
+{
+    switch (data->chunk_type) {
+        case HTTP_REQUEST_FILTER: {
+            return SendRequestFilterAsync(attachment, data);
+        }
+        case HTTP_REQUEST_METADATA: {
+            return SendMetadataAsync(attachment, data);
+        }
+        case HTTP_REQUEST_HEADER: {
+            return SendRequestHeadersAsync(attachment, data);
+        }
+        case HTTP_REQUEST_BODY: {
+            return SendRequestBodyAsync(attachment, data);
+        }
+        case HTTP_REQUEST_END: {
+            return SendRequestEndAsync(attachment, data);
+        }
+        case HTTP_RESPONSE_HEADER: {
+            return SendResponseHeadersAsync(attachment, data);
+        }
+        case HTTP_RESPONSE_BODY: {
+            return SendResponseBodyAsync(attachment, data);
+        }
+        case HTTP_RESPONSE_END: {
+            return SendResponseEndAsync(attachment, data);
+        }
+        default:
+            break;
+    }
+
+    return NANO_OK;
+}
+
+// TODO: Implement
+// Check if the queue is empty, return true if yes - otherwise false.
+bool
+isQueueEmpty(NanoAttachment *attachment)
+{
+    return false;
+}
+
+// TODO: Implement
+// [hash on session id] -> [verdict+modification]
+// Updating the table, and then return the session ID to the caller
+SessionID
+PopFromQueue(NanoAttachment *attachment)
+{
+
+    return session_id;
+}
+
+// TODO: Implement
+// given a sessionID return a verdict from the table.
+AttachmentVerdictResponse
+getAttachmentVerdictResponse(NanoAttachment *attachment, SessionID session_id)
+{
+    (void)attachment;
+    (void)session_id;
+    return (AttachmentVerdictResponse) {
+        .verdict = ATTACHMENT_VERDICT_INSPECT,
+        .session_id = session_id,
+        .modifications = NULL
+    };
+}
+
 
 ///
 /// @brief Connects to the keep-alive socket.

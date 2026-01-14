@@ -41,6 +41,15 @@ void FiniNanoAttachment(NanoAttachment *attachment);
 NanoCommunicationResult RestartAttachmentConfiguration(NanoAttachment *attachment);
 
 ///
+/// @brief Retrieves the communication socket from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The communication socket file descriptor, or -1 if attachment is NULL.
+///
+int GetCommSocket(NanoAttachment *attachment);
+
+///
 /// @brief Initializes a HttpSessionData structure with default values.
 ///
 /// This function dynamically allocates memory for a HttpSessionData structure
@@ -99,6 +108,19 @@ void SendAccumulatedMetricData(NanoAttachment *attachment);
 /// @return An AttachmentVerdictResponse structure containing the verdict and session ID.
 ///
 AttachmentVerdictResponse SendDataNanoAttachment(NanoAttachment *attachment, AttachmentData *data);
+
+///
+/// @brief Sends attachment data asynchronously to the appropriate handlers.
+///
+/// This function processes the attachment data based on its chunk type and sends
+/// it to the appropriate async handler functions.
+///
+/// @param attachment A pointer to the NanoAttachment structure associated with the data.
+/// @param data A pointer to the AttachmentData structure containing the data to be processed.
+///
+/// @return A NanoCommunicationResult indicating the success or failure of the operation.
+///
+NanoCommunicationResult SendDataNanoAttachmentAsync(NanoAttachment *attachment, AttachmentData *data);
 
 ///
 /// @brief Sends a keep-alive signal using a socket connection.
@@ -265,5 +287,33 @@ freeCompressedBody(
     HttpSessionData *session_data,
     NanoHttpBody *bodies
 );
+
+///
+/// @brief Checks if the queue is empty.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return Returns true if the queue is empty, false otherwise.
+///
+bool isQueueEmpty(NanoAttachment *attachment);
+
+///
+/// @brief Pops a session ID from the queue and updates the table.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The session ID that was popped from the queue.
+///
+SessionID PopFromQueue(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves a verdict response for a given session ID from the table.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+/// @param session_id The session ID to look up.
+///
+/// @return An AttachmentVerdictResponse structure containing the verdict for the session.
+///
+AttachmentVerdictResponse getAttachmentVerdictResponse(NanoAttachment *attachment, SessionID session_id);
 
 #endif // __NANO_ATTACHMENT_H__

@@ -20,6 +20,8 @@ add_library(
     nano_attachment_thread.c
     nano_attachment_sender.c
     nano_attachment_sender_thread.c
+    nano_attachment_sender_async.c
+    nano_attachment_bucket.c
     nano_attachment_metric.c
     nano_compression.c
 )
