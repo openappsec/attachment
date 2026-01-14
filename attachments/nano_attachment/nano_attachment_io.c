@@ -1749,6 +1749,57 @@ nano_request_delayed_verdict(
     );
 }
 
+AttachmentVerdictResponse
+PopResponseVerdictFromQueue(NanoAttachment *attachment)
+{
+    const char *reply_data;
+    uint16_t reply_size;
+    HttpReplyFromService *reply_p;
+    int pop_result;
+    SessionID session_id = 0;
+
+    if (attachment == NULL || attachment->nano_service_ipc == NULL) {
+        return 0;
+    }
+
+    if (!isDataAvailable(attachment->nano_service_ipc)) {
+        return 0;
+    }
+
+    pop_result = receiveData(attachment->nano_service_ipc, &reply_size, &reply_data);
+    if (pop_result < 0 || reply_data == NULL) {
+        write_dbg(
+            attachment,
+            0,
+            DBG_LEVEL_WARNING,
+            "Failed to receive data from queue"
+        );
+        return 0;
+    }
+
+    reply_p = (HttpReplyFromService *)reply_data;
+
+    pop_result = popData(attachment->nano_service_ipc);
+    if (pop_result < 0) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "Failed to pop data from queue"
+        );
+        return 0;
+    }
+
+    response.verdict = reply_p->verdict;
+    response.session_id = reply_p->session_id;
+
+    // TODO: Deal with data leak.
+    response.web_response_data = NULL;
+    response.modifications = NULL;
+
+    return response;
+}
+
 void
 nano_send_metric_data_sender(NanoAttachment *attachment)
 {

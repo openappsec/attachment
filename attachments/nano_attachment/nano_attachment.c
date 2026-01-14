@@ -18,6 +18,7 @@
 #include "nano_blockpage.h"
 #include "compression_utils.h"
 #include "nano_compression.h"
+#include "nano_attachment_io.h"
 
 NanoAttachment *
 InitNanoAttachment(uint8_t attachment_type, int worker_id, int num_of_workers, int logging_fd)
@@ -282,12 +283,24 @@ SessionID
 PopFromNanoQueue(NanoAttachment *attachment)
 {
     AttachmentVerdictResponse response;
-    SessionID session_id = 0;
+    SessionID session_id;
     NanoCommunicationResult res;
-    // Pop from queue
 
+    response = PopResponseVerdictFromQueue(attachment);
+    if (response.session_id == 0) {
+        return 0;
+    }
+
+    session_id = response.session_id;
     res = NanoAsyncAddResponse(attachment, session_id, &response);
     if (res != NANO_OK) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "Failed to add async response for session ID: %d",
+            session_id
+        );
         return 0;
     }
 

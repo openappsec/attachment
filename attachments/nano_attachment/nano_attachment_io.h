@@ -231,4 +231,18 @@ nano_request_delayed_verdict(
 void
 nano_send_metric_data_sender(NanoAttachment *attachment);
 
+///
+/// @brief Pops one element from the shared memory queue and returns its session ID.
+///
+/// This function checks if data is available in the queue, receives the data,
+/// extracts the session ID from the HttpReplyFromService structure, and pops
+/// the element from the queue.
+///
+/// @param attachment A pointer to a NanoAttachment structure representing the attachment to the nano service.
+///
+/// @return The session ID of the popped element, or 0 if the queue is empty or an error occurred.
+///
+AttachmentVerdictResponse
+PopResponseVerdictFromQueue(NanoAttachment *attachment);
+
 #endif // __NANO_ATTACHMENT_IO_H__
