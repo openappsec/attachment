@@ -86,6 +86,8 @@ typedef struct NanoAttachment {
     uint64_t metric_data[METRIC_TYPES_COUNT];
     uint64_t metric_average_data_divisor[METRIC_TYPES_COUNT];
 #endif
+
+    AttachmentVerdictResponse async_buckets[CP_ASYNC_CTX_BUCKETS]; ///< Buckets for storing verdict responses.
 } NanoAttachment;
 
 ///

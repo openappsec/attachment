@@ -5,4 +5,9 @@
 #include "nano_attachment_common.h"
 #include "nano_initializer.h"
 
+AttachmentVerdictResponse NanoAsyncFindResponse(NanoAttachment *attachment, SessionID session_id);
+
+NanoCommunicationResult NanoAsyncAddResponse(NanoAttachment *attachment, SessionID session_id, AttachmentVerdictResponse *response);
+
+void NanoAsyncRemoveResponse(NanoAttachment *attachment, SessionID session_id);
 #endif // __NANO_ATTACHMENT_BUCKET_H__

@@ -278,31 +278,28 @@ isNanoQueueEmpty(NanoAttachment *attachment)
     return false;
 }
 
-// TODO: Implement
-// [hash on session id] -> [verdict+modification]
-// Updating the table, and then return the session ID to the caller
 SessionID
 PopFromNanoQueue(NanoAttachment *attachment)
 {
-    // Pop from queue
-    // Put into hash table.
-
+    AttachmentVerdictResponse response;
     SessionID session_id = 0;
+    NanoCommunicationResult res;
+    // Pop from queue
+
+    res = NanoAsyncAddResponse(attachment, session_id, &response);
+    if (res != NANO_OK) {
+        return 0;
+    }
+
     return session_id;
 }
 
-// TODO: Implement
-// given a sessionID return a verdict from the table.
 AttachmentVerdictResponse
 getAttachmentVerdictResponse(NanoAttachment *attachment, SessionID session_id)
 {
-    (void)attachment;
-    (void)session_id;
-    return (AttachmentVerdictResponse) {
-        .verdict = ATTACHMENT_VERDICT_INSPECT,
-        .session_id = session_id,
-        .modifications = NULL
-    };
+    AttachmentVerdictResponse response = NanoAsyncFindResponse(attachment, session_id);
+    NanoAsyncRemoveResponse(attachment, session_id);
+    return response;
 }
 
 
