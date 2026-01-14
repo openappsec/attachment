@@ -295,7 +295,7 @@ freeCompressedBody(
 ///
 /// @return Returns true if the queue is empty, false otherwise.
 ///
-bool isQueueEmpty(NanoAttachment *attachment);
+bool isNanoQueueEmpty(NanoAttachment *attachment);
 
 ///
 /// @brief Pops a session ID from the queue and updates the table.
@@ -304,7 +304,7 @@ bool isQueueEmpty(NanoAttachment *attachment);
 ///
 /// @return The session ID that was popped from the queue.
 ///
-SessionID PopFromQueue(NanoAttachment *attachment);
+SessionID PopFromNanoQueue(NanoAttachment *attachment);
 
 ///
 /// @brief Retrieves a verdict response for a given session ID from the table.

@@ -273,7 +273,7 @@ SendDataNanoAttachmentAsync(NanoAttachment *attachment, AttachmentData *data)
 // TODO: Implement
 // Check if the queue is empty, return true if yes - otherwise false.
 bool
-isQueueEmpty(NanoAttachment *attachment)
+isNanoQueueEmpty(NanoAttachment *attachment)
 {
     return false;
 }
@@ -282,8 +282,11 @@ isQueueEmpty(NanoAttachment *attachment)
 // [hash on session id] -> [verdict+modification]
 // Updating the table, and then return the session ID to the caller
 SessionID
-PopFromQueue(NanoAttachment *attachment)
+PopFromNanoQueue(NanoAttachment *attachment)
 {
+    // Pop from queue
+    // Put into hash table.
+
     SessionID session_id = 0;
     return session_id;
 }
