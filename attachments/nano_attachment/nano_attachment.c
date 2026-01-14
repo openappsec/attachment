@@ -284,7 +284,7 @@ isQueueEmpty(NanoAttachment *attachment)
 SessionID
 PopFromQueue(NanoAttachment *attachment)
 {
-
+    SessionID session_id = 0;
     return session_id;
 }
 
