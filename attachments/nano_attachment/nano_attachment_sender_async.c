@@ -178,6 +178,8 @@ SendRequestBodyAsyncImpl(
         false
     );
 
+    signal_for_session_data(attachment, session_data_p->session_id, HTTP_REQUEST_BODY);
+
     return ctx.res;
 }
 
