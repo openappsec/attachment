@@ -1757,13 +1757,19 @@ PopResponseVerdictFromQueue(NanoAttachment *attachment)
     HttpReplyFromService *reply_p;
     int pop_result;
     SessionID session_id = 0;
+    AttachmentVerdictResponse response = {
+        .verdict = ATTACHMENT_VERDICT_INSPECT,
+        .session_id = 0,
+        .web_response_data = NULL,
+        .modifications = NULL
+    };
 
     if (attachment == NULL || attachment->nano_service_ipc == NULL) {
-        return 0;
+        return response;
     }
 
     if (!isDataAvailable(attachment->nano_service_ipc)) {
-        return 0;
+        return response;
     }
 
     pop_result = receiveData(attachment->nano_service_ipc, &reply_size, &reply_data);
@@ -1774,7 +1780,7 @@ PopResponseVerdictFromQueue(NanoAttachment *attachment)
             DBG_LEVEL_WARNING,
             "Failed to receive data from queue"
         );
-        return 0;
+        return response;
     }
 
     reply_p = (HttpReplyFromService *)reply_data;
@@ -1787,10 +1793,35 @@ PopResponseVerdictFromQueue(NanoAttachment *attachment)
             DBG_LEVEL_WARNING,
             "Failed to pop data from queue"
         );
-        return 0;
+        return response;
     }
 
-    response.verdict = reply_p->verdict;
+    // Convert ServiceVerdict to AttachmentVerdict
+    switch ((ServiceVerdict)reply_p->verdict) {
+        case TRAFFIC_VERDICT_INSPECT:
+            response.verdict = ATTACHMENT_VERDICT_INSPECT;
+            break;
+        case TRAFFIC_VERDICT_ACCEPT:
+            response.verdict = ATTACHMENT_VERDICT_ACCEPT;
+            break;
+        case TRAFFIC_VERDICT_DROP:
+            response.verdict = ATTACHMENT_VERDICT_DROP;
+            break;
+        case TRAFFIC_VERDICT_INJECT:
+            // Not yet supported
+            response.verdict = ATTACHMENT_VERDICT_INSPECT;
+            break;
+        default:
+            write_dbg(
+                attachment,
+                reply_p->session_id,
+                DBG_LEVEL_WARNING,
+                "Unknown verdict %d",
+                reply_p->verdict
+            );
+            response.verdict = ATTACHMENT_VERDICT_INSPECT;
+            break;
+    }
     response.session_id = reply_p->session_id;
 
     // TODO: Deal with data leak.
