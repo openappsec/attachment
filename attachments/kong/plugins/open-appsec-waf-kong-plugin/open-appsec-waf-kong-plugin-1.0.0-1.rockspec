@@ -51,7 +51,7 @@ build = {
         "external/"
       },
       defines = { "_GNU_SOURCE", "ZLIB_CONST" },
-      libraries = { "pthread", "z", "rt", "stdc++" },
+      libraries = { "pthread", "z", "rt", "stdc++", "brotlienc", "brotlidec", "brotlicommon" },
       ldflags = { "-static-libstdc++", "-static-libgcc" }
     }
   }
