@@ -52,13 +52,6 @@ build = {
       },
       defines = { "_GNU_SOURCE", "ZLIB_CONST" },
       libraries = { "pthread", "z", "rt", "stdc++", "brotlienc", "brotlidec", "brotlicommon" },
-      libdirs = { 
-        "/usr/lib", 
-        "/usr/local/lib", 
-        "/usr/lib64", 
-        "/usr/local/lib64",
-        "/usr/lib/x86_64-linux-gnu"
-      },
       ldflags = { "-static-libstdc++", "-static-libgcc" }
     }
   }
