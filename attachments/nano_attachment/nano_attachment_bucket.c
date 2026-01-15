@@ -23,10 +23,10 @@ NanoAsyncFindResponse(NanoAttachment *attachment, SessionID session_id)
     AttachmentVerdictResponse response;
     uint bucket = nano_attachment_async_ctx_hash(session_id);
 
-    response.verdict = attachment->async_buckets[bucket]->verdict;
-    response.session_id = attachment->async_buckets[bucket]->session_id;
-    response.modifications = attachment->async_buckets[bucket]->modifications;
-    response.web_response_data = attachment->async_buckets[bucket]->web_response_data;
+    response.verdict = attachment->async_buckets[bucket].verdict;
+    response.session_id = attachment->async_buckets[bucket].session_id;
+    response.modifications = attachment->async_buckets[bucket].modifications;
+    response.web_response_data = attachment->async_buckets[bucket].web_response_data;
     
     return response;
 }
@@ -41,10 +41,10 @@ NanoAsyncAddResponse(NanoAttachment *attachment, SessionID session_id, Attachmen
     }
 
     bucket = nano_attachment_async_ctx_hash(session_id);
-    attachment->async_buckets[bucket]->session_id = response->session_id;
-    attachment->async_buckets[bucket]->verdict = response->verdict;
-    attachment->async_buckets[bucket]->modifications = response->modifications;
-    attachment->async_buckets[bucket]->web_response_data = response->web_response_data;
+    attachment->async_buckets[bucket].session_id = response->session_id;
+    attachment->async_buckets[bucket].verdict = response->verdict;
+    attachment->async_buckets[bucket].modifications = response->modifications;
+    attachment->async_buckets[bucket].web_response_data = response->web_response_data;
     return NANO_OK;
 }
 
