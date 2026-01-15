@@ -22,6 +22,7 @@
 
 #include "nano_attachment_common.h"
 #include "shmem_ipc_2.h"
+#include "nano_attachment_bucket.h"
 
 #define LOGGING_DIRECTORY_PATH "/var/log/nano_attachment" ///< Default logging directory path.
 #define LOGGING_FILE_NAME "nano_attachment" ///< Default logging file name.
