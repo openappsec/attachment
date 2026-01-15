@@ -19,6 +19,13 @@ dependencies = {
   "lua >= 2.1"
 }
 
+external_dependencies = {
+  BROTLI = {
+    header = "brotli/encode.h",
+    library = "brotlienc"
+  }
+}
+
 build = {
   type = "builtin",
 
@@ -48,10 +55,12 @@ build = {
       incdirs = {
         "core/include/attachments/",
         "attachments/nano_attachment/",
-        "external/"
+        "external/",
+        "$(BROTLI_INCDIR)"
       },
       defines = { "_GNU_SOURCE", "ZLIB_CONST" },
       libraries = { "pthread", "z", "rt", "stdc++", "brotlienc", "brotlidec", "brotlicommon" },
+      libdirs = { "$(BROTLI_LIBDIR)" },
       ldflags = { "-static-libstdc++", "-static-libgcc" }
     }
   }
