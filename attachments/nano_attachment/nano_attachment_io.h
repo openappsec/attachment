@@ -220,7 +220,8 @@ nano_request_delayed_verdict(
     NanoAttachment *attachment,
     HttpEventThreadCtx *ctx,
     SessionID cur_request_id,
-    unsigned int *num_messages_sent
+    unsigned int *num_messages_sent,
+    bool is_verdict_requested
 );
 
 ///

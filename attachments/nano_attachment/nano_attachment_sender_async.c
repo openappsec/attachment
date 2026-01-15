@@ -250,6 +250,36 @@ SendDelayedVerdictRequestAsyncImpl(
 }
 
 NanoCommunicationResult
+SendHoldDataAsyncImpl(
+    NanoAttachment *attachment,
+    HttpSessionData *session_data_p
+)
+{
+    HttpEventThreadCtx ctx;
+
+    if (attachment == NULL || session_data_p == NULL) {
+        return NANO_ERROR;
+    }
+
+    ctx.attachment = attachment;
+    ctx.data = NULL;
+    ctx.session_data_p = session_data_p;
+    ctx.res = NANO_OK;
+    ctx.web_response_data = NULL;
+    ctx.modifications = NULL;
+
+    nano_request_delayed_verdict(
+        attachment,
+        &ctx,
+        session_data_p->session_id,
+        &session_data_p->remaining_messages_to_reply,
+        false
+    );
+
+    return ctx.res;
+}
+
+NanoCommunicationResult
 SendMetricToServiceAsyncImpl(
     NanoAttachment *attachment,
     HttpSessionData *session_data_p

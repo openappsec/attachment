@@ -97,7 +97,8 @@ public:
             NanoAttachment *attachment,
             HttpEventThreadCtx *ctx,
             SessionID cur_request_id,
-            unsigned int *num_messages_sent
+            unsigned int *num_messages_sent,
+            bool is_verdict_requested
         )
     );
 
@@ -200,7 +201,8 @@ CMOCK_MOCK_FUNCTION4(
         NanoAttachment *attachment,
         HttpEventThreadCtx *ctx,
         SessionID cur_request_id,
-        unsigned int *num_messages_sent
+        unsigned int *num_messages_sent,
+        bool is_verdict_requested
     )
 );
 

@@ -321,7 +321,8 @@ SendDelayedVerdictRequestThread(void *_ctx)
         attachment,
         ctx,
         session_data_p->session_id,
-        &session_data_p->remaining_messages_to_reply
+        &session_data_p->remaining_messages_to_reply,
+        true
     );
 
     return NULL;

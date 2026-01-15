@@ -205,6 +205,19 @@ NanoCommunicationResult SendRequestEndAsync(NanoAttachment *attachment, Attachme
 NanoCommunicationResult SendResponseEndAsync(NanoAttachment *attachment, AttachmentData *data);
 
 ///
+/// @brief Sends a delayed verdict signal to the agent asynchronously.
+///
+/// This function sends a delayed verdict signal to the agent service, requesting an updated
+/// verdict for a session that is currently in a delayed state.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+/// @param data A pointer to AttachmentData structure containing the session data.
+///
+/// @return A NanoCommunicationResult indicating the outcome of the operation.
+///
+NanoCommunicationResult SendHoldDataAsync(NanoAttachment *attachment, AttachmentData *data);
+
+///
 /// @brief Sends metric data to the nano service and resets it on the attachment.
 ///
 /// @param attachment A pointer to the NanoAttachment structure that contains metrics data.

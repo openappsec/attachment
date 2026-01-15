@@ -1139,6 +1139,42 @@ SendResponseEndAsync(NanoAttachment *attachment, AttachmentData *data)
 }
 
 NanoCommunicationResult
+SendHoldDataAsync(NanoAttachment *attachment, AttachmentData *data)
+{
+    if (attachment == NULL || data == NULL) {
+        return NANO_ERROR;
+    }
+
+    HttpSessionData *session_data_p = data->session_data;
+    if (session_data_p == NULL) {
+        return NANO_ERROR;
+    }
+
+    SessionID session_id = session_data_p->session_id;
+
+    write_dbg(
+        attachment,
+        session_id,
+        DBG_LEVEL_DEBUG,
+        "Hold data handling session ID: %d",
+        session_id
+    );
+
+    if (handle_shmem_corruption(attachment) == NANO_ERROR) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "Failed to handle shmem corruption in session ID: %d",
+            session_id
+        );
+        return NANO_ERROR;
+    }
+
+    return SendHoldDataAsyncImpl(attachment, session_data_p);
+}
+
+NanoCommunicationResult
 SendMetricData(NanoAttachment *attachment)
 {
     HttpEventThreadCtx ctx;

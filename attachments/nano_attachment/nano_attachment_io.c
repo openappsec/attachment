@@ -1703,7 +1703,8 @@ nano_request_delayed_verdict(
     NanoAttachment *attachment,
     HttpEventThreadCtx *ctx,
     SessionID cur_request_id,
-    unsigned int *num_messages_sent
+    unsigned int *num_messages_sent,
+    bool is_verdict_requested
 )
 {
     char *fragments[DELAYED_VERDICT_DATA_COUNT];
@@ -1740,13 +1741,17 @@ nano_request_delayed_verdict(
 
     *num_messages_sent += 1;
 
-    ctx->res = service_reply_receiver(
-        attachment,
-        ctx->session_data_p,
-        &ctx->web_response_data,
-        &ctx->modifications,
-        wait_transaction_type
-    );
+    if (is_verdict_requested) {
+        ctx->res = service_reply_receiver(
+            attachment,
+            ctx->session_data_p,
+            &ctx->web_response_data,
+            &ctx->modifications,
+            wait_transaction_type
+        );
+    } else {
+        ctx->res = NANO_OK;
+    }
 }
 
 AttachmentVerdictResponse
@@ -1796,6 +1801,8 @@ PopResponseVerdictFromQueue(NanoAttachment *attachment)
         return response;
     }
 
+    response.session_id = reply_p->session_id;
+
     // Convert ServiceVerdict to AttachmentVerdict
     switch ((ServiceVerdict)reply_p->verdict) {
         case TRAFFIC_VERDICT_INSPECT:
@@ -1814,15 +1821,23 @@ PopResponseVerdictFromQueue(NanoAttachment *attachment)
         case TRAFFIC_VERDICT_RECONF:
             write_dbg(
                 attachment,
-                reply_p->session_id,
+                0,
                 DBG_LEVEL_TRACE,
                 "Verdict reconf received from the nano service"
             );
             reset_attachment_config(attachment);
             response.verdict = ATTACHMENT_VERDICT_INSPECT;
+            response.session_id = 0;
             break;
         case TRAFFIC_VERDICT_DELAYED:
-            response.verdict = ATTACHMENT_VERDICT_INSPECT;
+            write_dbg(
+                attachment,
+                reply_p->session_id,
+                DBG_LEVEL_TRACE,
+                "Verdict delayed received from the nano service"
+            );
+
+            response.verdict = ATTACHMENT_VERDICT_DELAYED;
             break;
         default:
             write_dbg(
@@ -1835,7 +1850,6 @@ PopResponseVerdictFromQueue(NanoAttachment *attachment)
             response.verdict = ATTACHMENT_VERDICT_INSPECT;
             break;
     }
-    response.session_id = reply_p->session_id;
 
     // TODO: Deal with data leak.
     response.web_response_data = NULL;

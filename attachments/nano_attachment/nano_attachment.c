@@ -265,6 +265,9 @@ SendDataNanoAttachmentAsync(NanoAttachment *attachment, AttachmentData *data)
         case HTTP_RESPONSE_END: {
             return SendResponseEndAsync(attachment, data);
         }
+        case HOLD_DATA: {
+            return SendHoldDataAsync(attachment, data);
+        }
         default:
             break;
     }
