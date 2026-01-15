@@ -1,5 +1,7 @@
 #include "nano_attachment_bucket.h"
 
+#include <string.h>
+
 #define CP_ASYNC_CTX_BUCKETS 2048 ///< Hash table buckets for better distribution
 
 ///
@@ -49,9 +51,7 @@ NanoAsyncAddResponse(NanoAttachment *attachment, SessionID session_id, Attachmen
 void
 NanoAsyncRemoveResponse(NanoAttachment *attachment, SessionID session_id)
 {
-    uint bucket = nano_attachment_async_ctx_hash(ctx->session_id);
-    attachment->async_buckets[bucket]->session_id = 0;
-    attachment->async_buckets[bucket]->verdict = ATTACHMENT_VERDICT_INSPECT;
-    attachment->async_buckets[bucket]->modifications = NULL;
-    attachment->async_buckets[bucket]->web_response_data = NULL;
+    uint bucket = nano_attachment_async_ctx_hash(session_id);
+    memset(&attachment->async_buckets[bucket], 0, sizeof(AttachmentVerdictResponse));
+    attachment->async_buckets[bucket].verdict = ATTACHMENT_VERDICT_INSPECT;
 }

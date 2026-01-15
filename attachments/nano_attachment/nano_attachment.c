@@ -97,6 +97,7 @@ InitNanoAttachment(uint8_t attachment_type, int worker_id, int num_of_workers, i
     attachment->inspection_mode = NON_BLOCKING_THREAD;
     attachment->num_of_nano_ipc_elements = 200;
     attachment->keep_alive_interval_msec = DEFAULT_KEEP_ALIVE_INTERVAL_MSEC;
+    memset(attachment->async_buckets, 0, sizeof(attachment->async_buckets));
 
     if (nano_attachment_init_process(attachment) != NANO_OK) {
         write_dbg(attachment, 0, DBG_LEVEL_WARNING, "Could not initialize nano attachment");
@@ -271,12 +272,13 @@ SendDataNanoAttachmentAsync(NanoAttachment *attachment, AttachmentData *data)
     return NANO_OK;
 }
 
-// TODO: Implement
-// Check if the queue is empty, return true if yes - otherwise false.
 bool
 isNanoQueueEmpty(NanoAttachment *attachment)
 {
-    return false;
+    if (attachment == NULL || attachment->nano_service_ipc == NULL) {
+        return true;
+    }
+    return !isDataAvailable(attachment->nano_service_ipc);
 }
 
 SessionID
