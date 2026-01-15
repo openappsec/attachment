@@ -12,7 +12,7 @@ static int lua_init_nano_attachment(lua_State *L) {
     int worker_id = luaL_checkinteger(L, 1);
     int num_workers = luaL_checkinteger(L, 2);
 
-    NanoAttachment* attachment = InitNanoAttachment(0, worker_id, num_workers, fileno(stdout));
+    NanoAttachment* attachment = InitNanoAttachment(0, worker_id, num_workers, fileno(stderr));
     if (!attachment) {
         lua_pushnil(L);
         lua_pushstring(L, "Failed to initialize NanoAttachment");
