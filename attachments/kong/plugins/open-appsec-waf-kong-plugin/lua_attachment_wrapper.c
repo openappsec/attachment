@@ -12,7 +12,7 @@ static int lua_init_nano_attachment(lua_State *L) {
     int worker_id = luaL_checkinteger(L, 1);
     int num_workers = luaL_checkinteger(L, 2);
 
-    NanoAttachment* attachment = InitNanoAttachment(0, worker_id, num_workers, fileno(stderr));
+    NanoAttachment* attachment = InitNanoAttachment(0, worker_id, num_workers, fileno(stdout));
     if (!attachment) {
         lua_pushnil(L);
         lua_pushstring(L, "Failed to initialize NanoAttachment");
@@ -135,7 +135,7 @@ static int lua_createNanoStrAlloc(lua_State *L) {
         lua_pushnil(L);
         lua_pushstring(L, "Failed to allocate memory for string");
         return 2;
-    }
+}
 
     nano_str_t* nanoStr = (nano_str_t*)malloc(sizeof(nano_str_t));
     if (!nanoStr) {
@@ -350,6 +350,43 @@ static int lua_send_data(lua_State *L) {
     return 2;
 }
 
+static int lua_send_data_async(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
+    SessionID session_id = luaL_checkinteger(L, 2);
+    HttpSessionData *session_data = (HttpSessionData*) lua_touserdata(L, 3);
+    HttpChunkType chunk_type = luaL_checkinteger(L, 4);
+    HttpMetaData* meta_data = (HttpMetaData*) lua_touserdata(L, 5);
+    HttpHeaders* req_headers = (HttpHeaders*) lua_touserdata(L, 6);
+    int contains_body = luaL_checkinteger(L, 7);
+
+    if (!attachment || !session_data || !meta_data || !req_headers) {
+        lua_pushstring(L, "Error: received NULL data in lua_send_data_async");
+        return lua_error(L);
+    }
+
+    HttpRequestFilterData *filter_data = (HttpRequestFilterData *)malloc(sizeof(HttpRequestFilterData));
+    if (!filter_data) {
+        return luaL_error(L, "Memory allocation failed for HttpRequestFilterData");
+    }
+
+    filter_data->meta_data = meta_data;
+    filter_data->req_headers = req_headers;
+    filter_data->contains_body = contains_body;
+
+    AttachmentData attachment_data;
+    attachment_data.session_id = session_id;
+    attachment_data.session_data = session_data;
+    attachment_data.chunk_type = chunk_type;
+    attachment_data.data = (void*)filter_data;
+
+    SendDataNanoAttachmentAsync(attachment, &attachment_data);
+
+    free(filter_data);
+
+    lua_pushinteger(L, session_id);
+    return 1;
+}
+
 static int lua_send_body(lua_State *L) {
     NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
     SessionID session_id = luaL_checkinteger(L, 2);
@@ -364,7 +401,7 @@ static int lua_send_body(lua_State *L) {
     }
 
     if (body_len <= 8 * 1024) {
-        HttpBody http_chunks;
+        NanoHttpBody http_chunks;
         http_chunks.bodies_count = 1;
         
         nano_str_t chunk;
@@ -400,7 +437,7 @@ static int lua_send_body(lua_State *L) {
         num_chunks = 10000;
     }
 
-    HttpBody http_chunks;
+    NanoHttpBody http_chunks;
     http_chunks.bodies_count = num_chunks;
 
     http_chunks.data = (nano_str_t*)malloc(num_chunks * sizeof(nano_str_t));
@@ -441,6 +478,79 @@ static int lua_send_body(lua_State *L) {
     return 3;
 }
 
+static int lua_send_body_async(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
+    SessionID session_id = luaL_checkinteger(L, 2);
+    HttpSessionData *session_data = (HttpSessionData*) lua_touserdata(L, 3);
+    size_t body_len;
+    const char *body_chunk = luaL_checklstring(L, 4, &body_len);
+    HttpChunkType chunk_type = luaL_checkinteger(L, 5);
+
+    if (!attachment || !session_data || !body_chunk) {
+        lua_pushstring(L, "Error: Invalid attachment or session_data");
+        return lua_error(L);
+    }
+
+    if (body_len <= 8 * 1024) {
+        NanoHttpBody http_chunks;
+        http_chunks.bodies_count = 1;
+        
+        nano_str_t chunk;
+        chunk.data = (unsigned char*)body_chunk;
+        chunk.len = body_len;
+        http_chunks.data = &chunk;
+
+        AttachmentData attachment_data;
+        attachment_data.session_id = session_id;
+        attachment_data.session_data = session_data;
+        attachment_data.chunk_type = chunk_type;
+        attachment_data.data = &http_chunks;
+
+        SendDataNanoAttachmentAsync(attachment, &attachment_data);
+
+        lua_pushinteger(L, session_id);
+        return 1;
+    }
+
+    const size_t CHUNK_SIZE = 8 * 1024;
+    size_t num_chunks = ((body_len - 1) / CHUNK_SIZE) + 1;
+
+    if (num_chunks > 10000) {
+        num_chunks = 10000;
+    }
+
+    NanoHttpBody http_chunks;
+    http_chunks.bodies_count = num_chunks;
+
+    http_chunks.data = (nano_str_t*)malloc(num_chunks * sizeof(nano_str_t));
+    if (!http_chunks.data) {
+        lua_pushstring(L, "Error: Failed to allocate memory for chunks");
+        return lua_error(L);
+    }
+
+    for (size_t i = 0; i < num_chunks; i++) {
+        nano_str_t* chunk_ptr = (nano_str_t*)((char*)http_chunks.data + (i * sizeof(nano_str_t)));
+        size_t chunk_start = i * CHUNK_SIZE;
+        size_t chunk_len = (i == num_chunks - 1) ? (body_len - chunk_start) : CHUNK_SIZE;
+        
+        chunk_ptr->data = (unsigned char*)(body_chunk + chunk_start);
+        chunk_ptr->len = chunk_len;
+    }
+
+    AttachmentData attachment_data;
+    attachment_data.session_id = session_id;
+    attachment_data.session_data = session_data;
+    attachment_data.chunk_type = chunk_type;
+    attachment_data.data = &http_chunks;
+
+    SendDataNanoAttachmentAsync(attachment, &attachment_data);
+
+    free(http_chunks.data);
+
+    lua_pushinteger(L, session_id);
+    return 1;
+}
+
 static int lua_end_inspection(lua_State *L) {
     NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
     SessionID session_id = luaL_checkinteger(L, 2);
@@ -464,6 +574,46 @@ static int lua_end_inspection(lua_State *L) {
     lua_pushinteger(L, res_ptr->verdict);
     lua_pushlightuserdata(L, res_ptr);
 
+    return 2;
+}
+
+static int lua_end_inspection_async(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
+    SessionID session_id = luaL_checkinteger(L, 2);
+    HttpSessionData* session_data = (HttpSessionData*) lua_touserdata(L, 3);
+    HttpChunkType chunk_type = luaL_checkinteger(L, 4);
+
+    if (!attachment || !session_data) {
+        lua_pushstring(L, "Error: Invalid attachment or session_data");
+        return lua_error(L);
+    }
+
+    AttachmentData attachment_data;
+    attachment_data.session_id = session_id;
+    attachment_data.session_data = session_data;
+    attachment_data.chunk_type = chunk_type;
+    attachment_data.data = NULL;
+
+    SendDataNanoAttachmentAsync(attachment, &attachment_data);
+
+    lua_pushinteger(L, session_id);
+    return 1;
+}
+
+static int lua_get_attachment_verdict_response(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
+    SessionID session_id = luaL_checkinteger(L, 2);
+
+    if (!attachment) {
+        lua_pushstring(L, "Error: Invalid attachment");
+        return lua_error(L);
+    }
+
+    AttachmentVerdictResponse* res_ptr = malloc(sizeof(AttachmentVerdictResponse));
+    *res_ptr = getAttachmentVerdictResponse(attachment, session_id);
+
+    lua_pushinteger(L, res_ptr->verdict);
+    lua_pushlightuserdata(L, res_ptr);
     return 2;
 }
 
@@ -507,27 +657,35 @@ static int lua_free_verdict_response(lua_State *L) {
     return 0;
 }
 
-static int lua_get_request_processing_timeout_msec(lua_State *L) {
+static int lua_get_attachment_socket(lua_State *L) {
     NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
     if (!attachment) {
-        lua_pushinteger(L, 3000);
-        return 1;
+        return luaL_error(L, "invalid attachment");
     }
 
-    uint32_t timeout = GetRequestProcessingTimeout(attachment);
-    lua_pushinteger(L, timeout);
+    lua_pushinteger(L, GetCommSocket(attachment));
     return 1;
 }
 
-static int lua_get_response_processing_timeout_msec(lua_State *L) {
+static int lua_pop_from_queue(lua_State *L) {
     NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
     if (!attachment) {
-        lua_pushinteger(L, 3000);
-        return 1;
+        return luaL_error(L, "invalid attachment");
     }
 
-    uint32_t timeout = GetResponseProcessingTimeout(attachment);
-    lua_pushinteger(L, timeout);
+    SessionID session_id = PopFromNanoQueue(attachment);
+    lua_pushinteger(L, session_id);
+    return 1;
+}
+
+static int lua_is_queue_empty(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
+    if (!attachment) {
+        return luaL_error(L, "invalid attachment");
+    }
+
+    bool is_empty = isNanoQueueEmpty(attachment);
+    lua_pushboolean(L, is_empty);
     return 1;
 }
 
@@ -552,9 +710,14 @@ static const struct luaL_Reg nano_attachment_lib[] = {
     {"free_http_metadata", lua_free_http_metadata},
     {"free_verdict_response", lua_free_verdict_response},
     {"send_body", lua_send_body},
+    {"send_body_async", lua_send_body_async},
     {"end_inspection", lua_end_inspection},
-    {"get_request_processing_timeout_msec", lua_get_request_processing_timeout_msec},
-    {"get_response_processing_timeout_msec", lua_get_response_processing_timeout_msec},
+    {"end_inspection_async", lua_end_inspection_async},
+    {"send_data_async", lua_send_data_async},
+    {"get_attachment_verdict_response", lua_get_attachment_verdict_response},
+    {"get_attachment_socket", lua_get_attachment_socket},
+    {"pop_from_queue", lua_pop_from_queue},
+    {"is_queue_empty", lua_is_queue_empty},
     {NULL, NULL}
 };
 

@@ -3,7 +3,7 @@ version = "1.0.0-1"
 
 source = {
   url = "git://github.com/openappsec/attachment.git",
-  tag = "main"
+  tag = "feature/async_kong_nano_attachment"
 }
 
 description = {
@@ -39,6 +39,8 @@ build = {
         "attachments/nano_attachment/nano_configuration.c",
         "attachments/nano_attachment/nano_initializer.c",
         "attachments/nano_attachment/nano_utils.c",
+   "attachments/nano_attachment/nano_attachment_sender_async.c",
+"attachments/nano_attachment/nano_attachment_bucket.c",
         "attachments/nano_attachment/nano_attachment_util/nano_attachment_util.cc",
         "core/attachments/http_configuration/http_configuration.cc",
         "core/compression/compression_utils.cc",
@@ -51,7 +53,13 @@ build = {
         "external/"
       },
       defines = { "_GNU_SOURCE", "ZLIB_CONST" },
-      libraries = { "pthread", "z", "rt", "stdc++" },
+      libraries = {   "pthread",
+  "z",
+  "rt",
+  "stdc++",
+  "brotlidec",
+  "brotlienc",
+  "brotlicommon"},
       ldflags = { "-static-libstdc++", "-static-libgcc" }
     }
   }

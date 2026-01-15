@@ -5,6 +5,7 @@ local nano = {}
 
 nano.session_counter = 0
 nano.attachments = {}
+nano.num_workers = ngx.worker.count() or 1
 nano.allocated_strings = {}
 nano.allocate_headers = {}
 nano.allocated_metadata = {}
@@ -81,14 +82,13 @@ function nano.generate_session_id()
     return tonumber(string.format("%d%05d", worker_id, nano.session_counter))
 end
 
--- Returns: status_code, body, headers
-function nano.get_custom_response_data(session_data, response)
+function nano.handle_custom_response(session_data, response)
     local worker_id = ngx.worker.id()
     local attachment = nano.attachments[worker_id]
 
     if not attachment then
         kong.log.warn("Cannot handle custom response: Attachment not available for worker ", worker_id, " - failing open")
-        return 200, "Request allowed due to attachment unavailability", {}
+        return kong.response.exit(200, "Request allowed due to attachment unavailability")
     end
 
     local response_type = nano_attachment.get_web_response_type(attachment, session_data, response)
@@ -100,19 +100,18 @@ function nano.get_custom_response_data(session_data, response)
             code = 403
         end
         kong.log.debug("Response code only: ", code)
-        return code, "", {}
+        return kong.response.exit(code, "")
     end
 
     if response_type == nano.WebResponseType.REDIRECT_WEB_RESPONSE then
         local location = nano_attachment.get_redirect_page(attachment, session_data, response)
-        local code = nano_attachment.get_response_code(response) or 307
-        return code, "", { ["Location"] = location }
+        return kong.response.exit(307, "", { ["Location"] = location })
     end
 
     local block_page = nano_attachment.get_block_page(attachment, session_data, response)
     if not block_page then
-        kong.log.debug("Failed to retrieve custom block page for session ", session_data)
-        return 403, "", {}
+        kong.log.err("Failed to retrieve custom block page for session ", session_data)
+        return kong.response.exit(500, { message = "Internal Server Error" })
     end
     local code = nano_attachment.get_response_code(response)
     if not code or code < 100 or code > 599 then
@@ -120,13 +119,8 @@ function nano.get_custom_response_data(session_data, response)
         code = 403
     end
     kong.log.debug("Block page response with code: ", code)
-    return code, block_page, { ["Content-Type"] = "text/html" }
-end
+    return kong.response.exit(code, block_page, { ["Content-Type"] = "text/html" })
 
--- Wrapper for backward compatibility - calls kong.response.exit() in access phase
-function nano.handle_custom_response(session_data, response)
-    local code, body, headers = nano.get_custom_response_data(session_data, response)
-    return kong.response.exit(code, body, headers)
 end
 
 
@@ -184,15 +178,15 @@ end
 
 function nano.init_attachment()
     local worker_id = ngx.worker.id()
-    local num_workers = ngx.worker.count() or 1  -- Get count dynamically
     local attachment, err
     local retries = 3
 
     for attempt = 1, retries do
-        attachment, err = nano_attachment.init_nano_attachment(worker_id, num_workers)
+        attachment, err = nano_attachment.init_nano_attachment(worker_id, nano.num_workers)
         if attachment then
             break
         end
+
         kong.log.err("Worker ", worker_id, " failed to initialize attachment (attempt ", attempt, "/", retries, "): ", err)
     end
 
@@ -234,8 +228,8 @@ function nano.is_session_finalized(session_data)
     local attachment = nano.attachments[worker_id]
 
     if not attachment or not session_data then
-        kong.log.debug("Cannot check session finalization: Invalid attachment or session_data")
-        return true
+        kong.log.err("Cannot check session finalization: Invalid attachment or session_data")
+        return false
     end
 
     return nano_attachment.is_session_finalized(attachment, session_data)
@@ -262,6 +256,7 @@ function nano.handle_start_transaction()
     )
 
     table.insert(nano.allocated_metadata, metadata)
+
     collectgarbage("stop")
 
     return metadata
@@ -300,6 +295,7 @@ function nano.handleHeaders(headers)
     end
 
     nano_attachment.setHeaderCount(header_data, index)
+
     return header_data
 end
 
@@ -324,6 +320,21 @@ function nano.send_data(session_id, session_data, meta_data, header_data, contai
     return verdict, response
 end
 
+function nano.send_data_async(session_id, session_data, meta_data, header_data, contains_body, chunk_type)
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.warn("Attachment not available for worker ", worker_id, " - failing open")
+        return nil
+    end
+
+    contains_body = tonumber(contains_body) or 0
+    contains_body = (contains_body > 0) and 1 or 0
+
+    return nano_attachment.send_data_async(attachment, session_id, session_data, chunk_type, meta_data, header_data, contains_body)
+end
+
 function nano.send_body(session_id, session_data, body_chunk, chunk_type)
     local worker_id = ngx.worker.id()
     local attachment = nano.attachments[worker_id]
@@ -340,6 +351,18 @@ function nano.send_body(session_id, session_data, body_chunk, chunk_type)
     end
 
     return verdict, response, modifications
+end
+
+function nano.send_body_async(session_id, session_data, body_chunk, chunk_type)
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.warn("Attachment not available for worker ", worker_id, " - failing open")
+        return nil
+    end
+
+    return nano_attachment.send_body_async(attachment, session_id, session_data, body_chunk, chunk_type)
 end
 
 function nano.inject_at_position(buffer, injection, pos)
@@ -472,7 +495,7 @@ function nano.end_inspection(session_id, session_data, chunk_type)
     end
 
     if not session_data then
-        kong.log.debug("Cannot end inspection: Invalid session_data for session ", session_id)
+        kong.log.err("Cannot end inspection: Invalid session_data for session ", session_id)
         return nano.AttachmentVerdict.INSPECT, nil
     end
 
@@ -485,30 +508,75 @@ function nano.end_inspection(session_id, session_data, chunk_type)
     return verdict, response
 end
 
-function nano.get_request_processing_timeout_sec()
+function nano.end_inspection_async(session_id, session_data, chunk_type)
     local worker_id = ngx.worker.id()
     local attachment = nano.attachments[worker_id]
 
     if not attachment then
-        kong.log.warn("Attachment not available for worker ", worker_id, " - using default timeout")
-        return 3
+        kong.log.warn("Attachment not available for worker ", worker_id, " - failing open during end_inspection_async")
+        return nil
     end
 
-    local timeout_msec = nano_attachment.get_request_processing_timeout_msec(attachment)
-    return timeout_msec / 1000.0
+    if not session_data then
+        kong.log.err("Cannot end inspection async: Invalid session_data for session ", session_id)
+        return nil
+    end
+
+    return nano_attachment.end_inspection_async(attachment, session_id, session_data, chunk_type)
 end
 
-function nano.get_response_processing_timeout_sec()
+function nano.get_attachment_verdict_response(session_id)
     local worker_id = ngx.worker.id()
     local attachment = nano.attachments[worker_id]
 
     if not attachment then
-        kong.log.warn("Attachment not available for worker ", worker_id, " - using default timeout")
-        return 3
+        kong.log.err("Attachment not available for worker ", worker_id)
+        return nil, nil
     end
 
-    local timeout_msec = nano_attachment.get_response_processing_timeout_msec(attachment)
-    return timeout_msec / 1000.0
+    local verdict, response = nano_attachment.get_attachment_verdict_response(attachment, session_id)
+
+    if response then
+        table.insert(nano.allocated_responses, response)
+    end
+
+    return verdict, response
+end
+
+function nano.get_attachment_socket()
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.err("Attachment not available for worker ", worker_id)
+        return nil
+    end
+
+    return nano_attachment.get_attachment_socket(attachment)
+end
+
+function nano.pop_from_queue()
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.err("Attachment not available for worker ", worker_id)
+        return nil
+    end
+
+    return nano_attachment.pop_from_queue(attachment)
+end
+
+function nano.is_queue_empty()
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.err("Attachment not available for worker ", worker_id)
+        return true
+    end
+
+    return nano_attachment.is_queue_empty(attachment)
 end
 
 return nano
