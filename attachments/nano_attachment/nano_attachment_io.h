@@ -245,4 +245,7 @@ nano_send_metric_data_sender(NanoAttachment *attachment);
 AttachmentVerdictResponse
 PopResponseVerdictFromQueue(NanoAttachment *attachment);
 
+NanoCommunicationResult
+signal_for_session_data(NanoAttachment *attachment, uint32_t cur_session_id, AttachmentDataType chunk_type);
+
 #endif // __NANO_ATTACHMENT_IO_H__

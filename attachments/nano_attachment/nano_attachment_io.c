@@ -108,7 +108,7 @@ notify_signal_to_service(NanoAttachment *attachment, uint32_t cur_session_id)
 ///         NANO_AGAIN if the response indicates an old session ID and polling should be retried,
 ///         NANO_TIMEOUT if a timeout occurs while waiting for the response.
 ///
-static NanoCommunicationResult
+NanoCommunicationResult
 signal_for_session_data(NanoAttachment *attachment, uint32_t cur_session_id, AttachmentDataType chunk_type)
 {
     struct pollfd s_poll;
@@ -1809,6 +1809,19 @@ PopResponseVerdictFromQueue(NanoAttachment *attachment)
             break;
         case TRAFFIC_VERDICT_INJECT:
             // Not yet supported
+            response.verdict = ATTACHMENT_VERDICT_INSPECT;
+            break;
+        case TRAFFIC_VERDICT_RECONF:
+            write_dbg(
+                attachment,
+                reply_p->session_id,
+                DBG_LEVEL_TRACE,
+                "Verdict reconf received from the nano service"
+            );
+            reset_attachment_config(attachment);
+            response.verdict = ATTACHMENT_VERDICT_INSPECT;
+            break;
+        case TRAFFIC_VERDICT_DELAYED:
             response.verdict = ATTACHMENT_VERDICT_INSPECT;
             break;
         default:
