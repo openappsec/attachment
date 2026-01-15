@@ -3,7 +3,7 @@ version = "1.0.0-1"
 
 source = {
   url = "git://github.com/openappsec/attachment.git",
-  tag = "fix-lua-installation"
+  tag = "main"
 }
 
 description = {
