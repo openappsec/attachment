@@ -94,6 +94,8 @@ SendMetadataAsyncImpl(
         is_verdict_requested
     );
 
+    signal_for_session_data(attachment, session_data_p->session_id, HTTP_REQUEST_METADATA);
+
     return ctx.res;
 }
 
@@ -127,6 +129,8 @@ SendRequestHeadersAsyncImpl(
         &session_data_p->remaining_messages_to_reply,
         is_verdict_requested
     );
+
+    signal_for_session_data(attachment, session_data_p->session_id, HTTP_REQUEST_HEADER);
 
     return ctx.res;
 }
@@ -217,6 +221,8 @@ SendRequestEndAsyncImpl(
         &session_data_p->remaining_messages_to_reply,
         false
     );
+
+    signal_for_session_data(attachment, session_data_p->session_id, HTTP_REQUEST_END);
 
     return ctx.res;
 }
