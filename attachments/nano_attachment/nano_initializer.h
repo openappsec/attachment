@@ -27,6 +27,7 @@
 #define LOGGING_DIRECTORY_PATH "/var/log/nano_attachment" ///< Default logging directory path.
 #define LOGGING_FILE_NAME "nano_attachment" ///< Default logging file name.
 #define LOGGING_FILE_PATH LOGGING_DIRECTORY_PATH "/" LOGGING_FILE_NAME
+#define CP_ASYNC_CTX_BUCKETS_INIT 2048 ///< Hash table buckets for better distribution
 
 typedef enum nano_attachment_registration_state {
     NOT_REGISTERED,
@@ -88,7 +89,7 @@ typedef struct NanoAttachment {
     uint64_t metric_average_data_divisor[METRIC_TYPES_COUNT];
 #endif
 
-    AttachmentVerdictResponse async_buckets[CP_ASYNC_CTX_BUCKETS]; ///< Buckets for storing verdict responses.
+    AttachmentVerdictResponse async_buckets[CP_ASYNC_CTX_BUCKETS_INIT]; ///< Buckets for storing verdict responses.
 } NanoAttachment;
 
 ///
