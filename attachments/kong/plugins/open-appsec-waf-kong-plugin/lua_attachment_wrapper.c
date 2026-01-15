@@ -364,7 +364,7 @@ static int lua_send_body(lua_State *L) {
     }
 
     if (body_len <= 8 * 1024) {
-        HttpBody http_chunks;
+        NanoHttpBody http_chunks;
         http_chunks.bodies_count = 1;
         
         nano_str_t chunk;
@@ -400,7 +400,7 @@ static int lua_send_body(lua_State *L) {
         num_chunks = 10000;
     }
 
-    HttpBody http_chunks;
+    NanoHttpBody http_chunks;
     http_chunks.bodies_count = num_chunks;
 
     http_chunks.data = (nano_str_t*)malloc(num_chunks * sizeof(nano_str_t));
