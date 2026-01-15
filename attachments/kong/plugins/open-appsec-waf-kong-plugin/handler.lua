@@ -14,6 +14,7 @@ NanoHandler.processed_requests = {}
 
 -- per-worker state
 local pending = {} -- sid -> { semaphore, verdict }
+local verdict_listener_started = false
 
 local function drain_queue()
     kong.log.debug("drain_queue: Starting to drain queue")
@@ -38,10 +39,16 @@ local function drain_queue()
 end
 
 local function start_verdict_listener()
+    if verdict_listener_started then
+        kong.log.debug("Verdict listener already started, skipping")
+        return true
+    end
+
     local socket_fd = nano.get_attachment_socket()
     if not socket_fd or socket_fd < 0 then
         kong.log.err("Failed to get attachment socket")
-        return
+        verdict_listener_started = false
+        return false
     end
 
     kong.log.info("Starting verdict listener on socket fd: ", socket_fd)
@@ -58,10 +65,12 @@ local function start_verdict_listener()
         local ok, err = sock:setfd(socket_fd)
         if not ok then
             kong.log.err("Failed to set socket fd: ", err)
+            verdict_listener_started = false
             return
         end
 
         kong.log.info("Listening on verdict socket")
+        verdict_listener_started = true
 
         while true do
             -- Use socket as a doorbell - wait for any data
@@ -71,8 +80,9 @@ local function start_verdict_listener()
                     -- Continue waiting
                     goto continue
                 else
-                    kong.log.err("verdict_listener: Error receiving from verdict socket: ", err)
-                    goto continue
+                    kong.log.err("verdict_listener: Fatal error receiving from verdict socket: ", err, " - marking listener as stopped")
+                    verdict_listener_started = false
+                    break
                 end
             end
 
@@ -95,6 +105,12 @@ end
 
 -- **Handles Request Headers (DecodeHeaders Equivalent)**
 function NanoHandler.access(conf)
+    -- Ensure verdict listener is running
+    if not verdict_listener_started then
+        kong.log.info("access: Verdict listener not started, attempting to start")
+        start_verdict_listener()
+    end
+
     kong.log.debug("access: Starting access phase")
     local headers = kong.request.get_headers()
     local session_id = nano.generate_session_id()
