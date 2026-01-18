@@ -5,32 +5,6 @@
 #include "nano_initializer.h"
 
 ///
-/// @brief Connect attachment communication socket to the nano service.
-///
-/// @param attachment A pointer to a NanoAttachment structure.
-/// @param session_data_p A pointer to HttpSessionData structure.
-///
-/// @return #NANO_OK on success.
-///
-NanoCommunicationResult RegistrationCommSocketAsyncImpl(
-    NanoAttachment *attachment,
-    HttpSessionData *session_data_p
-);
-
-///
-/// @brief Connect attachment to registration socket to the nano service.
-///
-/// @param attachment A pointer to a NanoAttachment structure.
-/// @param session_data_p A pointer to HttpSessionData structure.
-///
-/// @return #NANO_OK on success.
-///
-NanoCommunicationResult RegistrationSocketAsyncImpl(
-    NanoAttachment *attachment,
-    HttpSessionData *session_data_p
-);
-
-///
 /// @brief Sends request start data to the nano service.
 ///
 /// This async function sends metadata to start a request interaction with the nano service.
@@ -168,21 +142,6 @@ NanoCommunicationResult SendRequestFilterAsyncImpl(
     NanoAttachment *attachment,
     HttpSessionData *session_data_p,
     HttpRequestFilterData *start_data
-);
-
-///
-/// @brief Send query for requesting delayed data verdict.
-///
-/// This async function sends a delayed data query to the service and waits for the response.
-///
-/// @param attachment A pointer to a NanoAttachment structure.
-/// @param session_data_p A pointer to HttpSessionData structure.
-///
-/// @return #NANO_OK on success.
-///
-NanoCommunicationResult SendDelayedVerdictRequestAsyncImpl(
-    NanoAttachment *attachment,
-    HttpSessionData *session_data_p
 );
 
 ///

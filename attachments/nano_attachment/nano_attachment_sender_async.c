@@ -1,30 +1,60 @@
 #include "nano_attachment_sender_async.h"
 
+#include <string.h>
+
 #include "nano_attachment_common.h"
 #include "nano_initializer.h"
 #include "nano_attachment_io.h"
 #include "nano_attachment_sender_thread.h"
 
-NanoCommunicationResult
-RegistrationCommSocketAsyncImpl(
-    NanoAttachment *attachment,
-    HttpSessionData *session_data_p
-)
-{
-    (void)attachment;
-    (void)session_data_p;
-    return NANO_OK;
+static HttpHeaderData *
+get_http_header(HttpHeaders *http_headers, const char *header_name) {
+    size_t i;
+    for (i = 0; i < http_headers->headers_count; ++i) {
+        if (strcasecmp((char*)http_headers->data[i].key.data, header_name) == 0) {
+            return &http_headers->data[i];
+        }
+    }
+    return NULL;
 }
 
-NanoCommunicationResult
-RegistrationSocketAsyncImpl(
+static void
+set_response_content_encoding(
     NanoAttachment *attachment,
-    HttpSessionData *session_data_p
+    HttpSessionData *session_data_p,
+    HttpHeaders *http_headers
 )
 {
-    (void)attachment;
-    (void)session_data_p;
-    return NANO_OK;
+    write_dbg(
+        attachment,
+        session_data_p->session_id,
+        DBG_LEVEL_TRACE,
+        "Determining response body's content encoding"
+    );
+
+    const HttpHeaderData *content_encoding = get_http_header(http_headers, "content-encoding");
+
+    if (content_encoding == NULL) {
+        session_data_p->response_data.compression_type = NO_COMPRESSION;
+        return;
+    }
+
+    if (strcasecmp((char*)content_encoding->value.data, "gzip") == 0) {
+        session_data_p->response_data.compression_type = GZIP;
+    } else if (strcasecmp((char*)content_encoding->value.data, "deflate") == 0) {
+        session_data_p->response_data.compression_type = ZLIB;
+    } else if (strcasecmp((char*)content_encoding->value.data, "identity") == 0) {
+        session_data_p->response_data.compression_type = NO_COMPRESSION;
+    } else {
+        write_dbg(
+            attachment,
+            session_data_p->session_id,
+            DBG_LEVEL_WARNING,
+            "Unsupported response content encoding: %.*s",
+            content_encoding->value.data
+        );
+        session_data_p->response_data.compression_type = NO_COMPRESSION;
+    }
 }
 
 NanoCommunicationResult
@@ -142,10 +172,59 @@ SendResponseHeadersAsyncImpl(
     ResHttpHeaders *headers
 )
 {
-    (void)attachment;
-    (void)session_data_p;
-    (void)headers;
-    return NANO_OK;
+    HttpEventThreadCtx ctx;
+    HttpHeaders *http_headers;
+
+    if (attachment == NULL || session_data_p == NULL || headers == NULL) {
+        return NANO_ERROR;
+    }
+
+    http_headers = headers->headers;
+
+    ctx.attachment = attachment;
+    ctx.data = NULL;
+    ctx.session_data_p = session_data_p;
+    ctx.res = NANO_OK;
+    ctx.web_response_data = NULL;
+    ctx.modifications = NULL;
+
+    nano_send_response_code(
+        attachment,
+        headers->response_code,
+        &ctx,
+        session_data_p->session_id,
+        &session_data_p->remaining_messages_to_reply
+    );
+
+    nano_send_response_content_length(
+        attachment,
+        headers->content_length,
+        &ctx,
+        session_data_p->session_id,
+        &session_data_p->remaining_messages_to_reply
+    );
+
+    if (http_headers != NULL) {
+        set_response_content_encoding(
+            attachment,
+            session_data_p,
+            http_headers
+        );
+
+        nano_header_sender(
+            attachment,
+            http_headers,
+            &ctx,
+            RESPONSE_HEADER,
+            session_data_p->session_id,
+            &session_data_p->remaining_messages_to_reply,
+            false
+        );
+    }
+
+    signal_for_session_data(attachment, session_data_p->session_id, HTTP_RESPONSE_HEADER);
+
+    return ctx.res;
 }
 
 NanoCommunicationResult
@@ -190,10 +269,32 @@ SendResponseBodyAsyncImpl(
     NanoHttpBody *bodies
 )
 {
-    (void)attachment;
-    (void)session_data_p;
-    (void)bodies;
-    return NANO_OK;
+    HttpEventThreadCtx ctx;
+
+    if (attachment == NULL || session_data_p == NULL || bodies == NULL) {
+        return NANO_ERROR;
+    }
+
+    ctx.attachment = attachment;
+    ctx.data = NULL;
+    ctx.session_data_p = session_data_p;
+    ctx.res = NANO_OK;
+    ctx.web_response_data = NULL;
+    ctx.modifications = NULL;
+
+    nano_body_sender(
+        attachment,
+        bodies,
+        &ctx,
+        RESPONSE_BODY,
+        session_data_p->session_id,
+        &session_data_p->remaining_messages_to_reply,
+        false
+    );
+
+    signal_for_session_data(attachment, session_data_p->session_id, HTTP_RESPONSE_BODY);
+
+    return ctx.res;
 }
 
 NanoCommunicationResult
@@ -235,24 +336,35 @@ SendResponseEndAsyncImpl(
     HttpSessionData *session_data_p
 )
 {
-    (void)attachment;
-    (void)session_data_p;
-    return NANO_OK;
+    HttpEventThreadCtx ctx;
+
+    if (attachment == NULL || session_data_p == NULL) {
+        return NANO_ERROR;
+    }
+
+    ctx.attachment = attachment;
+    ctx.data = NULL;
+    ctx.session_data_p = session_data_p;
+    ctx.res = NANO_OK;
+    ctx.web_response_data = NULL;
+    ctx.modifications = NULL;
+
+    nano_end_transaction_sender(
+        attachment,
+        RESPONSE_END,
+        &ctx,
+        session_data_p->session_id,
+        &session_data_p->remaining_messages_to_reply,
+        false
+    );
+
+    signal_for_session_data(attachment, session_data_p->session_id, HTTP_RESPONSE_END);
+
+    return ctx.res;
 }
 
 NanoCommunicationResult
 SendDelayedVerdictRequestAsyncImpl(
-    NanoAttachment *attachment,
-    HttpSessionData *session_data_p
-)
-{
-    (void)attachment;
-    (void)session_data_p;
-    return NANO_OK;
-}
-
-NanoCommunicationResult
-SendHoldDataAsyncImpl(
     NanoAttachment *attachment,
     HttpSessionData *session_data_p
 )
@@ -281,15 +393,4 @@ SendHoldDataAsyncImpl(
     signal_for_session_data(attachment, session_data_p->session_id, HOLD_DATA);
 
     return ctx.res;
-}
-
-NanoCommunicationResult
-SendMetricToServiceAsyncImpl(
-    NanoAttachment *attachment,
-    HttpSessionData *session_data_p
-)
-{
-    (void)attachment;
-    (void)session_data_p;
-    return NANO_OK;
 }

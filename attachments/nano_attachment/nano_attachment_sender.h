@@ -215,7 +215,7 @@ NanoCommunicationResult SendResponseEndAsync(NanoAttachment *attachment, Attachm
 ///
 /// @return A NanoCommunicationResult indicating the outcome of the operation.
 ///
-NanoCommunicationResult SendHoldDataAsync(NanoAttachment *attachment, AttachmentData *data);
+NanoCommunicationResult SendDelayedVerdictRequestAsync(NanoAttachment *attachment, AttachmentData *data);
 
 ///
 /// @brief Sends metric data to the nano service and resets it on the attachment.

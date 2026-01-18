@@ -1139,7 +1139,7 @@ SendResponseEndAsync(NanoAttachment *attachment, AttachmentData *data)
 }
 
 NanoCommunicationResult
-SendHoldDataAsync(NanoAttachment *attachment, AttachmentData *data)
+SendDelayedVerdictRequestAsync(NanoAttachment *attachment, AttachmentData *data)
 {
     if (attachment == NULL || data == NULL) {
         return NANO_ERROR;
@@ -1171,7 +1171,7 @@ SendHoldDataAsync(NanoAttachment *attachment, AttachmentData *data)
         return NANO_ERROR;
     }
 
-    return SendHoldDataAsyncImpl(attachment, session_data_p);
+    return SendDelayedVerdictRequestAsyncImpl(attachment, session_data_p);
 }
 
 NanoCommunicationResult

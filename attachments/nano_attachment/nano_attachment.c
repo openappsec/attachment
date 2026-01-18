@@ -266,7 +266,7 @@ SendDataNanoAttachmentAsync(NanoAttachment *attachment, AttachmentData *data)
             return SendResponseEndAsync(attachment, data);
         }
         case HOLD_DATA: {
-            return SendHoldDataAsync(attachment, data);
+            return SendDelayedVerdictRequestAsync(attachment, data);
         }
         default:
             break;
