@@ -278,6 +278,8 @@ SendHoldDataAsyncImpl(
         false
     );
 
+    signal_for_session_data(attachment, session_data_p->session_id, HOLD_DATA);
+
     return ctx.res;
 }
 

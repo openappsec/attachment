@@ -551,6 +551,31 @@ static int lua_send_body_async(lua_State *L) {
     return 1;
 }
 
+static int lua_send_wait_signal(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
+    SessionID session_id = luaL_checkinteger(L, 2);
+    HttpSessionData *session_data = (HttpSessionData*) lua_touserdata(L, 3);
+
+    if (!attachment || !session_data) {
+        lua_pushstring(L, "Error: Invalid attachment or session_data");
+        return lua_error(L);
+    }
+
+    NanoHttpBody http_chunks;
+    http_chunks.bodies_count = 0;
+    http_chunks.data = NULL;
+
+    AttachmentData attachment_data;
+    attachment_data.session_id = session_id;
+    attachment_data.session_data = session_data;
+    attachment_data.chunk_type = HOLD_DATA;
+    attachment_data.data = &http_chunks;
+
+    SendDataNanoAttachmentAsync(attachment, &attachment_data);
+
+    return 0;
+}
+
 static int lua_end_inspection(lua_State *L) {
     NanoAttachment* attachment = (NanoAttachment*) lua_touserdata(L, 1);
     SessionID session_id = luaL_checkinteger(L, 2);
@@ -711,6 +736,7 @@ static const struct luaL_Reg nano_attachment_lib[] = {
     {"free_verdict_response", lua_free_verdict_response},
     {"send_body", lua_send_body},
     {"send_body_async", lua_send_body_async},
+    {"send_wait_signal", lua_send_wait_signal},
     {"end_inspection", lua_end_inspection},
     {"end_inspection_async", lua_end_inspection_async},
     {"send_data_async", lua_send_data_async},

@@ -14,7 +14,8 @@ nano.AttachmentVerdict = {
     INSPECT = 0,
     ACCEPT = 1,
     DROP = 2,
-    INJECT = 3
+    INJECT = 3,
+    DELAYED = 4
 }
 nano.HttpChunkType = {
     HTTP_REQUEST_FILTER = 0,
@@ -363,6 +364,18 @@ function nano.send_body_async(session_id, session_data, body_chunk, chunk_type)
     end
 
     return nano_attachment.send_body_async(attachment, session_id, session_data, body_chunk, chunk_type)
+end
+
+function nano.send_wait_signal(session_id, session_data)
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.warn("Attachment not available for worker ", worker_id, " - failing open")
+        return nil
+    end
+
+    nano_attachment.send_wait_signal(attachment, session_id, session_data)
 end
 
 function nano.inject_at_position(buffer, injection, pos)
