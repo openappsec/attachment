@@ -245,7 +245,7 @@ function nano.handle_start_transaction()
     local stream_info = kong.request
 
     local full_host = stream_info.get_host()
-    local host = full_host:match("([^:]+)")
+    local host = full_host:match("([^:]+)") or full_host
 
     local method = stream_info.get_method()
     local uri = stream_info.get_path_with_query()
