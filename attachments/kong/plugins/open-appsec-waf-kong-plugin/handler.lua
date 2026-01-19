@@ -251,9 +251,9 @@ function NanoHandler.access(conf)
 
     if verdict == nano.AttachmentVerdict.DROP then
         kong.log.warn("access: Headers verdict DROP for session_id=", session_id)
-        nano.fini_session(session_data)
         kong.ctx.plugin.blocked = true
         local result = nano.handle_custom_response(session_data, response)
+        nano.fini_session(session_data)
         nano.cleanup_all()
         return result
     end
@@ -293,9 +293,9 @@ function NanoHandler.access(conf)
             
             if verdict == nano.AttachmentVerdict.DROP then
                 kong.log.warn("access: Body verdict DROP for session_id=", session_id)
-                nano.fini_session(session_data)
                 kong.ctx.plugin.blocked = true
                 local result = nano.handle_custom_response(session_data, response)
+                nano.fini_session(session_data)
                 nano.cleanup_all()
                 return result
             end
@@ -309,9 +309,9 @@ function NanoHandler.access(conf)
                 kong.log.debug("access: Nginx var body verdict=", verdict, " for session_id=", session_id)
                 if verdict == nano.AttachmentVerdict.DROP then
                     kong.log.warn("access: Nginx var body verdict DROP for session_id=", session_id)
-                    nano.fini_session(session_data)
                     kong.ctx.plugin.blocked = true
                     local result = nano.handle_custom_response(session_data, response)
+                    nano.fini_session(session_data)
                     nano.cleanup_all()
                     return result
                 end
@@ -330,9 +330,9 @@ function NanoHandler.access(conf)
                             kong.log.debug("access: File body verdict=", verdict, " for session_id=", session_id)
                             if verdict == nano.AttachmentVerdict.DROP then
                                 kong.log.warn("access: File body verdict DROP for session_id=", session_id)
-                                nano.fini_session(session_data)
                                 kong.ctx.plugin.blocked = true
                                 local result = nano.handle_custom_response(session_data, response)
+                                nano.fini_session(session_data)
                                 nano.cleanup_all()
                                 return result
                             end
@@ -383,9 +383,9 @@ function NanoHandler.access(conf)
 
         if verdict == nano.AttachmentVerdict.DROP then
             kong.log.warn("access: End inspection verdict DROP for session_id=", session_id)
-            nano.fini_session(session_data)
             kong.ctx.plugin.blocked = true
             local result = nano.handle_custom_response(session_data, response)
+            nano.fini_session(session_data)
             nano.cleanup_all()
             return result
         end
@@ -416,9 +416,9 @@ function NanoHandler.access(conf)
 
         if verdict == nano.AttachmentVerdict.DROP then
             kong.log.warn("access: End inspection verdict DROP (no body) for session_id=", session_id)
-            nano.fini_session(session_data)
             kong.ctx.plugin.blocked = true
             local result = nano.handle_custom_response(session_data, response)
+            nano.fini_session(session_data)
             nano.cleanup_all()
             return result
         end
