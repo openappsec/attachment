@@ -1802,6 +1802,16 @@ PopResponseVerdictFromQueue(NanoAttachment *attachment)
     }
 
     response.session_id = reply_p->session_id;
+    response.web_response_data = NULL;
+    response.modifications = NULL;
+
+    write_dbg(
+        attachment,
+        reply_p->session_id,
+        DBG_LEVEL_DEBUG,
+        "Received verdict from the nano service: %d",
+        (ServiceVerdict)reply_p->verdict
+    );
 
     // Convert ServiceVerdict to AttachmentVerdict
     switch ((ServiceVerdict)reply_p->verdict) {
@@ -1812,6 +1822,12 @@ PopResponseVerdictFromQueue(NanoAttachment *attachment)
             response.verdict = ATTACHMENT_VERDICT_ACCEPT;
             break;
         case TRAFFIC_VERDICT_DROP:
+            handle_drop_response(
+                attachment,
+                reply_p->session_id,
+                &response.web_response_data,
+                reply_p->modify_data->web_response_data
+
             response.verdict = ATTACHMENT_VERDICT_DROP;
             break;
         case TRAFFIC_VERDICT_INJECT:
@@ -1850,10 +1866,6 @@ PopResponseVerdictFromQueue(NanoAttachment *attachment)
             response.verdict = ATTACHMENT_VERDICT_INSPECT;
             break;
     }
-
-    // TODO: Deal with data leak.
-    response.web_response_data = NULL;
-    response.modifications = NULL;
 
     return response;
 }
