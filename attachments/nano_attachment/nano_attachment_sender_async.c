@@ -6,6 +6,7 @@
 #include "nano_initializer.h"
 #include "nano_attachment_io.h"
 #include "nano_attachment_sender_thread.h"
+#include "nano_utils.h"
 
 static HttpHeaderData *
 get_http_header(HttpHeaders *http_headers, const char *header_name) {

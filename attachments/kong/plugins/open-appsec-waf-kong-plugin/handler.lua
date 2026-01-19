@@ -253,8 +253,9 @@ function NanoHandler.access(conf)
         kong.log.warn("access: Headers verdict DROP for session_id=", session_id)
         nano.fini_session(session_data)
         kong.ctx.plugin.blocked = true
+        local result = nano.handle_custom_response(session_data, response)
         nano.cleanup_all()
-        return kong.response.exit(403, "Forbidden")
+        return result
     end
     kong.log.debug("access: Headers verdict ACCEPT for session_id=", session_id)
 
@@ -294,8 +295,9 @@ function NanoHandler.access(conf)
                 kong.log.warn("access: Body verdict DROP for session_id=", session_id)
                 nano.fini_session(session_data)
                 kong.ctx.plugin.blocked = true
+                local result = nano.handle_custom_response(session_data, response)
                 nano.cleanup_all()
-                return kong.response.exit(403, "Forbidden")
+                return result
             end
         else
             kong.log.debug("access: Request body not in memory, attempting to read from buffer/file for session_id=", session_id)
@@ -309,8 +311,9 @@ function NanoHandler.access(conf)
                     kong.log.warn("access: Nginx var body verdict DROP for session_id=", session_id)
                     nano.fini_session(session_data)
                     kong.ctx.plugin.blocked = true
+                    local result = nano.handle_custom_response(session_data, response)
                     nano.cleanup_all()
-                    return kong.response.exit(403, "Forbidden")
+                    return result
                 end
             else
                 local body_file = ngx.var.request_body_file
@@ -329,8 +332,9 @@ function NanoHandler.access(conf)
                                 kong.log.warn("access: File body verdict DROP for session_id=", session_id)
                                 nano.fini_session(session_data)
                                 kong.ctx.plugin.blocked = true
+                                local result = nano.handle_custom_response(session_data, response)
                                 nano.cleanup_all()
-                                return kong.response.exit(403, "Forbidden")
+                                return result
                             end
                         else
                             kong.log.debug("access: Empty body file for session_id=", session_id)
@@ -381,8 +385,9 @@ function NanoHandler.access(conf)
             kong.log.warn("access: End inspection verdict DROP for session_id=", session_id)
             nano.fini_session(session_data)
             kong.ctx.plugin.blocked = true
+            local result = nano.handle_custom_response(session_data, response)
             nano.cleanup_all()
-            return kong.response.exit(403, "Forbidden")
+            return result
         end
     else
         kong.log.debug("access: Ending request inspection (no body) for session_id=", session_id)
@@ -413,8 +418,9 @@ function NanoHandler.access(conf)
             kong.log.warn("access: End inspection verdict DROP (no body) for session_id=", session_id)
             nano.fini_session(session_data)
             kong.ctx.plugin.blocked = true
+            local result = nano.handle_custom_response(session_data, response)
             nano.cleanup_all()
-            return kong.response.exit(403, "Forbidden")
+            return result
         end
     end
 
