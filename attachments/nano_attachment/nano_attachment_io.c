@@ -1827,6 +1827,7 @@ PopResponseVerdictFromQueue(NanoAttachment *attachment)
                 reply_p->session_id,
                 &response.web_response_data,
                 reply_p->modify_data->web_response_data
+            );
 
             response.verdict = ATTACHMENT_VERDICT_DROP;
             break;
