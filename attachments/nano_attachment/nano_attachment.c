@@ -97,6 +97,7 @@ InitNanoAttachment(uint8_t attachment_type, int worker_id, int num_of_workers, i
     attachment->inspection_mode = NON_BLOCKING_THREAD;
     attachment->num_of_nano_ipc_elements = 200;
     attachment->keep_alive_interval_msec = DEFAULT_KEEP_ALIVE_INTERVAL_MSEC;
+    attachment->is_async_mode_enabled = 0;
     memset(attachment->async_buckets, 0, sizeof(attachment->async_buckets));
 
     if (nano_attachment_init_process(attachment) != NANO_OK) {
@@ -739,3 +740,209 @@ GetResponseProcessingTimeout(NanoAttachment *attachment)
     return attachment->res_max_proccessing_ms_time;
 }
 
+const char *
+GetSharedVerdictSignalPath(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return NULL;
+    }
+    return attachment->shared_verdict_signal_path;
+}
+
+uint8_t
+GetWorkerId(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 0;
+    }
+    return attachment->worker_id;
+}
+
+uint8_t
+GetAttachmentType(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 0;
+    }
+    return attachment->attachment_type;
+}
+
+int
+GetFailModeVerdict(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return NANO_OK;
+    }
+    return attachment->fail_mode_verdict;
+}
+
+int
+GetFailModeDelayedVerdict(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return NANO_OK;
+    }
+    return attachment->fail_mode_delayed_verdict;
+}
+
+int
+GetNumOfConnectionAttempts(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 0;
+    }
+    return attachment->num_of_connection_attempts;
+}
+
+unsigned int
+GetFailOpenTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 50;
+    }
+    return attachment->fail_open_timeout;
+}
+
+unsigned int
+GetFailOpenDelayedTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 150;
+    }
+    return attachment->fail_open_delayed_timeout;
+}
+
+AttachmentVerdict
+GetSessionsPerMinuteLimitVerdict(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return ATTACHMENT_VERDICT_ACCEPT;
+    }
+    return attachment->sessions_per_minute_limit_verdict;
+}
+
+unsigned int
+GetMaxSessionsPerMinute(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 0;
+    }
+    return attachment->max_sessions_per_minute;
+}
+
+unsigned int
+GetRegistrationThreadTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 100;
+    }
+    return attachment->registration_thread_timeout_msec;
+}
+
+unsigned int
+GetReqStartThreadTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 100;
+    }
+    return attachment->req_start_thread_timeout_msec;
+}
+
+unsigned int
+GetReqHeaderThreadTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 100;
+    }
+    return attachment->req_header_thread_timeout_msec;
+}
+
+unsigned int
+GetReqBodyThreadTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 150;
+    }
+    return attachment->req_body_thread_timeout_msec;
+}
+
+unsigned int
+GetResHeaderThreadTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 100;
+    }
+    return attachment->res_header_thread_timeout_msec;
+}
+
+unsigned int
+GetResBodyThreadTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 150;
+    }
+    return attachment->res_body_thread_timeout_msec;
+}
+
+unsigned int
+GetWaitingForVerdictThreadTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 150;
+    }
+    return attachment->waiting_for_verdict_thread_timeout_msec;
+}
+
+unsigned int
+GetHoldVerdictRetries(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 10;
+    }
+    return attachment->hold_verdict_retries;
+}
+
+unsigned int
+GetHoldVerdictPollingTime(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 1;
+    }
+    return attachment->hold_verdict_polling_time;
+}
+
+unsigned int
+GetMetricTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 100;
+    }
+    return attachment->metric_timeout_timeout;
+}
+
+unsigned int
+GetNumOfNanoIpcElements(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 200;
+    }
+    return attachment->num_of_nano_ipc_elements;
+}
+
+uint64_t
+GetKeepAliveInterval(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 0;
+    }
+    return attachment->keep_alive_interval_msec;
+}
+
+unsigned int
+GetIsAsyncModeEnabled(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 0;
+    }
+    return attachment->is_async_mode_enabled;
+}

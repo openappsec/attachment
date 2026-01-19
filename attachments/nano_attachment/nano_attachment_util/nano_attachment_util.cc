@@ -267,3 +267,9 @@ isPairedAffinityEnabled()
 {
     return conf_data.getNumericalValue("is_paired_affinity_enabled");
 }
+
+unsigned int
+isAsyncModeEnabled()
+{
+    return conf_data.getNumericalValue("is_async_mode_enabled") != 0;
+}

@@ -80,6 +80,7 @@ typedef struct NanoAttachment {
     NanoHttpInspectionMode inspection_mode; ///< Default inspection mode.
     unsigned int num_of_nano_ipc_elements; ///< Number of NANO IPC elements.
     uint64_t keep_alive_interval_msec; ///< Keep alive interval in milliseconds.
+    unsigned int is_async_mode_enabled; ///< Async mode enabled flag.
 
 #ifdef __cplusplus
     uint64_t metric_data[static_cast<int>(AttachmentMetricType::METRIC_TYPES_COUNT)];

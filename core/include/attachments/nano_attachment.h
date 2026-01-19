@@ -316,4 +316,229 @@ SessionID PopFromNanoQueue(NanoAttachment *attachment);
 ///
 AttachmentVerdictResponse getAttachmentVerdictResponse(NanoAttachment *attachment, SessionID session_id);
 
+///
+/// @brief Retrieves the shared verdict signal path from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return A pointer to the shared verdict signal path string, or NULL if attachment is NULL.
+///
+const char * GetSharedVerdictSignalPath(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the worker ID from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The worker ID, or 0 if attachment is NULL.
+///
+uint8_t GetWorkerId(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the attachment type from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The attachment type, or 0 if attachment is NULL.
+///
+uint8_t GetAttachmentType(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the fail mode verdict from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The fail mode verdict, or NANO_OK if attachment is NULL.
+///
+int GetFailModeVerdict(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the fail mode delayed verdict from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The fail mode delayed verdict, or NANO_OK if attachment is NULL.
+///
+int GetFailModeDelayedVerdict(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the number of connection attempts from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The number of connection attempts, or 0 if attachment is NULL.
+///
+int GetNumOfConnectionAttempts(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the fail open timeout from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The fail open timeout in milliseconds, or 50 if attachment is NULL.
+///
+unsigned int GetFailOpenTimeout(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the fail open delayed timeout from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The fail open delayed timeout in milliseconds, or 150 if attachment is NULL.
+///
+unsigned int GetFailOpenDelayedTimeout(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the sessions per minute limit verdict from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The sessions per minute limit verdict, or ATTACHMENT_VERDICT_ACCEPT if attachment is NULL.
+///
+AttachmentVerdict GetSessionsPerMinuteLimitVerdict(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the maximum sessions per minute from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The maximum sessions per minute, or 0 if attachment is NULL.
+///
+unsigned int GetMaxSessionsPerMinute(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the request maximum processing timeout from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The request maximum processing timeout in milliseconds, or 3000 if attachment is NULL.
+///
+uint32_t GetRequestProcessingTimeout(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the response maximum processing timeout from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The response maximum processing timeout in milliseconds, or 3000 if attachment is NULL.
+///
+uint32_t GetResponseProcessingTimeout(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the registration thread timeout from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The registration thread timeout in milliseconds, or 100 if attachment is NULL.
+///
+unsigned int GetRegistrationThreadTimeout(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the request start thread timeout from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The request start thread timeout in milliseconds, or 100 if attachment is NULL.
+///
+unsigned int GetReqStartThreadTimeout(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the request header thread timeout from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The request header thread timeout in milliseconds, or 100 if attachment is NULL.
+///
+unsigned int GetReqHeaderThreadTimeout(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the request body thread timeout from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The request body thread timeout in milliseconds, or 150 if attachment is NULL.
+///
+unsigned int GetReqBodyThreadTimeout(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the response header thread timeout from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The response header thread timeout in milliseconds, or 100 if attachment is NULL.
+///
+unsigned int GetResHeaderThreadTimeout(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the response body thread timeout from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The response body thread timeout in milliseconds, or 150 if attachment is NULL.
+///
+unsigned int GetResBodyThreadTimeout(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the waiting for verdict thread timeout from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The waiting for verdict thread timeout in milliseconds, or 150 if attachment is NULL.
+///
+unsigned int GetWaitingForVerdictThreadTimeout(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the hold verdict retries from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The number of hold verdict retries, or 10 if attachment is NULL.
+///
+unsigned int GetHoldVerdictRetries(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the hold verdict polling time from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The hold verdict polling time in milliseconds, or 1 if attachment is NULL.
+///
+unsigned int GetHoldVerdictPollingTime(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the metric timeout from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The metric timeout in milliseconds, or 100 if attachment is NULL.
+///
+unsigned int GetMetricTimeout(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the number of nano IPC elements from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The number of nano IPC elements, or 200 if attachment is NULL.
+///
+unsigned int GetNumOfNanoIpcElements(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the keep alive interval from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The keep alive interval in milliseconds, or 0 if attachment is NULL.
+///
+uint64_t GetKeepAliveInterval(NanoAttachment *attachment);
+
+///
+/// @brief Retrieves the async mode enabled flag from a NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The async mode enabled flag, or 0 if attachment is NULL.
+///
+unsigned int GetIsAsyncModeEnabled(NanoAttachment *attachment);
+
 #endif // __NANO_ATTACHMENT_H__
