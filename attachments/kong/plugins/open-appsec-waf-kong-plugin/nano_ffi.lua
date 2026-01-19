@@ -29,9 +29,10 @@ nano.HttpChunkType = {
 
 nano.WebResponseType = {
     CUSTOM_WEB_RESPONSE = 0,
-    RESPONSE_CODE_ONLY = 1,
-    REDIRECT_WEB_RESPONSE = 2,
-    NO_WEB_RESPONSE = 3,
+    CUSTOM_WEB_BLOCK_PAGE_RESPONSE = 1,
+    RESPONSE_CODE_ONLY = 2,
+    REDIRECT_WEB_RESPONSE = 3,
+    NO_WEB_RESPONSE = 4,
 }
 
 local ffi = require "ffi"
@@ -47,6 +48,7 @@ typedef enum HttpModificationType
 typedef enum NanoWebResponseType
 {
     CUSTOM_WEB_RESPONSE,
+    CUSTOM_WEB_BLOCK_PAGE_RESPONSE,
     RESPONSE_CODE_ONLY,
     REDIRECT_WEB_RESPONSE,
     NO_WEB_RESPONSE
