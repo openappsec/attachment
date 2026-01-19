@@ -203,18 +203,10 @@ static int lua_setHeaderCount(lua_State *L) {
 }
 
 static void lua_fill_nano_str(lua_State *L, int index, nano_str_t *nano_str) {
-    size_t len = 0;
-    
-    // Check if the value at index is nil or none
-    if (lua_isnoneornil(L, index)) {
-        nano_str->data = NULL;
-        nano_str->len = 0;
-        return;
-    }
-    
-    const char *str = lua_tolstring(L, index, &len);
+    size_t len;
+    const char *str = luaL_checklstring(L, index, &len);
 
-    if (!str || len == 0) {
+    if (!str) {
         nano_str->data = NULL;
         nano_str->len = 0;
         return;

@@ -1091,8 +1091,8 @@ nano_metadata_sender(
 {
     uint16_t chunk_type;
     NanoCommunicationResult res;
-    char *fragments[META_DATA_COUNT + 2];
-    uint16_t fragments_sizes[META_DATA_COUNT + 2];
+    char *fragments[META_DATA_COUNT + 2] = {0};
+    uint16_t fragments_sizes[META_DATA_COUNT + 2] = {0};
     uint8_t meta_data_count = META_DATA_COUNT - 4;
 
     write_dbg(attachment, cur_request_id, DBG_LEVEL_TRACE, "Sending request start meta data for inspection");
