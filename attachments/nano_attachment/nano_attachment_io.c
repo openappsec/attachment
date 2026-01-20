@@ -1568,7 +1568,7 @@ nano_body_sender(
     bool is_verdict_requested
 )
 {
-    char *fragments[BODY_DATA_COUNT = {0}];
+    char *fragments[BODY_DATA_COUNT] = {0};
     uint16_t fragments_sizes[BODY_DATA_COUNT] = {0};
     uint8_t is_final_chunk = 0;
     uint8_t body_index = 0;
