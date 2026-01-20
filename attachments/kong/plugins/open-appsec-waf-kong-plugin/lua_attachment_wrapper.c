@@ -714,6 +714,83 @@ static int lua_is_queue_empty(lua_State *L) {
     return 1;
 }
 
+static int lua_get_is_async_mode_enabled(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
+    if (!attachment) {
+        return luaL_error(L, "invalid attachment");
+    }
+
+    unsigned int is_enabled = GetIsAsyncModeEnabled(attachment);
+    lua_pushinteger(L, is_enabled);
+    return 1;
+}
+
+static int lua_get_hold_verdict_polling_time(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
+    if (!attachment) {
+        return luaL_error(L, "invalid attachment");
+    }
+
+    unsigned int polling_time = GetHoldVerdictPollingTime(attachment);
+    lua_pushinteger(L, polling_time);
+    return 1;
+}
+
+static int lua_get_hold_verdict_retries(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
+    if (!attachment) {
+        return luaL_error(L, "invalid attachment");
+    }
+
+    unsigned int retries = GetHoldVerdictRetries(attachment);
+    lua_pushinteger(L, retries);
+    return 1;
+}
+
+static int lua_get_req_body_thread_timeout(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
+    if (!attachment) {
+        return luaL_error(L, "invalid attachment");
+    }
+
+    unsigned int timeout = GetReqBodyThreadTimeout(attachment);
+    lua_pushinteger(L, timeout);
+    return 1;
+}
+
+static int lua_get_req_header_thread_timeout(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
+    if (!attachment) {
+        return luaL_error(L, "invalid attachment");
+    }
+
+    unsigned int timeout = GetReqHeaderThreadTimeout(attachment);
+    lua_pushinteger(L, timeout);
+    return 1;
+}
+
+static int lua_get_fail_mode_verdict(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
+    if (!attachment) {
+        return luaL_error(L, "invalid attachment");
+    }
+
+    int verdict = GetFailModeVerdict(attachment);
+    lua_pushinteger(L, verdict);
+    return 1;
+}
+
+static int lua_get_request_processing_timeout(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
+    if (!attachment) {
+        return luaL_error(L, "invalid attachment");
+    }
+
+    uint32_t timeout = GetRequestProcessingTimeout(attachment);
+    lua_pushinteger(L, timeout);
+    return 1;
+}
+
 static const struct luaL_Reg nano_attachment_lib[] = {
     {"init_nano_attachment", lua_init_nano_attachment},
     {"get_web_response_type", lua_get_web_response_type},
@@ -744,6 +821,13 @@ static const struct luaL_Reg nano_attachment_lib[] = {
     {"get_attachment_socket", lua_get_attachment_socket},
     {"pop_from_queue", lua_pop_from_queue},
     {"is_queue_empty", lua_is_queue_empty},
+    {"get_is_async_mode_enabled", lua_get_is_async_mode_enabled},
+    {"get_hold_verdict_polling_time", lua_get_hold_verdict_polling_time},
+    {"get_hold_verdict_retries", lua_get_hold_verdict_retries},
+    {"get_req_body_thread_timeout", lua_get_req_body_thread_timeout},
+    {"get_req_header_thread_timeout", lua_get_req_header_thread_timeout},
+    {"get_fail_mode_verdict", lua_get_fail_mode_verdict},
+    {"get_request_processing_timeout", lua_get_request_processing_timeout},
     {NULL, NULL}
 };
 

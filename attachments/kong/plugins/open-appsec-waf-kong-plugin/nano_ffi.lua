@@ -592,4 +592,88 @@ function nano.is_queue_empty()
     return nano_attachment.is_queue_empty(attachment)
 end
 
+function nano.get_is_async_mode_enabled()
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.err("Attachment not available for worker ", worker_id)
+        return 0
+    end
+
+    return nano_attachment.get_is_async_mode_enabled(attachment)
+end
+
+function nano.get_hold_verdict_polling_time()
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.err("Attachment not available for worker ", worker_id)
+        return 1
+    end
+
+    return nano_attachment.get_hold_verdict_polling_time(attachment)
+end
+
+function nano.get_hold_verdict_retries()
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.err("Attachment not available for worker ", worker_id)
+        return 10
+    end
+
+    return nano_attachment.get_hold_verdict_retries(attachment)
+end
+
+function nano.get_req_body_thread_timeout()
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.err("Attachment not available for worker ", worker_id)
+        return 150
+    end
+
+    return nano_attachment.get_req_body_thread_timeout(attachment)
+end
+
+function nano.get_req_header_thread_timeout()
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.err("Attachment not available for worker ", worker_id)
+        return 100
+    end
+
+    return nano_attachment.get_req_header_thread_timeout(attachment)
+end
+
+function nano.get_fail_mode_verdict()
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.err("Attachment not available for worker ", worker_id)
+        return 0  -- NANO_OK (fail open)
+    end
+
+    return nano_attachment.get_fail_mode_verdict(attachment)
+end
+
+function nano.get_request_processing_timeout()
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.err("Attachment not available for worker ", worker_id)
+        return 3000  -- Default 3000ms
+    end
+
+    return nano_attachment.get_request_processing_timeout(attachment)
+end
+
 return nano
