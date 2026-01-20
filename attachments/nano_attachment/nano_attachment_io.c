@@ -1091,8 +1091,8 @@ nano_metadata_sender(
 {
     uint16_t chunk_type;
     NanoCommunicationResult res;
-    char *fragments[META_DATA_COUNT + 2];
-    uint16_t fragments_sizes[META_DATA_COUNT + 2];
+    char *fragments[META_DATA_COUNT + 2]  = {0};
+    uint16_t fragments_sizes[META_DATA_COUNT + 2]  = {0};
     uint8_t meta_data_count = META_DATA_COUNT - 4;
 
     write_dbg(attachment, cur_request_id, DBG_LEVEL_TRACE, "Sending request start meta data for inspection");
@@ -1292,8 +1292,8 @@ nano_send_response_code(
     unsigned int *num_messages_sent
 )
 {
-    char *fragments[RESPONSE_CODE_COUNT];
-    uint16_t fragments_sizes[RESPONSE_CODE_COUNT];
+    char *fragments[RESPONSE_CODE_COUNT] = {0};
+    uint16_t fragments_sizes[RESPONSE_CODE_COUNT] = {0};
     uint16_t chunk_type = RESPONSE_CODE;
     NanoCommunicationResult res;
 
@@ -1328,8 +1328,8 @@ nano_send_response_content_length(
     unsigned int *num_messages_sent
 )
 {
-    char *fragments[CONTENT_LENGTH_COUNT];
-    uint16_t fragments_sizes[CONTENT_LENGTH_COUNT];
+    char *fragments[CONTENT_LENGTH_COUNT] = {0};
+    uint16_t fragments_sizes[CONTENT_LENGTH_COUNT] = {0};
     uint16_t chunk_type = CONTENT_LENGTH;
     NanoCommunicationResult res;
 
@@ -1479,8 +1479,8 @@ nano_header_sender(
 {
     int is_final_header = 0;
     int bulk_index = 0;
-    char *fragments[HEADER_DATA_COUNT * MAX_HEADER_BULK_SIZE + 4];
-    uint16_t fragments_sizes[HEADER_DATA_COUNT * MAX_HEADER_BULK_SIZE + 4];
+    char *fragments[HEADER_DATA_COUNT * MAX_HEADER_BULK_SIZE + 4] = {0};
+    uint16_t fragments_sizes[HEADER_DATA_COUNT * MAX_HEADER_BULK_SIZE + 4] = {0};
     size_t header_index = 0;
     int fragment_index = 0;
     NanoCommunicationResult send_bulk_result;
@@ -1568,8 +1568,8 @@ nano_body_sender(
     bool is_verdict_requested
 )
 {
-    char *fragments[BODY_DATA_COUNT];
-    uint16_t fragments_sizes[BODY_DATA_COUNT];
+    char *fragments[BODY_DATA_COUNT = {0}];
+    uint16_t fragments_sizes[BODY_DATA_COUNT] = {0};
     uint8_t is_final_chunk = 0;
     uint8_t body_index = 0;
     nano_str_t *body = NULL;
@@ -1650,8 +1650,8 @@ nano_end_transaction_sender(
     bool is_verdict_requested
 )
 {
-    char *fragments[END_TRANSACTION_DATA_COUNT];
-    uint16_t fragments_sizes[END_TRANSACTION_DATA_COUNT];
+    char *fragments[END_TRANSACTION_DATA_COUNT] = {0};
+    uint16_t fragments_sizes[END_TRANSACTION_DATA_COUNT] = {0};
     NanoCommunicationResult res;
 
     write_dbg(
@@ -1707,8 +1707,8 @@ nano_request_delayed_verdict(
     bool is_verdict_requested
 )
 {
-    char *fragments[DELAYED_VERDICT_DATA_COUNT];
-    uint16_t fragments_sizes[DELAYED_VERDICT_DATA_COUNT];
+    char *fragments[DELAYED_VERDICT_DATA_COUNT] = {0};
+    uint16_t fragments_sizes[DELAYED_VERDICT_DATA_COUNT] = {0};
     AttachmentDataType wait_transaction_type = REQUEST_DELAYED_VERDICT;
     NanoCommunicationResult res;
 
