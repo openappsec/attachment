@@ -9,7 +9,6 @@ NanoHandler.PRIORITY = 3000
 NanoHandler.VERSION = "1.0.0"
 
 function NanoHandler.init_worker()
-    kong.log.debug("it's working Yaay!")
     nano.init_attachment()
 end
 
