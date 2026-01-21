@@ -655,6 +655,16 @@ FreeAttachmentResponseContent(
     NanoHttpModificationList *current_modification;
     NanoHttpModificationList *modification_list;
 
+    if (session_data == NULL) {
+        write_dbg(
+            attachment,
+            0,
+            DBG_LEVEL_WARNING,
+            "Attempting to free NULL response"
+        );
+        return;
+    }
+
     if (response == NULL) {
         write_dbg(
             attachment,
@@ -679,7 +689,11 @@ FreeAttachmentResponseContent(
             "Freeing custom web response data"
         );
 
-        free(response->web_response_data->data);
+        if (response->web_response_data->data != NULL){
+            free(response->web_response_data->data);
+            response->web_response_data->data = NULL;
+        }
+
         free(response->web_response_data);
         response->web_response_data = NULL;
     }
