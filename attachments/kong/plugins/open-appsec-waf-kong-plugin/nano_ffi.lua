@@ -83,13 +83,33 @@ function nano.generate_session_id()
     return tonumber(string.format("%d%05d", worker_id, nano.session_counter))
 end
 
-function nano.handle_custom_response(session_data, response)
+function nano.handle_custom_response(session_data, response, meta_data, req_headers, sem, session_id, pending_table)
     local worker_id = ngx.worker.id()
     local attachment = nano.attachments[worker_id]
 
     if not attachment then
         kong.log.warn("Cannot handle custom response: Attachment not available for worker ", worker_id, " - failing open")
         return kong.response.exit(200, "Request allowed due to attachment unavailability")
+    end
+    
+    -- Helper function to do all cleanup before exiting
+    local function cleanup_and_exit(code, body, headers)
+        -- Free response
+        nano.free_verdict_response(session_data, response)
+        -- Free async resources if provided
+        if meta_data then
+            nano_attachment.free_http_metadata(meta_data)
+        end
+        if req_headers then
+            nano_attachment.freeHttpHeaders(req_headers)
+        end
+        -- Finalize session
+        nano.fini_session(session_data)
+        -- Remove from pending if session_id and pending_table provided
+        if session_id and pending_table then
+            pending_table[session_id] = nil
+        end
+        return kong.response.exit(code, body, headers)
     end
 
     local response_type = nano_attachment.get_web_response_type(attachment, session_data, response)
@@ -101,18 +121,18 @@ function nano.handle_custom_response(session_data, response)
             code = 403
         end
         kong.log.debug("Response code only: ", code)
-        return kong.response.exit(code, "")
+        return cleanup_and_exit(code, "")
     end
 
     if response_type == nano.WebResponseType.REDIRECT_WEB_RESPONSE then
         local location = nano_attachment.get_redirect_page(attachment, session_data, response)
-        return kong.response.exit(307, "", { ["Location"] = location })
+        return cleanup_and_exit(307, "", { ["Location"] = location })
     end
 
     local block_page = nano_attachment.get_block_page(attachment, session_data, response)
     if not block_page then
         kong.log.err("Failed to retrieve custom block page for session ", session_data)
-        return kong.response.exit(500, { message = "Internal Server Error" })
+        return cleanup_and_exit(500, { message = "Internal Server Error" })
     end
     local code = nano_attachment.get_response_code(response)
     if not code or code < 100 or code > 599 then
@@ -120,7 +140,7 @@ function nano.handle_custom_response(session_data, response)
         code = 403
     end
     kong.log.debug("Block page response with code: ", code)
-    return kong.response.exit(code, block_page, { ["Content-Type"] = "text/html" })
+    return cleanup_and_exit(code, block_page, { ["Content-Type"] = "text/html" })
 
 end
 
@@ -164,10 +184,28 @@ function nano.free_all_metadata()
 end
 
 function nano.free_all_responses()
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
     for _, response in ipairs(nano.allocated_responses) do
-        nano_attachment.free_verdict_response(response)
+        if attachment then
+            nano_attachment.free_verdict_response(attachment, nil, response)
+        else
+            nano_attachment.free_verdict_response(nil, nil, response)
+        end
     end
     nano.allocated_responses = {}
+end
+
+function nano.free_verdict_response(session_data, response)
+    if response then
+        local worker_id = ngx.worker.id()
+        local attachment = nano.attachments[worker_id]
+        if attachment then
+            nano_attachment.free_verdict_response(attachment, session_data, response)
+        else
+            nano_attachment.free_verdict_response(nil, session_data, response)
+        end
+    end
 end
 
 function nano.cleanup_all()
@@ -250,22 +288,28 @@ function nano.handle_start_transaction()
 
     local listening_ip = ngx.var.server_addr or "127.0.0.1"
     local listening_port = ngx.var.server_port or 80
+    kong.log.err("listening ip: ", listening_ip, ", listening_port: ", listening_port)
 
     local metadata = nano_attachment.create_http_metadata(
         scheme, method, host, listening_ip, tonumber(listening_port) or 0,
         uri, client_ip, tonumber(client_port) or 0, "", ""
     )
 
-    table.insert(nano.allocated_metadata, metadata)
-
-    collectgarbage("stop")
+    local is_async_mode = nano.get_is_async_mode_enabled() > 0
+    if not is_async_mode then
+        table.insert(nano.allocated_metadata, metadata)
+        collectgarbage("stop")
+    end
 
     return metadata
 end
 
 function nano.handleHeaders(headers)
     local header_data = nano_attachment.allocHttpHeaders()
-    table.insert(nano.allocate_headers, header_data)
+    local is_async_mode = nano.get_is_async_mode_enabled() > 0
+    if not is_async_mode then
+        table.insert(nano.allocate_headers, header_data)
+    end
     local index = 0
 
     for key, value in pairs(headers) do
@@ -548,10 +592,6 @@ function nano.get_attachment_verdict_response(session_id)
     end
 
     local verdict, response = nano_attachment.get_attachment_verdict_response(attachment, session_id)
-
-    if response then
-        table.insert(nano.allocated_responses, response)
-    end
 
     return verdict, response
 end

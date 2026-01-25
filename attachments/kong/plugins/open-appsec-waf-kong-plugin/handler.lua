@@ -1,6 +1,7 @@
 local module_name = ...
 local prefix = module_name:match("^(.-)handler$")
 local nano = require(prefix .. "nano_ffi")
+local nano_attachment = require "lua_attachment_wrapper"
 local semaphore = require "ngx.semaphore"
 local ffi = require "ffi"
 local kong = kong
@@ -23,15 +24,12 @@ local pending = {} -- sid -> { semaphore }
 local verdict_listener_started = false
 
 local function drain_queue()
-    kong.log.debug("drain_queue: Starting to drain queue")
     local drained_count = 0
     while not nano.is_queue_empty() do
         local session_id = nano.pop_from_queue()
         if session_id and session_id > 0 then
-            kong.log.debug("drain_queue: Popped session_id=", session_id)
             local session_info = pending[session_id]
             if session_info and session_info.sem then
-                kong.log.debug("drain_queue: Notifying semaphore for session_id=", session_id)
                 session_info.sem:post()
                 drained_count = drained_count + 1
             else
@@ -39,7 +37,9 @@ local function drain_queue()
             end
         end
     end
-    kong.log.debug("drain_queue: Drained ", drained_count, " sessions")
+    if drained_count > 0 then
+        kong.log.debug("drain_queue: Drained ", drained_count, " sessions")
+    end
 end
 
 local function get_timeout_and_fail_mode(timeout_getter_fn, default_timeout_sec)
@@ -49,28 +49,39 @@ local function get_timeout_and_fail_mode(timeout_getter_fn, default_timeout_sec)
     return timeout, fail_mode_verdict
 end
 
-local function handle_drop_verdict(ctx, session_id, session_data, response, is_async)
+local function free_async_resources(session_data, meta_data, req_headers, response)
+    if response then
+        nano.free_verdict_response(session_data, response)
+    end
+    if meta_data then
+        nano_attachment.free_http_metadata(meta_data)
+    end
+    if req_headers then
+        nano_attachment.freeHttpHeaders(req_headers)
+    end
+end
+
+local function handle_drop_verdict(ctx, session_id, session_data, response, is_async, meta_data, req_headers, sem)
     if is_async then
         ctx.blocked = true
+        -- Pass cleanup resources to handle_custom_response so it can clean up before exiting
+        local result = nano.handle_custom_response(session_data, response, meta_data, req_headers, sem, session_id, pending)
+        return result
     else
         ctx.cleanup_needed = true
+        local result = nano.handle_custom_response(session_data, response)
+        nano.cleanup_all()
+        return result
     end
-    local result = nano.handle_custom_response(session_data, response)
-    nano.fini_session(session_data)
-    nano.cleanup_all()
-    return result
 end
 
 local function wait_for_verdict_async(sem, session_id, timeout_getter_fn, default_timeout, ctx, log_context)
     local timeout, fail_mode_verdict = get_timeout_and_fail_mode(timeout_getter_fn, default_timeout)
-    kong.log.debug("access: Waiting for ", log_context, " verdict for session_id=", session_id, " timeout=", timeout)
     local ok, err = sem:wait(timeout)
     
     if not ok then
         local fail_action = (fail_mode_verdict == 0) and "failing open" or "failing closed"
-        kong.log.err("access: Timeout while waiting for ", log_context, " verdict for session_id=", session_id, " err=", err or "nil", " - ", fail_action)
-        nano.fini_session(nil)  -- session_data will be accessed from ctx in caller
-        nano.cleanup_all()
+        kong.log.err("access: Timeout waiting for ", log_context, " verdict for session_id=", session_id, " - ", fail_action)
         if fail_mode_verdict ~= 0 then
             ctx.blocked = true
             return nil, "blocked"
@@ -78,15 +89,12 @@ local function wait_for_verdict_async(sem, session_id, timeout_getter_fn, defaul
         return nil, "timeout"
     end
     
-    -- Query verdict after semaphore wakeup
-    kong.log.debug("access: Querying ", log_context, " verdict for session_id=", session_id)
     local verdict, response = nano.get_attachment_verdict_response(session_id)
     kong.log.debug("access: ", log_context, " verdict=", verdict, " for session_id=", session_id)
     return verdict, response
 end
 
 local function read_body_from_file(body_file, session_id, session_data, is_async, ctx)
-    kong.log.debug("access: Reading request body from file=", body_file, " for session_id=", session_id)
     local file, open_err = io.open(body_file, "rb")
     if not file then
         kong.log.err("access: Failed to open body file=", body_file, " err=", open_err or "nil", " for session_id=", session_id)
@@ -98,12 +106,9 @@ local function read_body_from_file(body_file, session_id, session_data, is_async
         local entire_body = file:read("*all")
         file:close()
         if entire_body and #entire_body > 0 then
-            kong.log.debug("access: Sending entire body from file, size=", #entire_body, " bytes for session_id=", session_id)
+            kong.log.debug("access: Sending body from file, size=", #entire_body, " bytes for session_id=", session_id)
             local verdict, response = nano.send_body(session_id, session_data, entire_body, nano.HttpChunkType.HTTP_REQUEST_BODY)
-            kong.log.debug("access: File body verdict=", verdict, " for session_id=", session_id)
             return verdict, response
-        else
-            kong.log.debug("access: Empty body file for session_id=", session_id)
         end
     else
         -- Chunked reading for sync mode with timeout
@@ -111,7 +116,6 @@ local function read_body_from_file(body_file, session_id, session_data, is_async
         local chunk_count = 0
         local start_time = ngx.now()
         local timeout_sec = nano.get_request_processing_timeout_sec()
-        kong.log.debug("Request body reading timeout set to ", timeout_sec, " seconds")
         
         while true do
             ngx.update_time()
@@ -127,12 +131,10 @@ local function read_body_from_file(body_file, session_id, session_data, is_async
             
             local chunk = file:read(chunk_size)
             if not chunk or #chunk == 0 then
-                kong.log.debug("End of request body file reached")
                 break
             end
             
             chunk_count = chunk_count + 1
-            kong.log.debug("Sending request body chunk ", chunk_count, " of size ", #chunk, " bytes to C module")
             local verdict, response = nano.send_body(session_id, session_data, chunk, nano.HttpChunkType.HTTP_REQUEST_BODY)
             
             if verdict ~= nano.AttachmentVerdict.INSPECT then
@@ -141,7 +143,7 @@ local function read_body_from_file(body_file, session_id, session_data, is_async
             end
         end
         file:close()
-        kong.log.debug("Sent ", chunk_count, " chunks from request body file")
+        kong.log.debug("Sent ", chunk_count, " chunks from body file for session_id=", session_id)
     end
     return nano.AttachmentVerdict.INSPECT, nil
 end
@@ -153,18 +155,21 @@ local function handle_delayed_verdict(session_id, session_data, sem, verdict, re
     
     kong.log.info("handle_delayed_verdict: Initial verdict DELAYED for session_id=", session_id)
     
-    -- Drain any pending semaphore posts to ensure we wait for NEW verdicts
-    while sem:wait(0) do
-        kong.log.debug("handle_delayed_verdict: Drained pending semaphore post for session_id=", session_id)
+    -- Free the initial DELAYED response
+    if response then
+        nano.free_verdict_response(session_data, response)
+        response = nil
     end
     
+    -- Drain any pending semaphore posts to ensure we wait for NEW verdicts
+    while sem:wait(0) do end
+    
     local start_time = ngx.now()
-    local is_async_mode = nano.get_is_async_mode_enabled() > 0
-    local max_timeout_ms = is_async_mode and nano.get_request_processing_timeout() or 3000
+    local max_timeout_ms = nano.get_request_processing_timeout()
     local max_timeout = max_timeout_ms / 1000.0
-    local polling_time_ms = is_async_mode and (nano.get_hold_verdict_polling_time() * 50) or 50
+    local polling_time_ms = nano.get_hold_verdict_polling_time() * 50
     local polling_time = polling_time_ms / 1000.0
-    local fail_mode_verdict = is_async_mode and nano.get_fail_mode_verdict() or 0
+    local fail_mode_verdict = nano.get_fail_mode_verdict()
 
     ngx.sleep(polling_time)
     nano.send_wait_signal(session_id, session_data)
@@ -173,23 +178,28 @@ local function handle_delayed_verdict(session_id, session_data, sem, verdict, re
         local elapsed = ngx.now() - start_time
         if elapsed >= max_timeout then
             local fail_action = (fail_mode_verdict == 0) and "failing open" or "failing closed"
-            kong.log.warn("handle_delayed_verdict: Total timeout reached for session_id=", session_id, " - ", fail_action)
-            nano.fini_session(session_data)
-            nano.cleanup_all()
+            kong.log.warn("handle_delayed_verdict: Timeout reached for session_id=", session_id, " - ", fail_action)
+            if response then
+                nano.free_verdict_response(session_data, response)
+            end
             pending[session_id] = nil
             return nil, nil
         end
         
         -- Calculate remaining timeout
         local remaining = max_timeout - elapsed
-        
-        kong.log.debug("handle_delayed_verdict: Waiting for verdict notification, remaining=", remaining, " for session_id=", session_id)
         local ok, err = sem:wait(remaining)
         
         if ok then
             -- Got a notification, check the verdict
+            local old_response = response
             verdict, response = nano.get_attachment_verdict_response(session_id)
             kong.log.info("handle_delayed_verdict: Received verdict notification, verdict=", verdict, " for session_id=", session_id)
+            
+            -- Free old response
+            if old_response then
+                nano.free_verdict_response(session_data, old_response)
+            end
             
             -- If still DELAYED, send wait signal and continue
             if verdict == nano.AttachmentVerdict.DELAYED then
@@ -202,15 +212,17 @@ local function handle_delayed_verdict(session_id, session_data, sem, verdict, re
             if err == "timeout" then
                 local fail_action = (fail_mode_verdict == 0) and "failing open" or "failing closed"
                 kong.log.warn("handle_delayed_verdict: No verdict received within timeout for session_id=", session_id, " - ", fail_action)
-                nano.fini_session(session_data)
-                nano.cleanup_all()
+                if response then
+                    nano.free_verdict_response(session_data, response)
+                end
                 pending[session_id] = nil
                 return nil, nil
             else
                 local fail_action = (fail_mode_verdict == 0) and "failing open" or "failing closed"
                 kong.log.err("handle_delayed_verdict: Semaphore error for session_id=", session_id, " err=", err, " - ", fail_action)
-                nano.fini_session(session_data)
-                nano.cleanup_all()
+                if response then
+                    nano.free_verdict_response(session_data, response)
+                end
                 pending[session_id] = nil
                 return nil, nil
             end
@@ -247,9 +259,7 @@ local function start_verdict_listener()
         -- Drain the socket (doorbell notifications)
         local buf = ffi.new("char[1024]")
         local bytes_read = ffi.C.recv(socket_fd, buf, 1024, 0x40) -- MSG_DONTWAIT = 0x40
-        if bytes_read > 0 then
-            kong.log.debug("verdict_listener: Drained ", bytes_read, " bytes from socket")
-        elseif bytes_read < 0 then
+        if bytes_read < 0 then
             local errno = ffi.errno()
             -- EAGAIN (11) or EWOULDBLOCK means no data available, which is fine
             if errno ~= 11 then
@@ -259,7 +269,6 @@ local function start_verdict_listener()
 
         -- Drain the queue if it has data
         if not nano.is_queue_empty() then
-            kong.log.debug("verdict_listener: Queue not empty, draining")
             local ok, drain_err = pcall(drain_queue)
             if not ok then
                 kong.log.err("verdict_listener: Error draining queue: ", drain_err)
@@ -302,65 +311,81 @@ end
 
 local function handle_access_async(ctx, session_id, session_data, meta_data, req_headers, contains_body)
     local sem = semaphore.new()
-    pending[session_id] = { sem = sem, verdict = nil }
+    local final_response = nil
+    pending[session_id] = { sem = sem }
 
     -- Use non-blocking send_data_async
-    kong.log.debug("access: Sending headers async for session_id=", session_id, " contains_body=", contains_body)
     nano.send_data_async(session_id, session_data, meta_data, req_headers, contains_body, nano.HttpChunkType.HTTP_REQUEST_FILTER)
 
     -- Wait for verdict
     local verdict, response = wait_for_verdict_async(sem, session_id, nano.get_req_header_thread_timeout, 3, ctx, "headers")
     if not verdict then
         if response == "blocked" then
-            return kong.response.exit(403, "Request blocked")
+            handle_drop_verdict(ctx, session_id, session_data, nil, true, meta_data, req_headers, sem)
         end
-        return
+        goto cleanup
     end
 
     if verdict == nano.AttachmentVerdict.DROP then
         kong.log.warn("access: Headers verdict DROP for session_id=", session_id)
-        return handle_drop_verdict(ctx, session_id, session_data, response, true)
+        final_response = response
+        handle_drop_verdict(ctx, session_id, session_data, response, true, meta_data, req_headers, sem)
+        goto cleanup
     end
-    kong.log.debug("access: Headers verdict ACCEPT for session_id=", session_id)
+    
+    -- Free header verdict response after handling it
+    if response then
+        nano.free_verdict_response(session_data, response)
+        response = nil
+    end
 
     if contains_body == 1 then
-        kong.log.debug("access: Request contains body for session_id=", session_id)
         local body = kong.request.get_raw_body()
         if body and #body > 0 then
             -- Use non-blocking send_body_async
-            kong.log.debug("access: Sending body async, size=", #body, " for session_id=", session_id)
             nano.send_body_async(session_id, session_data, body, nano.HttpChunkType.HTTP_REQUEST_BODY)
 
             -- Wait for verdict
             verdict, response = wait_for_verdict_async(sem, session_id, nano.get_req_body_thread_timeout, 3, ctx, "body")
             if not verdict then
                 if response == "blocked" then
-                    return kong.response.exit(403, "Request blocked")
+                    handle_drop_verdict(ctx, session_id, session_data, nil, true, meta_data, req_headers, sem)
                 end
-                return
+                goto cleanup
             end
             
             -- Handle DELAYED verdict
             verdict, response = handle_delayed_verdict(session_id, session_data, sem, verdict, response)
             if not verdict then
-                return
+                goto cleanup
             end
             
             if verdict == nano.AttachmentVerdict.DROP then
                 kong.log.warn("access: Body verdict DROP for session_id=", session_id)
-                return handle_drop_verdict(ctx, session_id, session_data, response, true)
+                final_response = response
+                handle_drop_verdict(ctx, session_id, session_data, response, true, meta_data, req_headers, sem)
+                goto cleanup
+            end
+            
+            -- Free body verdict response after handling it
+            if response then
+                nano.free_verdict_response(session_data, response)
+                response = nil
             end
         else
-            kong.log.debug("access: Request body not in memory, attempting to read from buffer/file for session_id=", session_id)
-
             local body_data = ngx.var.request_body
             if body_data and #body_data > 0 then
-                kong.log.debug("access: Found request body in nginx var, size=", #body_data, " for session_id=", session_id)
                 verdict, response = nano.send_body(session_id, session_data, body_data, nano.HttpChunkType.HTTP_REQUEST_BODY)
-                kong.log.debug("access: Nginx var body verdict=", verdict, " for session_id=", session_id)
                 if verdict == nano.AttachmentVerdict.DROP then
                     kong.log.warn("access: Nginx var body verdict DROP for session_id=", session_id)
-                    return handle_drop_verdict(ctx, session_id, session_data, response, true)
+                    final_response = response
+                    handle_drop_verdict(ctx, session_id, session_data, response, true, meta_data, req_headers, sem)
+                    goto cleanup
+                end
+                -- Free nginx var body response
+                if response then
+                    nano.free_verdict_response(session_data, response)
+                    response = nil
                 end
             else
                 local body_file = ngx.var.request_body_file
@@ -368,7 +393,14 @@ local function handle_access_async(ctx, session_id, session_data, meta_data, req
                     verdict, response = read_body_from_file(body_file, session_id, session_data, true, ctx)
                     if verdict == nano.AttachmentVerdict.DROP then
                         kong.log.warn("access: File body verdict DROP for session_id=", session_id)
-                        return handle_drop_verdict(ctx, session_id, session_data, response, true)
+                        final_response = response
+                        handle_drop_verdict(ctx, session_id, session_data, response, true, meta_data, req_headers, sem)
+                        goto cleanup
+                    end
+                    -- Free file body response
+                    if response then
+                        nano.free_verdict_response(session_data, response)
+                        response = nil
                     end
                 else
                     kong.log.warn("access: Request body expected but no body data or file available for session_id=", session_id)
@@ -376,63 +408,81 @@ local function handle_access_async(ctx, session_id, session_data, meta_data, req
             end
         end
 
-        kong.log.debug("access: Ending request inspection (with body) for session_id=", session_id)
         local ok, result  = pcall(function()
             return nano.end_inspection_async(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
         end)
 
         if not ok then
             kong.log.err("access: Error ending request inspection for session_id=", session_id, " err=", result, " - failing open")
-            nano.fini_session(session_data)
-            nano.cleanup_all()
-            return
+            goto cleanup
         end
 
         -- Wait for verdict
         verdict, response = wait_for_verdict_async(sem, session_id, nano.get_req_body_thread_timeout, 3, ctx, "end inspection")
         if not verdict then
             if response == "blocked" then
-                return kong.response.exit(403, "Request blocked")
+                kong.response.exit(403, "Request blocked")
             end
-            return
+            goto cleanup
         end
 
         -- Handle DELAYED verdict
         verdict, response = handle_delayed_verdict(session_id, session_data, sem, verdict, response)
         if not verdict then
-            return
+            goto cleanup
         end
 
         if verdict == nano.AttachmentVerdict.DROP then
             kong.log.warn("access: End inspection verdict DROP for session_id=", session_id)
-            return handle_drop_verdict(ctx, session_id, session_data, response, true)
+            final_response = response
+            handle_drop_verdict(ctx, session_id, session_data, response, true, meta_data, req_headers, sem)
+            goto cleanup
+        end
+        
+        -- Free end inspection verdict response after handling it
+        if response then
+            nano.free_verdict_response(session_data, response)
+            response = nil
         end
     else
-        kong.log.debug("access: Ending request inspection (no body) for session_id=", session_id)
         nano.end_inspection_async(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
 
         -- Wait for verdict
         verdict, response = wait_for_verdict_async(sem, session_id, nano.get_req_header_thread_timeout, 3, ctx, "end inspection (no body)")
         if not verdict then
             if response == "blocked" then
-                return kong.response.exit(403, "Request blocked")
+                kong.response.exit(403, "Request blocked")
             end
-            return
+            goto cleanup
         end
 
         -- Handle DELAYED verdict
         verdict, response = handle_delayed_verdict(session_id, session_data, sem, verdict, response)
         if not verdict then
-            return
+            goto cleanup
         end
 
         if verdict == nano.AttachmentVerdict.DROP then
             kong.log.warn("access: End inspection verdict DROP (no body) for session_id=", session_id)
-            return handle_drop_verdict(ctx, session_id, session_data, response, true)
+            final_response = response
+            handle_drop_verdict(ctx, session_id, session_data, response, true, meta_data, req_headers, sem)
+            goto cleanup
+        end
+        
+        -- Free end inspection verdict response after handling it
+        if response then
+            nano.free_verdict_response(session_data, response)
+            response = nil
         end
     end
 
-    kong.log.debug("access: Request processing complete for session_id=", session_id)
+    ::cleanup::
+    -- Single cleanup point for all paths
+    if final_response then
+        nano.free_verdict_response(session_data, final_response)
+    end
+    free_async_resources(nil, meta_data, req_headers, nil)
+    nano.fini_session(session_data)
     pending[session_id] = nil
 end
 
@@ -460,7 +510,6 @@ local function handle_access_sync(ctx, session_id, session_data, meta_data, req_
         else
             local body_data = ngx.var.request_body
             if body_data and #body_data > 0 then
-                kong.log.debug("access: Found request body in nginx var, size=", #body_data, " for session_id=", session_id)
                 verdict, response = nano.send_body(session_id, session_data, body_data, nano.HttpChunkType.HTTP_REQUEST_BODY)
                 if verdict ~= nano.AttachmentVerdict.INSPECT then
                     ctx.cleanup_needed = true
@@ -514,10 +563,8 @@ function NanoHandler.access(conf)
     local is_async_mode = nano.get_is_async_mode_enabled() > 0
     
     -- Common initialization
-    kong.log.debug("access: Starting access phase", is_async_mode and " (async)" or " (sync)")
     local headers = kong.request.get_headers()
     local session_id = nano.generate_session_id()
-    kong.log.debug("access: Generated session_id=", session_id)
 
     local session_data = nano.init_session(session_id)
     if not session_data then
@@ -525,7 +572,6 @@ function NanoHandler.access(conf)
         return
     end
 
-    kong.log.debug("access: Session initialized successfully for session_id=", session_id)
     ctx.session_data = session_data
     ctx.session_id = session_id
     
@@ -535,21 +581,17 @@ function NanoHandler.access(conf)
     end
 
     if nano.is_session_finalized(session_data) then
-        kong.log.debug("Session has already been inspected, no need for further inspection")
         return
     end
     
     local meta_data = nano.handle_start_transaction()
     if not meta_data then
-        kong.log.debug("Failed to handle start transaction - failing mode")
         ctx.cleanup_needed = true
         return
     end
-    kong.log.debug("access: Start transaction handled for session_id=", session_id)
     
     local req_headers = nano.handleHeaders(headers)
     if not req_headers then
-        kong.log.debug("Failed to handle request headers - failing mode")
         ctx.cleanup_needed = true
         return
     end

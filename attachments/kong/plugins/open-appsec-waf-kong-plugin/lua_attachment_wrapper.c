@@ -6,7 +6,7 @@
 #include "nano_attachment.h"
 #include "nano_attachment_common.h"
 
-#define MAX_HEADERS 10000
+#define MAX_HEADERS 1000
 
 static int lua_init_nano_attachment(lua_State *L) {
     int worker_id = luaL_checkinteger(L, 1);
@@ -135,7 +135,7 @@ static int lua_createNanoStrAlloc(lua_State *L) {
         lua_pushnil(L);
         lua_pushstring(L, "Failed to allocate memory for string");
         return 2;
-}
+    }
 
     nano_str_t* nanoStr = (nano_str_t*)malloc(sizeof(nano_str_t));
     if (!nanoStr) {
@@ -162,7 +162,7 @@ static int lua_freeNanoStr(lua_State *L) {
 }
 
 static int lua_allocHttpHeaders(lua_State *L) {
-    size_t max_headers = 10000;
+    size_t max_headers = MAX_HEADERS;
 
     HttpHeaders* headers = (HttpHeaders*)malloc(sizeof(HttpHeaders));
     if (!headers) {
@@ -228,7 +228,7 @@ static int lua_setHeaderElement(lua_State *L) {
     HttpHeaders *headers = (HttpHeaders *)lua_touserdata(L, 1);
     int index = luaL_checkinteger(L, 2);
 
-    if (!headers || index >= MAX_HEADERS) {
+    if (!headers || index >= MAX_HEADERS || index < 0) {
         lua_pushboolean(L, 0);
         return 1;
     }
@@ -674,9 +674,18 @@ static int lua_send_response_headers(lua_State *L) {
 }
 
 static int lua_free_verdict_response(lua_State *L) {
-    AttachmentVerdictResponse *response = (AttachmentVerdictResponse *)lua_touserdata(L, 1);
+    NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
+    HttpSessionData *session_data = (HttpSessionData *)lua_touserdata(L, 2);
+    AttachmentVerdictResponse *response = (AttachmentVerdictResponse *)lua_touserdata(L, 3);
+    
     if (!response) return 0;
 
+    // Free the response content (web_response_data and modifications)
+    if (attachment && session_data) {
+        FreeAttachmentResponseContent(attachment, session_data, response);
+    }
+
+    // Free the response structure itself
     free(response);
 
     return 0;
