@@ -20,6 +20,46 @@
 #define END_TRANSACTION_DATA_COUNT 2
 #define DELAYED_VERDICT_DATA_COUNT 2
 
+/// @brief Gets the appropriate communication socket based on usage mode.
+///
+/// @param attachment A pointer to a NanoAttachment structure.
+/// @param usage_mode An enumeration representing whether the function is being used in SYNC or ASYNC mode.
+/// @return The socket file descriptor to use for communication.
+///
+static inline int
+get_comm_socket(NanoAttachment *attachment, SignalUsageMode usage_mode)
+{
+    // There are two modes, async and sync. In sync mode, comm_socket is always being used.
+    // in async mode, comm_socket is being used for async and comm_socket_sync is being used for sync operations.
+
+    if (!attachment->is_async_mode_enabled) {
+        return attachment->comm_socket;
+    }
+
+    // This here is not a bug, it is a preparation for future implementation and fix.
+    return (usage_mode == SIGNAL_USAGE_ASYNC) ? attachment->comm_socket : attachment->comm_socket_sync;
+}
+
+/// @brief Gets the appropriate nano service IPC based on usage mode.
+///
+/// @param attachment A pointer to a NanoAttachment structure.
+/// @param usage_mode An enumeration representing whether the function is being used in SYNC or ASYNC mode.
+/// @return The SharedMemoryIPC pointer to use for communication.
+///
+static inline SharedMemoryIPC *
+get_nano_service_ipc(NanoAttachment *attachment, SignalUsageMode usage_mode)
+{
+    // There are two modes, async and sync. In sync mode, nano_service_ipc is always being used.
+    // in async mode, nano_service_ipc is being used for async and nano_service_sync_ipc is being used for sync operations.
+
+    if (!attachment->is_async_mode_enabled) {
+        return attachment->nano_service_ipc;
+    }
+
+    // This here is not a bug, it is a preparation for future implementation and fix.
+    return (usage_mode == SIGNAL_USAGE_ASYNC) ? attachment->nano_service_ipc : attachment->nano_service_sync_ipc;
+}
+
 /// @brief Sends a signal to the nano service to notify about new session data to inspect.
 ///
 /// This function sends a signal to the nano service to notify it about new session data
@@ -27,19 +67,21 @@
 ///
 /// @param attachment A pointer to a NanoAttachment structure representing the attachment to the nano service.
 /// @param cur_session_id An unsigned 32-bit integer representing the current session ID.
+/// @param usage_mode An enumeration representing whether the function is being used in SYNC or ASYNC mode.
 ///
 /// @return NANO_OK if the signal is sent successfully
 ///         NANO_ERROR if there is an error
 ///         NANO_TIMEOUT if a timeout occurs.
 ///
 static NanoCommunicationResult
-notify_signal_to_service(NanoAttachment *attachment, uint32_t cur_session_id)
+notify_signal_to_service(NanoAttachment *attachment, uint32_t cur_session_id, SignalUsageMode usage_mode)
 {
     int res = 0;
     unsigned int bytes_written = 0;
     struct timeval absolute_timeout = get_absolute_timeout_val_sec(1);
     int failopen_enabled = (attachment->inspection_mode == NON_BLOCKING_THREAD);
     struct pollfd s_poll;
+    int comm_socket = get_comm_socket(attachment, usage_mode);
 
     write_dbg(
         attachment,
@@ -48,7 +90,7 @@ notify_signal_to_service(NanoAttachment *attachment, uint32_t cur_session_id)
         "Sending signal to the service to notify about new session data to inspect"
     );
 
-    s_poll.fd = attachment->comm_socket;
+    s_poll.fd = comm_socket;
     s_poll.events = POLLOUT;
     s_poll.revents = 0;
     res = poll(&s_poll, 1, 0);
@@ -74,7 +116,7 @@ notify_signal_to_service(NanoAttachment *attachment, uint32_t cur_session_id)
         }
 
         res = write(
-            attachment->comm_socket,
+            comm_socket,
             ((char *)&cur_session_id) + bytes_written,
             sizeof(cur_session_id) - bytes_written
         );
@@ -102,6 +144,7 @@ notify_signal_to_service(NanoAttachment *attachment, uint32_t cur_session_id)
 /// @param attachment A pointer to a NanoAttachment structure representing the attachment to the nano service.
 /// @param cur_session_id An unsigned 32-bit integer representing the current session ID.
 /// @param chunk_type An enumeration representing the type of HTTP chunk being sent.
+/// @param usage_mode An enumeration representing whether the function is being used in SYNC or ASYNC mode.
 ///
 /// @return NANO_OK if the ack response is received and matches the current session ID,
 ///         NANO_ERROR if there is an error in signaling or reading the response,
@@ -109,13 +152,14 @@ notify_signal_to_service(NanoAttachment *attachment, uint32_t cur_session_id)
 ///         NANO_TIMEOUT if a timeout occurs while waiting for the response.
 ///
 NanoCommunicationResult
-signal_for_session_data(NanoAttachment *attachment, uint32_t cur_session_id, AttachmentDataType chunk_type)
+signal_for_session_data(NanoAttachment *attachment, uint32_t cur_session_id, AttachmentDataType chunk_type, SignalUsageMode usage_mode)
 {
     struct pollfd s_poll;
     NanoCommunicationResult res = NANO_OK;
     uint32_t reply_from_service;
     int timeout = attachment->fail_open_timeout;
     int retry;
+    int comm_socket = get_comm_socket(attachment, usage_mode);
 
     if (chunk_type == REQUEST_DELAYED_VERDICT) {
         timeout = attachment->fail_open_delayed_timeout;
@@ -124,7 +168,7 @@ signal_for_session_data(NanoAttachment *attachment, uint32_t cur_session_id, Att
         timeout = -1;
     }
 
-    res = notify_signal_to_service(attachment, cur_session_id);
+    res = notify_signal_to_service(attachment, cur_session_id, usage_mode);
     if (res != NANO_OK) return res;
 
     write_dbg(
@@ -135,7 +179,7 @@ signal_for_session_data(NanoAttachment *attachment, uint32_t cur_session_id, Att
     );
 
     for (retry = 0; retry < 3; retry++) {
-        s_poll.fd = attachment->comm_socket;
+        s_poll.fd = comm_socket;
         s_poll.events = POLLIN;
         s_poll.revents = 0;
         res = poll(&s_poll, 1, timeout);
@@ -155,7 +199,7 @@ signal_for_session_data(NanoAttachment *attachment, uint32_t cur_session_id, Att
             continue;
         }
 
-        res = read(attachment->comm_socket, ((char *)&reply_from_service), sizeof(reply_from_service));
+        res = read(comm_socket, ((char *)&reply_from_service), sizeof(reply_from_service));
         if (res <= 0) {
             write_dbg(
                 attachment,
@@ -260,7 +304,8 @@ send_session_data_to_service(
     const uint16_t *fragments_sizes,
     uint8_t num_of_data_elem,
     uint32_t cur_session_id,
-    AttachmentDataType chunk_type
+    AttachmentDataType chunk_type,
+    SignalUsageMode usage_mode
 )
 {
     int attempt_num;
@@ -275,7 +320,7 @@ send_session_data_to_service(
 
     for (attempt_num = 1; attempt_num <= 5; attempt_num++) {
         err_code = sendChunkedData(
-            attachment->nano_service_ipc,
+            get_nano_service_ipc(attachment, usage_mode),
             fragments_sizes,
             (const char **)fragments,
             num_of_data_elem
@@ -306,7 +351,7 @@ send_session_data_to_service(
 
         // Notify the nano service to inspect new session data.
         // This notification is triggered when chunked data transmission fails.
-        res = signal_for_session_data(attachment, cur_session_id, chunk_type);
+        res = signal_for_session_data(attachment, cur_session_id, chunk_type, usage_mode);
 
         if (res == NANO_ERROR) {
             disconnect_communication(attachment);
@@ -772,7 +817,7 @@ service_reply_receiver(
     }
 
     do {
-        res = signal_for_session_data(attachment, session_data->session_id, chunk_type);
+        res = signal_for_session_data(attachment, session_data->session_id, chunk_type, SIGNAL_USAGE_SYNC);
     } while (res == NANO_AGAIN);
 
     if (res != NANO_OK) {
@@ -938,6 +983,29 @@ service_reply_receiver(
                 updateMetricField(attachment, HOLD_VERDICTS_COUNT, 1);
                 break;
             }
+
+            case LIMIT_RESPONSE_HEADERS: {
+                write_dbg(
+                    attachment,
+                    session_data->session_id,
+                    DBG_LEVEL_DEBUG,
+                    "Verdict limit response headers received from the nano service, returning Inspect"
+                );
+                session_data->verdict = TRAFFIC_VERDICT_INSPECT;
+                break;
+            }
+
+            case TRAFFIC_VERDICT_CUSTOM_RESPONSE: {
+                write_dbg(
+                    attachment,
+                    session_data->session_id,
+                    DBG_LEVEL_DEBUG,
+                    "Verdict custom response received from the nano service, returning Inspect"
+                );
+                session_data->verdict = TRAFFIC_VERDICT_INSPECT;
+                break;
+            }
+            
         }
         popData(attachment->nano_service_ipc);
     }
@@ -1086,13 +1154,14 @@ nano_metadata_sender(
     HttpEventThreadCtx *ctx,
     uint32_t cur_request_id,
     unsigned int *num_of_messages_sent,
-    bool is_verdict_requested
+    bool is_verdict_requested,
+    SignalUsageMode usage_mode
 )
 {
     uint16_t chunk_type;
     NanoCommunicationResult res;
-    char *fragments[META_DATA_COUNT + 2]  = {0};
-    uint16_t fragments_sizes[META_DATA_COUNT + 2]  = {0};
+    char *fragments[META_DATA_COUNT + 2] = {0};
+    uint16_t fragments_sizes[META_DATA_COUNT + 2] = {0};
     uint8_t meta_data_count = META_DATA_COUNT - 4;
 
     write_dbg(attachment, cur_request_id, DBG_LEVEL_TRACE, "Sending request start meta data for inspection");
@@ -1252,7 +1321,8 @@ nano_metadata_sender(
         fragments_sizes,
         meta_data_count + 2,
         cur_request_id,
-        chunk_type
+        chunk_type,
+        usage_mode
     );
 
     if (res == NANO_ERROR) {
@@ -1289,7 +1359,8 @@ nano_send_response_code(
     uint16_t response_code,
     HttpEventThreadCtx *ctx,
     uint32_t cur_request_id,
-    unsigned int *num_messages_sent
+    unsigned int *num_messages_sent,
+    SignalUsageMode usage_mode
 )
 {
     char *fragments[RESPONSE_CODE_COUNT] = {0};
@@ -1308,7 +1379,8 @@ nano_send_response_code(
         fragments_sizes,
         RESPONSE_CODE_COUNT,
         cur_request_id,
-        chunk_type
+        chunk_type,
+        usage_mode
     );
 
     if (res != NANO_OK) {
@@ -1325,7 +1397,8 @@ nano_send_response_content_length(
     uint64_t content_length,
     HttpEventThreadCtx *ctx,
     uint32_t cur_request_id,
-    unsigned int *num_messages_sent
+    unsigned int *num_messages_sent,
+    SignalUsageMode usage_mode
 )
 {
     char *fragments[CONTENT_LENGTH_COUNT] = {0};
@@ -1350,7 +1423,8 @@ nano_send_response_content_length(
         fragments_sizes,
         CONTENT_LENGTH_COUNT,
         cur_request_id,
-        chunk_type
+        chunk_type,
+        usage_mode
     );
 
     if (res != NANO_OK) {
@@ -1389,7 +1463,8 @@ send_header_bulk(
     const unsigned int num_headers,
     uint8_t is_last_part,
     uint8_t bulk_part_index,
-    uint32_t cur_request_id
+    uint32_t cur_request_id,
+    SignalUsageMode usage_mode
 )
 {
     NanoCommunicationResult res;
@@ -1404,7 +1479,8 @@ send_header_bulk(
         data_sizes,
         HEADER_DATA_COUNT * num_headers + 4,
         cur_request_id,
-        REQUEST_HEADER
+        header_type,
+        usage_mode
     );
 
     if (res != NANO_OK) {
@@ -1474,7 +1550,8 @@ nano_header_sender(
     AttachmentDataType header_type,
     uint32_t cur_request_id,
     unsigned int *num_messages_sent,
-    bool is_verdict_requested
+    bool is_verdict_requested,
+    SignalUsageMode usage_mode
 )
 {
     int is_final_header = 0;
@@ -1518,7 +1595,8 @@ nano_header_sender(
             fragment_index,
             is_final_header,
             bulk_index,
-            cur_request_id
+            cur_request_id,
+            usage_mode
         );
         if (send_bulk_result != NANO_OK) {
             write_dbg(
@@ -1565,7 +1643,8 @@ nano_body_sender(
     AttachmentDataType body_type,
     uint32_t cur_request_id,
     unsigned int *num_messages_sent,
-    bool is_verdict_requested
+    bool is_verdict_requested,
+    SignalUsageMode usage_mode
 )
 {
     char *fragments[BODY_DATA_COUNT] = {0};
@@ -1602,7 +1681,8 @@ nano_body_sender(
             fragments_sizes,
             BODY_DATA_COUNT,
             cur_request_id,
-            body_type
+            body_type,
+            usage_mode
         );
         if (send_bulk_result != NANO_OK) {
             write_dbg(
@@ -1647,7 +1727,8 @@ nano_end_transaction_sender(
     HttpEventThreadCtx *ctx,
     SessionID cur_request_id,
     unsigned int *num_messages_sent,
-    bool is_verdict_requested
+    bool is_verdict_requested,
+    SignalUsageMode usage_mode
 )
 {
     char *fragments[END_TRANSACTION_DATA_COUNT] = {0};
@@ -1670,7 +1751,8 @@ nano_end_transaction_sender(
         fragments_sizes,
         END_TRANSACTION_DATA_COUNT,
         cur_request_id,
-        attachment->fail_open_timeout
+        end_transaction_type,
+        usage_mode
     );
     if (res != NANO_OK) {
         write_dbg(
@@ -1704,7 +1786,8 @@ nano_request_delayed_verdict(
     HttpEventThreadCtx *ctx,
     SessionID cur_request_id,
     unsigned int *num_messages_sent,
-    bool is_verdict_requested
+    bool is_verdict_requested,
+    SignalUsageMode usage_mode
 )
 {
     char *fragments[DELAYED_VERDICT_DATA_COUNT] = {0};
@@ -1727,7 +1810,8 @@ nano_request_delayed_verdict(
         fragments_sizes,
         DELAYED_VERDICT_DATA_COUNT,
         cur_request_id,
-        attachment->fail_open_timeout
+        wait_transaction_type,
+        usage_mode
     );
     if (res != NANO_OK) {
         write_dbg(
@@ -1899,7 +1983,8 @@ nano_send_metric_data_sender(NanoAttachment *attachment)
         &fragments_sizes,
         1,
         0,
-        attachment->fail_open_timeout
+        METRIC_DATA_FROM_PLUGIN,
+        SIGNAL_USAGE_SYNC
     );
 
     if (res != NANO_OK) {

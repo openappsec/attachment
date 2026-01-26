@@ -111,7 +111,8 @@ SendRequestFilterThread(void *_ctx)
         ctx,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        is_verdict_requested
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     nano_header_sender(
@@ -121,7 +122,8 @@ SendRequestFilterThread(void *_ctx)
         REQUEST_HEADER,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        is_verdict_requested
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     if (!contains_body) {
@@ -131,7 +133,8 @@ SendRequestFilterThread(void *_ctx)
             ctx,
             session_data_p->session_id,
             &session_data_p->remaining_messages_to_reply,
-            is_verdict_requested
+            is_verdict_requested,
+            SIGNAL_USAGE_SYNC
         );
     }
 
@@ -153,7 +156,8 @@ SendMetadataThread(void *_ctx)
         ctx,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        is_verdict_requested
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;
@@ -175,7 +179,8 @@ SendRequestHeadersThread(void *_ctx)
         REQUEST_HEADER,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        is_verdict_requested
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;
@@ -196,7 +201,8 @@ SendResponseHeadersThread(void *_ctx)
         headers->response_code,
         ctx,
         session_data_p->session_id,
-        &session_data_p->remaining_messages_to_reply
+        &session_data_p->remaining_messages_to_reply,
+        SIGNAL_USAGE_SYNC
     );
 
     nano_send_response_content_length(
@@ -204,7 +210,8 @@ SendResponseHeadersThread(void *_ctx)
         headers->content_length,
         ctx,
         session_data_p->session_id,
-        &session_data_p->remaining_messages_to_reply
+        &session_data_p->remaining_messages_to_reply,
+        SIGNAL_USAGE_SYNC
     );
 
     set_response_content_encoding(
@@ -220,7 +227,8 @@ SendResponseHeadersThread(void *_ctx)
         RESPONSE_HEADER,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        is_verdict_requested
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;
@@ -242,7 +250,8 @@ SendRequestBodyThread(void *_ctx)
         REQUEST_BODY,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        is_verdict_requested
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;
@@ -264,7 +273,8 @@ SendResponseBodyThread(void *_ctx)
         RESPONSE_BODY,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        is_verdict_requested
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;
@@ -284,7 +294,8 @@ SendRequestEndThread(void *_ctx)
         ctx,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        is_verdict_requested
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;
@@ -304,7 +315,8 @@ SendResponseEndThread(void *_ctx)
         ctx,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        is_verdict_requested
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;
@@ -322,7 +334,8 @@ SendDelayedVerdictRequestThread(void *_ctx)
         ctx,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        true
+        true,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;

@@ -8,6 +8,16 @@
 #include "nano_attachment_sender_thread.h"
 #include "shmem_ipc_2.h"
 
+#ifdef __cplusplus
+typedef enum class SignalUsageMode
+#else
+typedef enum SignalUsageMode
+#endif
+{
+    SIGNAL_USAGE_SYNC,
+    SIGNAL_USAGE_ASYNC
+} SignalUsageMode;
+
 /// @brief Sends session data chunk to a nano service for inspection.
 ///
 /// This function sends the provided data fragments to the nano service for inspection.
@@ -18,6 +28,7 @@
 /// @param num_of_data_elem An 8-bit integer representing the number of data elements (fragments) to send.
 /// @param cur_session_id An unsigned 32-bit integer representing the current session ID.
 /// @param chunk_type An enumeration representing the type of data chunk being sent.
+/// @param usage_mode An enumeration representing whether the function is being used in SYNC or ASYNC mode.
 ///
 /// @return NANO_OK if the data is sent successfully, NANO_ERROR otherwise.
 ///
@@ -28,7 +39,8 @@ send_session_data_to_service(
     const uint16_t *fragments_sizes,
     uint8_t num_of_data_elem,
     uint32_t cur_session_id,
-    AttachmentDataType chunk_type
+    AttachmentDataType chunk_type,
+    SignalUsageMode usage_mode
 );
 
 ///
@@ -84,6 +96,7 @@ service_reply_receiver(
 /// @param cur_request_id The current request ID.
 /// @param num_of_messages_sent Pointer to an unsigned int to store the number of messages sent.
 /// @param is_verdict_requested Boolean value indicating if a verdict is requested.
+/// @param usage_mode An enumeration representing whether the function is being used in SYNC or ASYNC mode.
 ///
 void
 nano_metadata_sender(
@@ -92,7 +105,8 @@ nano_metadata_sender(
     HttpEventThreadCtx *ctx,
     uint32_t cur_request_id,
     unsigned int *num_of_messages_sent,
-    bool is_verdict_requested
+    bool is_verdict_requested,
+    SignalUsageMode usage_mode
 );
 
 ///
@@ -105,6 +119,7 @@ nano_metadata_sender(
 /// @param ctx The HttpEventThreadCtx context.
 /// @param cur_request_id The current request ID.
 /// @param num_messages_sent A pointer to the number of messages sent.
+/// @param usage_mode An enumeration representing whether the function is being used in SYNC or ASYNC mode.
 ///
 void
 nano_send_response_code(
@@ -112,7 +127,8 @@ nano_send_response_code(
     uint16_t response_code,
     HttpEventThreadCtx *ctx,
     uint32_t cur_request_id,
-    unsigned int *num_messages_sent
+    unsigned int *num_messages_sent,
+    SignalUsageMode usage_mode
 );
 
 ///
@@ -125,6 +141,7 @@ nano_send_response_code(
 /// @param ctx The HttpEventThreadCtx context.
 /// @param cur_request_id The current request ID.
 /// @param num_messages_sent A pointer to the number of messages sent.
+/// @param usage_mode An enumeration representing whether the function is being used in SYNC or ASYNC mode.
 ///
 void
 nano_send_response_content_length(
@@ -132,7 +149,8 @@ nano_send_response_content_length(
     uint64_t content_length,
     HttpEventThreadCtx *ctx,
     uint32_t cur_request_id,
-    unsigned int *num_messages_sent
+    unsigned int *num_messages_sent,
+    SignalUsageMode usage_mode
 );
 
 ///
@@ -148,6 +166,8 @@ nano_send_response_content_length(
 /// @param header_type Type of the headers (REQUEST_HEADER or RESPONSE_HEADER).
 /// @param cur_request_id Current request ID.
 /// @param num_messages_sent Pointer to an unsigned int to store the number of messages sent.
+/// @param is_verdict_requested Boolean value indicating if a verdict is requested.
+/// @param usage_mode An enumeration representing whether the function is being used in SYNC or ASYNC mode.
 ///
 void
 nano_header_sender(
@@ -157,7 +177,8 @@ nano_header_sender(
     AttachmentDataType header_type,
     uint32_t cur_request_id,
     unsigned int *num_messages_sent,
-    bool is_verdict_requested
+    bool is_verdict_requested,
+    SignalUsageMode usage_mode
 );
 
 ///
@@ -174,6 +195,7 @@ nano_header_sender(
 /// @param cur_request_id Current request ID for logging and tracking purposes.
 /// @param num_messages_sent Pointer to an unsigned int to track the number of messages sent.
 /// @param is_verdict_requested Boolean value indicating if a verdict is requested.
+/// @param usage_mode An enumeration representing whether the function is being used in SYNC or ASYNC mode.
 ///
 void
 nano_body_sender(
@@ -183,7 +205,8 @@ nano_body_sender(
     AttachmentDataType body_type,
     uint32_t cur_request_id,
     unsigned int *num_messages_sent,
-    bool is_verdict_requested
+    bool is_verdict_requested,
+    SignalUsageMode usage_mode
 );
 
 ///
@@ -195,6 +218,7 @@ nano_body_sender(
 /// @param cur_request_id The ID of the current request.
 /// @param num_messages_sent Pointer to an unsigned integer to store the number of messages sent.
 /// @param is_verdict_requested Boolean value indicating if a verdict is requested.
+/// @param usage_mode An enumeration representing whether the function is being used in SYNC or ASYNC mode.
 /// @return NANO_OK if the end transaction event was sent successfully, NANO_ERROR otherwise.
 ///
 void
@@ -204,7 +228,8 @@ nano_end_transaction_sender(
     HttpEventThreadCtx *ctx,
     SessionID cur_request_id,
     unsigned int *num_messages_sent,
-    bool is_verdict_requested
+    bool is_verdict_requested,
+    SignalUsageMode usage_mode
 );
 
 ///
@@ -214,6 +239,8 @@ nano_end_transaction_sender(
 /// @param ctx Pointer to the HttpEventThreadCtx struct containing the context of the current thread.
 /// @param cur_request_id The ID of the current request.
 /// @param num_messages_sent Pointer to an unsigned integer to store the number of messages sent.
+/// @param is_verdict_requested Boolean value indicating if a verdict is requested.
+/// @param usage_mode An enumeration representing whether the function is being used in SYNC or ASYNC mode.
 ///
 void
 nano_request_delayed_verdict(
@@ -221,7 +248,8 @@ nano_request_delayed_verdict(
     HttpEventThreadCtx *ctx,
     SessionID cur_request_id,
     unsigned int *num_messages_sent,
-    bool is_verdict_requested
+    bool is_verdict_requested,
+    SignalUsageMode usage_mode
 );
 
 ///
@@ -247,6 +275,6 @@ AttachmentVerdictResponse
 PopResponseVerdictFromQueue(NanoAttachment *attachment);
 
 NanoCommunicationResult
-signal_for_session_data(NanoAttachment *attachment, uint32_t cur_session_id, AttachmentDataType chunk_type);
+signal_for_session_data(NanoAttachment *attachment, uint32_t cur_session_id, AttachmentDataType chunk_type, SignalUsageMode usage_mode);
 
 #endif // __NANO_ATTACHMENT_IO_H__

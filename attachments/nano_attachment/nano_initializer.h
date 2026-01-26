@@ -48,8 +48,9 @@ typedef struct NanoAttachment {
 
     uint8_t attachment_type; // Holds the type of the attachment.
     SharedMemoryIPC *nano_service_ipc; // Holds the shared memory IPC of the nano service.
+    SharedMemoryIPC *nano_service_sync_ipc; // Holds the shared memory IPC of the nano service for sync responses.
     int comm_socket; // Holds the communication socket of the attachment.
-
+    int comm_socket_sync; // Holds the communication socket of the attachment for sync responses.
     int is_default_fd; // Holds a value indicating if the logging file descriptor is the default one.
     int logging_fd; // Holds the file descriptor for logging.
     LoggingData *logging_data; // Holds the logging data of the attachment.
