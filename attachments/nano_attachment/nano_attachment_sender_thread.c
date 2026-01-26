@@ -78,6 +78,7 @@ RegistrationCommSocketThread(void *_ctx)
     NanoAttachment *attachment = ctx->attachment;
 
     ctx->res = connect_to_comm_socket(attachment);
+    ctx->res = connect_to_comm_socket_sync(attachment);
 
     return NULL;
 }

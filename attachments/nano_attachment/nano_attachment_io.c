@@ -1114,6 +1114,52 @@ connect_to_comm_socket(NanoAttachment *attachment)
 }
 
 NanoCommunicationResult
+connect_to_comm_socket_sync(NanoAttachment *attachment)
+{
+    struct sockaddr_un server;
+    int cur_errno = 0; // temp fix for errno changing during print
+    char sync_path[MAX_SHARED_MEM_PATH_LEN];
+
+    // Close the old socket if there was one.
+    if (attachment->comm_socket_sync > 0) {
+        close(attachment->comm_socket_sync);
+        attachment->comm_socket_sync = -1;
+    }
+
+    // Construct the sync socket path by appending "_sync" to the shared_verdict_signal_path
+    snprintf(sync_path, sizeof(sync_path), "%s_secondary", attachment->shared_verdict_signal_path);
+    sync_path[sizeof(sync_path) - 1] = '\0';
+
+    // Connect a new socket.
+    attachment->comm_socket_sync = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (attachment->comm_socket_sync < 0) {
+        write_dbg(attachment, 0, DBG_LEVEL_WARNING, "Could not create sync socket, Error: %s", strerror(errno));
+        return NANO_ERROR;
+    }
+
+    server.sun_family = AF_UNIX;
+    strncpy(server.sun_path, sync_path, sizeof(server.sun_path) - 1);
+    server.sun_path[sizeof(server.sun_path) - 1] = '\0';
+
+    if (connect(attachment->comm_socket_sync, (struct sockaddr *)&server, sizeof(struct sockaddr_un)) != -1) {
+        return NANO_OK;
+    }
+
+    cur_errno = errno;
+    write_dbg(
+        attachment,
+        0,
+        DBG_LEVEL_DEBUG,
+        "Could not connect to nano service sync socket. Path: %s, Error: %s, Errno: %d",
+        server.sun_path,
+        strerror(errno),
+        cur_errno
+    );
+
+    return NANO_ERROR;
+}
+
+NanoCommunicationResult
 connect_to_registration_socket(NanoAttachment *attachment)
 {
     struct sockaddr_un server;

@@ -56,6 +56,18 @@ send_session_data_to_service(
 NanoCommunicationResult connect_to_comm_socket(NanoAttachment *attachment);
 
 ///
+/// @brief Connect to the secondary sync communication socket.
+///
+/// This function creates a new socket and connects it to the secondary sync
+/// Unix domain socket address. If the attachment already has a sync communication
+/// socket open, it is closed before creating a new one.
+///
+/// @param[in] attachment The NanoAttachment struct containing socket information.
+/// @returns A NanoCommunicationResult indicating the success of the operation.
+///
+NanoCommunicationResult connect_to_comm_socket_sync(NanoAttachment *attachment);
+
+///
 /// @brief Create an unix socket and connect to the attachment registration service.
 /// @param[in] attachment Points to initiated NanoAttachment struct.
 /// @returns NanoCommunicationResult

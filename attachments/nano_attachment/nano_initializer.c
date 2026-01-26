@@ -764,6 +764,25 @@ nano_attachment_init_process(NanoAttachment *attachment)
         }
     }
 
+    // Initialize secondary sync IPC channel for async responses
+    if (attachment->nano_service_sync_ipc == NULL) {        
+        write_dbg(attachment, 0, DBG_LEVEL_INFO, "Initializing secondary sync IPC channel");
+        attachment->nano_service_sync_ipc = initIpc(
+            attachment->unique_id,
+            attachment->nano_user_id,
+            attachment->nano_group_id,
+            0,
+            attachment->num_of_nano_ipc_elements,
+            attachment->logging_data,
+            write_dbg_impl
+        );
+        if (attachment->nano_service_sync_ipc == NULL) {
+            restart_communication(attachment);
+            write_dbg(attachment, 0, DBG_LEVEL_INFO, "Failed to initialize secondary sync IPC with nano service");
+            return NANO_ERROR;
+        }
+    }
+
     write_dbg(
         attachment,
         0,
@@ -785,6 +804,11 @@ restart_communication(NanoAttachment *attachment)
     if (attachment->nano_service_ipc != NULL) {
         destroyIpc(attachment->nano_service_ipc, 0);
         attachment->nano_service_ipc = NULL;
+    }
+
+    if (attachment->nano_service_sync_ipc != NULL) {
+        destroyIpc(attachment->nano_service_sync_ipc, 0);
+        attachment->nano_service_sync_ipc = NULL;
     }
 
     if (init_signaling_socket(attachment) == NANO_ERROR) {
@@ -811,6 +835,21 @@ restart_communication(NanoAttachment *attachment)
         write_dbg(attachment, 0, DBG_LEVEL_DEBUG, "Failed to init IPC");
         return NANO_ERROR;
     }
+
+    attachment->nano_service_sync_ipc = initIpc(
+        attachment->unique_id,
+        attachment->nano_user_id,
+        attachment->nano_group_id,
+        0,
+        attachment->num_of_nano_ipc_elements,
+        attachment->logging_data,
+        write_dbg_impl
+    );
+    if (attachment->nano_service_sync_ipc == NULL) {
+        write_dbg(attachment, 0, DBG_LEVEL_DEBUG, "Failed to init secondary sync IPC");
+        return NANO_ERROR;
+    }
+
     return NANO_OK;
 }
 
@@ -823,15 +862,23 @@ disconnect_communication(NanoAttachment *attachment)
         close(attachment->comm_socket);
         attachment->comm_socket = -1;
     }
+    if (attachment->comm_socket_sync > 0) {
+        close(attachment->comm_socket_sync);
+        attachment->comm_socket_sync = -1;
+    }
     if (attachment->nano_service_ipc != NULL) {
         destroyIpc(attachment->nano_service_ipc, 0);
         attachment->nano_service_ipc = NULL;
     }
+    if (attachment->nano_service_sync_ipc != NULL) {
+        destroyIpc(attachment->nano_service_sync_ipc, 0);
+        attachment->nano_service_sync_ipc = NULL;
+    }
 }
 
-NanoCommunicationResult
-handle_shmem_corruption(NanoAttachment *attachment)
-{
+
+static NanoCommunicationResult
+handle_ipc_corruption_sync(NanoAttachment *attachment) {
     NanoCommunicationResult res;
 
     if (attachment->nano_service_ipc == NULL) {
@@ -852,8 +899,54 @@ handle_shmem_corruption(NanoAttachment *attachment)
     return NANO_OK;
 }
 
+static NanoCommunicationResult
+handle_ipc_corruption_async(NanoAttachment *attachment) {
+
+    NanoCommunicationResult res;
+
+    if (attachment->nano_service_sync_ipc == NULL) {
+        disconnect_communication(attachment);
+        res = restart_communication(attachment);
+        if (res != NANO_OK) {
+            write_dbg(attachment, 0, DBG_LEVEL_WARNING, "Failed to restart async communication");
+            return NANO_ERROR;
+        }
+    }
+
+    if (isCorruptedShmem(attachment->nano_service_sync_ipc, 0)) {
+        write_dbg(attachment, 0, DBG_LEVEL_WARNING, "Async Shared memory is corrupted! restarting communication");
+        disconnect_communication(attachment);
+        return NANO_ERROR;
+    }
+
+    return NANO_OK;
+}
+
+NanoCommunicationResult
+handle_shmem_corruption(NanoAttachment *attachment)
+{
+    NanoCommunicationResult res;
+
+    if (attachment->is_async_mode_enabled) {
+        res = handle_ipc_corruption_async(attachment);
+    }
+
+    if (res != NANO_OK) {
+        return res;
+    }
+
+    return handle_ipc_corruption_sync(attachment);
+}
+
 int
 isIpcReady(NanoAttachment *attachment)
 {
-    return attachment->nano_service_ipc != NULL && attachment->comm_socket > 0;
+    if (!attachment->is_async_mode_enabled) {
+        return attachment->nano_service_ipc != NULL && attachment->comm_socket > 0;
+    }
+
+    return attachment->nano_service_ipc != NULL &&
+        attachment->comm_socket > 0 &&
+        attachment->nano_service_sync_ipc != NULL &&
+        attachment->comm_socket_sync > 0;
 }
