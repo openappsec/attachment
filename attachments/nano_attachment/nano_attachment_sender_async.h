@@ -40,24 +40,6 @@ NanoCommunicationResult SendRequestHeadersAsyncImpl(
 );
 
 ///
-/// @brief Sends response headers to the nano service.
-///
-/// This async function sends response headers to the nano service. It updates the session data
-/// and handles any errors that occur during the header sending process.
-///
-/// @param attachment A pointer to a NanoAttachment structure.
-/// @param session_data_p A pointer to HttpSessionData structure.
-/// @param headers A pointer to ResHttpHeaders structure.
-///
-/// @return #NANO_OK on success.
-///
-NanoCommunicationResult SendResponseHeadersAsyncImpl(
-    NanoAttachment *attachment,
-    HttpSessionData *session_data_p,
-    ResHttpHeaders *headers
-);
-
-///
 /// @brief Sends request body to the nano service.
 ///
 /// This async function sends request body to the nano service. It updates the session data
@@ -76,24 +58,6 @@ NanoCommunicationResult SendRequestBodyAsyncImpl(
 );
 
 ///
-/// @brief Sends response body to the nano service.
-///
-/// This async function sends response body to the nano service. It updates the session data
-/// and handles any errors that occur during the body sending process.
-///
-/// @param attachment A pointer to a NanoAttachment structure.
-/// @param session_data_p A pointer to HttpSessionData structure.
-/// @param bodies A pointer to NanoHttpBody structure.
-///
-/// @return #NANO_OK on success.
-///
-NanoCommunicationResult SendResponseBodyAsyncImpl(
-    NanoAttachment *attachment,
-    HttpSessionData *session_data_p,
-    NanoHttpBody *bodies
-);
-
-///
 /// @brief Sends request end data to the nano service.
 ///
 /// This async function sends signal to the nano service that the request has ended
@@ -105,22 +69,6 @@ NanoCommunicationResult SendResponseBodyAsyncImpl(
 /// @return #NANO_OK on success.
 ///
 NanoCommunicationResult SendRequestEndAsyncImpl(
-    NanoAttachment *attachment,
-    HttpSessionData *session_data_p
-);
-
-///
-/// @brief Sends response end data to the nano service.
-///
-/// This async function sends signal to the nano service that the response has ended
-/// and with it the whole session transaction.
-///
-/// @param attachment A pointer to a NanoAttachment structure.
-/// @param session_data_p A pointer to HttpSessionData structure.
-///
-/// @return #NANO_OK on success.
-///
-NanoCommunicationResult SendResponseEndAsyncImpl(
     NanoAttachment *attachment,
     HttpSessionData *session_data_p
 );
@@ -155,6 +103,22 @@ NanoCommunicationResult SendRequestFilterAsyncImpl(
 /// @return #NANO_OK on success.
 ///
 NanoCommunicationResult SendMetricToServiceAsyncImpl(
+    NanoAttachment *attachment,
+    HttpSessionData *session_data_p
+);
+
+///
+/// @brief Sends delayed verdict request to the nano service.
+///
+/// This async function sends a delayed verdict request to the nano service.
+/// It is used when a verdict has been delayed and needs to be requested again.
+///
+/// @param attachment A pointer to a NanoAttachment structure.
+/// @param session_data_p A pointer to HttpSessionData structure.
+///
+/// @return #NANO_OK on success.
+///
+NanoCommunicationResult SendDelayedVerdictRequestAsyncImpl(
     NanoAttachment *attachment,
     HttpSessionData *session_data_p
 );

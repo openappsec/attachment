@@ -39,7 +39,9 @@ InitNanoAttachment(uint8_t attachment_type, int worker_id, int num_of_workers, i
     attachment->registration_state = NOT_REGISTERED;
     attachment->attachment_type = attachment_type;
     attachment->nano_service_ipc = NULL;
+    attachment->nano_service_sync_ipc = NULL;
     attachment->comm_socket = -1;
+    attachment->comm_socket_sync = -1;
     attachment->logging_data = NULL;
 
     if (set_docker_id(attachment) == NANO_ERROR) {
@@ -256,15 +258,6 @@ SendDataNanoAttachmentAsync(NanoAttachment *attachment, AttachmentData *data)
         }
         case HTTP_REQUEST_END: {
             return SendRequestEndAsync(attachment, data);
-        }
-        case HTTP_RESPONSE_HEADER: {
-            return SendResponseHeadersAsync(attachment, data);
-        }
-        case HTTP_RESPONSE_BODY: {
-            return SendResponseBodyAsync(attachment, data);
-        }
-        case HTTP_RESPONSE_END: {
-            return SendResponseEndAsync(attachment, data);
         }
         case HOLD_DATA: {
             return SendDelayedVerdictRequestAsync(attachment, data);
