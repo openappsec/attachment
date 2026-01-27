@@ -259,7 +259,7 @@ signal_for_session_data(NanoAttachment *attachment, uint32_t cur_session_id, Att
 ///         or NULL if the data could not be received after multiple attempts.
 ///
 static HttpReplyFromService *
-receive_data_from_service(NanoAttachment *attachment, uint32_t session_id)
+receive_data_from_service(NanoAttachment *attachment, uint32_t session_id, SignalUsageMode usage_mode)
 {
     int res, retry;
     const char *reply_data;
@@ -268,7 +268,7 @@ receive_data_from_service(NanoAttachment *attachment, uint32_t session_id)
     write_dbg(attachment, session_id, DBG_LEVEL_TRACE, "Receiving verdict data from nano service");
 
     for (retry = 0; retry < 5; retry++) {
-        if (!isDataAvailable(attachment->nano_service_ipc)) {
+        if (!isDataAvailable(get_nano_service_ipc(attachment, usage_mode))) {
             write_dbg(
                 attachment,
                 session_id,
@@ -796,7 +796,8 @@ service_reply_receiver(
     HttpSessionData *session_data,
     WebResponseData **web_response_data,
     NanoHttpModificationList **modification_list,
-    AttachmentDataType chunk_type
+    AttachmentDataType chunk_type,
+    SignalUsageMode usage_mode
 )
 {
     HttpReplyFromService *reply_p;
@@ -828,7 +829,7 @@ service_reply_receiver(
 
     while (session_data->remaining_messages_to_reply) {
         // For each expected message, receive the reply from the nano service.
-        reply_p = receive_data_from_service(attachment, session_data->session_id);
+        reply_p = receive_data_from_service(attachment, session_data->session_id, usage_mode);
         if (reply_p == NULL) {
             write_dbg(
                 attachment,
@@ -1394,7 +1395,8 @@ nano_metadata_sender(
             ctx->session_data_p,
             &ctx->web_response_data,
             &ctx->modifications,
-            chunk_type
+            chunk_type,
+            usage_mode
         );
     }
 }
@@ -1676,7 +1678,8 @@ nano_header_sender(
             ctx->session_data_p,
             &ctx->web_response_data,
             &ctx->modifications,
-            header_type
+            header_type,
+            usage_mode
         );
     }
 }
@@ -1759,7 +1762,8 @@ nano_body_sender(
             ctx->session_data_p,
             &ctx->web_response_data,
             &ctx->modifications,
-            body_type
+            body_type,
+            usage_mode
         );
     } else {
         ctx->res = NANO_OK;
@@ -1819,7 +1823,8 @@ nano_end_transaction_sender(
             ctx->session_data_p,
             &ctx->web_response_data,
             &ctx->modifications,
-            end_transaction_type
+            end_transaction_type,
+            usage_mode
         );
     } else {
         ctx->res = NANO_OK;
@@ -1877,7 +1882,8 @@ nano_request_delayed_verdict(
             ctx->session_data_p,
             &ctx->web_response_data,
             &ctx->modifications,
-            wait_transaction_type
+            wait_transaction_type,
+            usage_mode
         );
     } else {
         ctx->res = NANO_OK;
