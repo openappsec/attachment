@@ -765,10 +765,12 @@ nano_attachment_init_process(NanoAttachment *attachment)
     }
 
     // Initialize secondary sync IPC channel for async responses
-    if (attachment->nano_service_sync_ipc == NULL) {        
+    if (attachment->nano_service_sync_ipc == NULL) {
+        char secondary_unique_id[MAX_NGINX_UID_LEN + 10]; // Extra space for suffix
+        snprintf(secondary_unique_id, sizeof(secondary_unique_id), "%s_sync", attachment->unique_id);
         write_dbg(attachment, 0, DBG_LEVEL_INFO, "Initializing secondary sync IPC channel");
         attachment->nano_service_sync_ipc = initIpc(
-            attachment->unique_id,
+            secondary_unique_id,
             attachment->nano_user_id,
             attachment->nano_group_id,
             0,
