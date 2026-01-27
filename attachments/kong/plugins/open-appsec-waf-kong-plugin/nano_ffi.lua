@@ -109,6 +109,7 @@ function nano.handle_custom_response(session_data, response, meta_data, req_head
         if session_id and pending_table then
             pending_table[session_id] = nil
         end
+        ctx.session_data = nil
         return kong.response.exit(code, body, headers)
     end
 

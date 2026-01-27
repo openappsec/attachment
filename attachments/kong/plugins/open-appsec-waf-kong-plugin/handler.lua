@@ -482,7 +482,6 @@ local function handle_access_async(ctx, session_id, session_data, meta_data, req
         nano.free_verdict_response(session_data, final_response)
     end
     free_async_resources(nil, meta_data, req_headers, nil)
-    nano.fini_session(session_data)
     pending[session_id] = nil
 end
 
@@ -610,12 +609,6 @@ end
 function NanoHandler.header_filter(conf)
     local ctx = kong.ctx.plugin
     
-    -- Skip header_filter in async mode
-    local is_async_mode = nano.get_is_async_mode_enabled() > 0
-    if is_async_mode then
-        return
-    end
-    
     if ctx.blocked then
         return
     end
@@ -663,12 +656,6 @@ end
 
 function NanoHandler.body_filter(conf)
     local ctx = kong.ctx.plugin
-    
-    -- Skip body_filter in async mode
-    local is_async_mode = nano.get_is_async_mode_enabled() > 0
-    if is_async_mode then
-        return
-    end
     
     if ctx.blocked then
         return
@@ -752,6 +739,11 @@ end
 
 function NanoHandler.log(conf)
     local ctx = kong.ctx.plugin
+
+    if ctx.session_data then
+        nano.fini_session(ctx.session_data)
+    end
+
     if ctx.cleanup_needed then
         nano.fini_session(ctx.session_data)
         nano.cleanup_all()

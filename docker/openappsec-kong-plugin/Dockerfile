@@ -2,6 +2,7 @@ FROM kong
 
 USER root
 
+RUN touch /etc/dual_docker
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential git curl zlib1g-dev ca-certificates && \
     rm -rf /var/lib/apt/lists/*
@@ -20,6 +21,9 @@ RUN curl -fSL https://luarocks.org/releases/luarocks-${LUAROCKS_VER}.tar.gz -o l
         --with-lua-include=/usr/local/openresty/luajit/include/luajit-2.1 && \
     make && make install && \
     cd .. && rm -rf luarocks-${LUAROCKS_VER}*
+
+# Create attachment-metadata file
+RUN echo "EFFECTIVE_SHM_SEGMENT_SIZE=4096" > /etc/attachment-metadata
 
 # Install the plugin via LuaRocks
 RUN luarocks install https://raw.githubusercontent.com/openappsec/attachment/main/attachments/kong/plugins/open-appsec-waf-kong-plugin/open-appsec-waf-kong-plugin-1.0.0-1.rockspec
