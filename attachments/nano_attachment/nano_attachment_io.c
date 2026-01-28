@@ -279,7 +279,7 @@ receive_data_from_service(NanoAttachment *attachment, uint32_t session_id, Signa
             usleep(1);
             continue;
         }
-        res = receiveData(attachment->nano_service_ipc, &reply_size, &reply_data);
+        res = receiveData(get_nano_service_ipc(attachment, usage_mode), &reply_size, &reply_data);
         if (res < 0 || reply_data == NULL) {
             write_dbg(
                 attachment,
@@ -854,7 +854,7 @@ service_reply_receiver(
                     "Ignoring verdict to an already handled request %d",
                     reply_p->session_id
                 );
-                popData(attachment->nano_service_ipc);
+                popData(get_nano_service_ipc(attachment, usage_mode));
                 continue;
             }
 
@@ -918,7 +918,7 @@ service_reply_receiver(
                     free(current_modification->modification.data);
                     free(current_modification);
                 }
-                popData(attachment->nano_service_ipc);
+                popData(get_nano_service_ipc(attachment, usage_mode));
                 return NANO_HTTP_FORBIDDEN;
             }
 
@@ -932,7 +932,7 @@ service_reply_receiver(
                 );
                 updateMetricField(attachment, ACCEPT_VERDICTS_COUNT, 1);
                 session_data->remaining_messages_to_reply = 0;
-                popData(attachment->nano_service_ipc);
+                popData(get_nano_service_ipc(attachment, usage_mode));
                 return NANO_OK;
             }
 
@@ -1008,7 +1008,7 @@ service_reply_receiver(
             }
             
         }
-        popData(attachment->nano_service_ipc);
+        popData(get_nano_service_ipc(attachment, usage_mode));
     }
 
     write_dbg(

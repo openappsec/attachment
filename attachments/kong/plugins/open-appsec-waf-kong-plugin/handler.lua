@@ -739,11 +739,6 @@ end
 
 function NanoHandler.log(conf)
     local ctx = kong.ctx.plugin
-
-    if ctx.session_data then
-        nano.fini_session(ctx.session_data)
-    end
-
     if ctx.cleanup_needed then
         nano.fini_session(ctx.session_data)
         nano.cleanup_all()

@@ -109,7 +109,6 @@ function nano.handle_custom_response(session_data, response, meta_data, req_head
         if session_id and pending_table then
             pending_table[session_id] = nil
         end
-        ctx.session_data = nil
         return kong.response.exit(code, body, headers)
     end
 
@@ -715,6 +714,28 @@ function nano.get_request_processing_timeout()
     end
 
     return nano_attachment.get_request_processing_timeout(attachment)
+end
+
+function nano.get_request_processing_timeout_sec()
+    local timeout_ms = nano.get_request_processing_timeout()
+    return timeout_ms / 1000  -- Convert milliseconds to seconds
+end
+
+function nano.get_response_processing_timeout()
+    local worker_id = ngx.worker.id()
+    local attachment = nano.attachments[worker_id]
+
+    if not attachment then
+        kong.log.err("Attachment not available for worker ", worker_id)
+        return 3000  -- Default 3000ms
+    end
+
+    return nano_attachment.get_response_processing_timeout(attachment)
+end
+
+function nano.get_response_processing_timeout_sec()
+    local timeout_ms = nano.get_response_processing_timeout()
+    return timeout_ms / 1000  -- Convert milliseconds to seconds
 end
 
 return nano

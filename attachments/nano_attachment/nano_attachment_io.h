@@ -96,7 +96,8 @@ service_reply_receiver(
     HttpSessionData *session_data,
     WebResponseData **web_response_data,
     NanoHttpModificationList **modification_list,
-    AttachmentDataType chunk_type
+    AttachmentDataType chunk_type,
+    SignalUsageMode usage_mode
 );
 
 ///

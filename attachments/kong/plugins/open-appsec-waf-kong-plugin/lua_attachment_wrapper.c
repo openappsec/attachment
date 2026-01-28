@@ -800,6 +800,17 @@ static int lua_get_request_processing_timeout(lua_State *L) {
     return 1;
 }
 
+static int lua_get_response_processing_timeout(lua_State *L) {
+    NanoAttachment* attachment = (NanoAttachment*)lua_touserdata(L, 1);
+    if (!attachment) {
+        return luaL_error(L, "invalid attachment");
+    }
+
+    uint32_t timeout = GetResponseProcessingTimeout(attachment);
+    lua_pushinteger(L, timeout);
+    return 1;
+}
+
 static const struct luaL_Reg nano_attachment_lib[] = {
     {"init_nano_attachment", lua_init_nano_attachment},
     {"get_web_response_type", lua_get_web_response_type},
@@ -837,6 +848,7 @@ static const struct luaL_Reg nano_attachment_lib[] = {
     {"get_req_header_thread_timeout", lua_get_req_header_thread_timeout},
     {"get_fail_mode_verdict", lua_get_fail_mode_verdict},
     {"get_request_processing_timeout", lua_get_request_processing_timeout},
+    {"get_response_processing_timeout", lua_get_response_processing_timeout},
     {NULL, NULL}
 };
 
