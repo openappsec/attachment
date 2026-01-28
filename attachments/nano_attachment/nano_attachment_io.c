@@ -130,13 +130,17 @@ notify_signal_to_service(NanoAttachment *attachment, uint32_t cur_session_id, Si
         );
 
         if (res < 0) {
-            write_dbg(
-                attachment,
-                cur_session_id,
-                DBG_LEVEL_WARNING,
-                "Failed to signal nano service, trying to restart communications"
-            );
-            return NANO_ERROR;
+            if (filter_mode == ASYNC_FILTER) {
+                if (errno == EBADF || errno == EPIPE || errno == ECONNRESET) {
+                    write_dbg(DBG_LEVEL_WARNING, "Error (errno=%d) on async socket, restarting communication", errno);
+                    return NANO_ERROR;
+                } else {
+                    return NANO_TIMEOUT;
+                }
+            } else {
+                write_dbg(DBG_LEVEL_WARNING, "Failed to signal nano service, restarting communication");
+                return NANO_ERROR;
+            }
         }
 
         bytes_written += res;
@@ -360,7 +364,8 @@ send_session_data_to_service(
         // Notify the nano service to inspect new session data.
         // This notification is triggered when chunked data transmission fails.
         res = signal_for_session_data(attachment, cur_session_id, chunk_type, usage_mode);
-
+        
+        //TODO: Here one
         if (res == NANO_ERROR) {
             disconnect_communication(attachment);
             res = restart_communication(attachment);
@@ -830,6 +835,7 @@ service_reply_receiver(
     } while (res == NANO_AGAIN);
 
     if (res != NANO_OK) {
+        // TODO: Here two
         disconnect_communication(attachment);
         restart_communication(attachment);
         return NANO_ERROR;

@@ -92,6 +92,7 @@ typedef struct NanoAttachment {
 #endif
 
     AttachmentVerdictResponse async_buckets[CP_ASYNC_CTX_BUCKETS_INIT]; ///< Buckets for storing verdict responses.
+    SessionIDQueue async_failed_bucket; ///< Bucket to track failed session IDs.
 } NanoAttachment;
 
 ///

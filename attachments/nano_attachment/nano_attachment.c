@@ -207,6 +207,11 @@ InitNanoAttachment(uint8_t attachment_type, int worker_id, int num_of_workers, i
     attachment->is_async_mode_enabled = 0;
     memset(attachment->async_buckets, 0, sizeof(attachment->async_buckets));
 
+    memset(&attachment->session_id_queue, 0, sizeof(attachment->session_id_queue));
+    attachment->session_id_queue.head = 0;
+    attachment->session_id_queue.tail = 0;
+    attachment->session_id_queue.count = 0;
+
     if (nano_attachment_init_process(attachment) != NANO_OK) {
         write_dbg(attachment, 0, DBG_LEVEL_WARNING, "Could not initialize nano attachment");
         close_logging_fd(attachment);
@@ -416,6 +421,9 @@ getAttachmentVerdictResponse(NanoAttachment *attachment, SessionID session_id)
 {
     AttachmentVerdictResponse response = NanoAsyncFindResponse(attachment, session_id);
     NanoAsyncRemoveResponse(attachment, session_id);
+
+    if (response.session_id == 0) return GenerateFailedVerdict(attachment, session_id);
+
     return response;
 }
 
