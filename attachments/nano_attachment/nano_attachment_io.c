@@ -60,6 +60,14 @@ get_nano_service_ipc(NanoAttachment *attachment, SignalUsageMode usage_mode)
     return (usage_mode == SIGNAL_USAGE_ASYNC) ? attachment->nano_service_ipc : attachment->nano_service_sync_ipc;
 }
 
+static void
+handle_counter_new_message_sent(unsigned amount, unsigned int *sync_sent_messages_counter, SignalUsageMode usage_mode)
+{
+    if (usage_mode == SIGNAL_USAGE_ASYNC) return;
+
+    *sync_sent_messages_counter += amount;
+}
+
 /// @brief Sends a signal to the nano service to notify about new session data to inspect.
 ///
 /// This function sends a signal to the nano service to notify it about new session data
@@ -1386,7 +1394,7 @@ nano_metadata_sender(
     }
 
     if (res == NANO_OK) {
-        *num_of_messages_sent += 1;
+        handle_counter_new_message_sent(1, num_of_messages_sent, usage_mode);
     }
 
     if (is_verdict_requested) {
@@ -1436,7 +1444,7 @@ nano_send_response_code(
         return;
     }
 
-    *num_messages_sent += 1;
+    handle_counter_new_message_sent(1, num_messages_sent, usage_mode);
 }
 
 void
@@ -1480,7 +1488,7 @@ nano_send_response_content_length(
         return;
     }
 
-    *num_messages_sent += 1;
+    handle_counter_new_message_sent(1, num_messages_sent, usage_mode);
 }
 
 ///
@@ -1662,7 +1670,7 @@ nano_header_sender(
         fragment_index = 0;
     }
 
-    *num_messages_sent += bulk_index;
+    handle_counter_new_message_sent(bulk_index, num_messages_sent, usage_mode);
 
     write_dbg(
         attachment,
@@ -1746,7 +1754,7 @@ nano_body_sender(
         }
     }
 
-    *num_messages_sent += body_index;
+    handle_counter_new_message_sent(body_index, num_messages_sent, usage_mode);
 
     write_dbg(
         attachment,
@@ -1815,7 +1823,7 @@ nano_end_transaction_sender(
         return;
     }
 
-    *num_messages_sent += 1;
+    handle_counter_new_message_sent(1, num_messages_sent, usage_mode);
 
     if (is_verdict_requested) {
         ctx->res = service_reply_receiver(
@@ -1874,7 +1882,7 @@ nano_request_delayed_verdict(
         return;
     }
 
-    *num_messages_sent += 1;
+    handle_counter_new_message_sent(1, num_messages_sent, usage_mode);
 
     if (is_verdict_requested) {
         ctx->res = service_reply_receiver(
