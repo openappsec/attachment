@@ -11,6 +11,7 @@
 #include "nano_attachment_metric.h"
 #include "nano_attachment_util.h"
 #include "nano_configuration.h"
+#include "nano_attachment_bucket.h"
 
 #define MAX_HEADER_BULK_SIZE 10
 #define RESPONSE_CODE_COUNT 3
@@ -1396,6 +1397,9 @@ nano_metadata_sender(
             cur_request_id
         );
         ctx->res = NANO_ERROR;
+        if (usage_mode == SIGNAL_USAGE_ASYNC) {
+            NanoAsyncFailedSessionIDQueueAdd(attachment, cur_request_id);
+        }
         return;
     }
 
@@ -1447,6 +1451,9 @@ nano_send_response_code(
 
     if (res != NANO_OK) {
         ctx->res = NANO_ERROR;
+        if (usage_mode == SIGNAL_USAGE_ASYNC) {
+            NanoAsyncFailedSessionIDQueueAdd(attachment, cur_request_id);
+        }
         return;
     }
 
@@ -1491,6 +1498,9 @@ nano_send_response_content_length(
 
     if (res != NANO_OK) {
         ctx->res = NANO_ERROR;
+        if (usage_mode == SIGNAL_USAGE_ASYNC) {
+            NanoAsyncFailedSessionIDQueueAdd(attachment, cur_request_id);
+        }
         return;
     }
 
@@ -1669,6 +1679,9 @@ nano_header_sender(
                 cur_request_id
             );
             ctx->res = NANO_ERROR;
+            if (usage_mode == SIGNAL_USAGE_ASYNC) {
+                NanoAsyncFailedSessionIDQueueAdd(attachment, cur_request_id);
+            }
             return;
         }
 
@@ -1756,6 +1769,9 @@ nano_body_sender(
                 cur_request_id
             );
             ctx->res = NANO_ERROR;
+            if (usage_mode == SIGNAL_USAGE_ASYNC) {
+                NanoAsyncFailedSessionIDQueueAdd(attachment, cur_request_id);
+            }
             return;
         }
     }
@@ -1826,6 +1842,10 @@ nano_end_transaction_sender(
             "Failed to send end %s event flag for inspection",
             end_transaction_type == REQUEST_END ? "request" : "response"
         );
+        if (usage_mode == SIGNAL_USAGE_ASYNC) {
+            ctx->res = NANO_ERROR;
+            NanoAsyncFailedSessionIDQueueAdd(attachment, cur_request_id);
+        }
         return;
     }
 
@@ -1885,6 +1905,10 @@ nano_request_delayed_verdict(
             DBG_LEVEL_TRACE,
             "Failed to send delayed event flag for inspection"
         );
+        if (usage_mode == SIGNAL_USAGE_ASYNC) {
+            ctx->res = NANO_ERROR;
+            NanoAsyncFailedSessionIDQueueAdd(attachment, cur_request_id);
+        }
         return;
     }
 

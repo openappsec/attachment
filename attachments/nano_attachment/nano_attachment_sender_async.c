@@ -7,6 +7,7 @@
 #include "nano_attachment_io.h"
 #include "nano_attachment_sender_thread.h"
 #include "nano_utils.h"
+#include "nano_attachment_bucket.h"
 
 NanoCommunicationResult
 SendRequestFilterAsyncImpl(
@@ -76,7 +77,16 @@ SendMetadataAsyncImpl(
         SIGNAL_USAGE_ASYNC
     );
 
-    signal_for_session_data(attachment, session_data_p->session_id, HTTP_REQUEST_METADATA, SIGNAL_USAGE_ASYNC);
+    if (ctx.res != NANO_OK) {
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_data_p->session_id);
+        return ctx.res;
+    }
+
+    NanoCommunicationResult signal_res = signal_for_session_data(attachment, session_data_p->session_id, HTTP_REQUEST_METADATA, SIGNAL_USAGE_ASYNC);
+    if (signal_res != NANO_OK) {
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_data_p->session_id);
+        return signal_res;
+    }
 
     return ctx.res;
 }
@@ -113,7 +123,16 @@ SendRequestHeadersAsyncImpl(
         SIGNAL_USAGE_ASYNC
     );
 
-    signal_for_session_data(attachment, session_data_p->session_id, HTTP_REQUEST_HEADER, SIGNAL_USAGE_ASYNC);
+    if (ctx.res != NANO_OK) {
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_data_p->session_id);
+        return ctx.res;
+    }
+
+    NanoCommunicationResult signal_res = signal_for_session_data(attachment, session_data_p->session_id, HTTP_REQUEST_HEADER, SIGNAL_USAGE_ASYNC);
+    if (signal_res != NANO_OK) {
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_data_p->session_id);
+        return signal_res;
+    }
 
     return ctx.res;
 }
@@ -149,7 +168,16 @@ SendRequestBodyAsyncImpl(
         SIGNAL_USAGE_ASYNC
     );
 
-    signal_for_session_data(attachment, session_data_p->session_id, HTTP_REQUEST_BODY, SIGNAL_USAGE_ASYNC);
+    if (ctx.res != NANO_OK) {
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_data_p->session_id);
+        return ctx.res;
+    }
+
+    NanoCommunicationResult signal_res = signal_for_session_data(attachment, session_data_p->session_id, HTTP_REQUEST_BODY, SIGNAL_USAGE_ASYNC);
+    if (signal_res != NANO_OK) {
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_data_p->session_id);
+        return signal_res;
+    }
 
     return ctx.res;
 }
@@ -183,7 +211,16 @@ SendRequestEndAsyncImpl(
         SIGNAL_USAGE_ASYNC
     );
 
-    signal_for_session_data(attachment, session_data_p->session_id, HTTP_REQUEST_END, SIGNAL_USAGE_ASYNC);
+    if (ctx.res != NANO_OK) {
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_data_p->session_id);
+        return ctx.res;
+    }
+
+    NanoCommunicationResult signal_res = signal_for_session_data(attachment, session_data_p->session_id, HTTP_REQUEST_END, SIGNAL_USAGE_ASYNC);
+    if (signal_res != NANO_OK) {
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_data_p->session_id);
+        return signal_res;
+    }
 
     return ctx.res;
 }
@@ -216,7 +253,16 @@ SendDelayedVerdictRequestAsyncImpl(
         SIGNAL_USAGE_ASYNC
     );
 
-    signal_for_session_data(attachment, session_data_p->session_id, HOLD_DATA, SIGNAL_USAGE_ASYNC);
+    if (ctx.res != NANO_OK) {
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_data_p->session_id);
+        return ctx.res;
+    }
+
+    NanoCommunicationResult signal_res = signal_for_session_data(attachment, session_data_p->session_id, HOLD_DATA, SIGNAL_USAGE_ASYNC);
+    if (signal_res != NANO_OK) {
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_data_p->session_id);
+        return signal_res;
+    }
 
     return ctx.res;
 }

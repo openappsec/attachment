@@ -8,6 +8,7 @@
 #include "nano_attachment_thread.h"
 #include "nano_utils.h"
 #include "nano_attachment_metric.h"
+#include "nano_attachment_bucket.h"
 
 static unsigned char default_uuid[] = "20118dba-81f7-4999-8e94-003cf242f5dd\0";
 static const size_t default_uuid_size = 37;
@@ -825,6 +826,7 @@ SendRequestFilterAsync(NanoAttachment *attachment, AttachmentData *data)
             "Failed to handle shmem corruption in session ID: %d",
             session_id
         );
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_id);
         return NANO_ERROR;
     }
 
@@ -872,6 +874,7 @@ SendMetadataAsync(NanoAttachment *attachment, AttachmentData *data)
             "Failed to handle shmem corruption in session ID: %d",
             session_id
         );
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_id);
         return NANO_ERROR;
     }
 
@@ -919,6 +922,7 @@ SendRequestHeadersAsync(NanoAttachment *attachment, AttachmentData *data)
             "Failed to handle shmem corruption in session ID: %d",
             session_id
         );
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_id);
         return NANO_ERROR;
     }
 
@@ -966,6 +970,7 @@ SendRequestBodyAsync(NanoAttachment *attachment, AttachmentData *data)
             "Failed to handle shmem corruption in session ID: %d",
             session_id
         );
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_id);
         return NANO_ERROR;
     }
 
@@ -1002,6 +1007,7 @@ SendRequestEndAsync(NanoAttachment *attachment, AttachmentData *data)
             "Failed to handle shmem corruption in session ID: %d",
             session_id
         );
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_id);
         return NANO_ERROR;
     }
 
@@ -1038,6 +1044,7 @@ SendDelayedVerdictRequestAsync(NanoAttachment *attachment, AttachmentData *data)
             "Failed to handle shmem corruption in session ID: %d",
             session_id
         );
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_id);
         return NANO_ERROR;
     }
 
