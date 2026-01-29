@@ -289,6 +289,32 @@ freeCompressedBody(
 );
 
 ///
+/// @brief Checks if the failed session ID queue is empty.
+///
+/// This function checks whether the queue containing failed session IDs
+/// associated with the NanoAttachment is empty.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return Returns true if the failed session ID queue is empty, false otherwise.
+///
+bool
+IsFailedSessionIDQueueEmpty(NanoAttachment *attachment);
+
+///
+/// @brief Pops a session ID from the failed session ID queue.
+///
+/// This function removes and returns a session ID from the queue of failed
+/// session IDs associated with the NanoAttachment.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+///
+/// @return The session ID that was popped from the failed session ID queue.
+///
+SessionID
+PopFailedSessionID(NanoAttachment *attachment);
+
+///
 /// @brief Checks if the queue is empty.
 ///
 /// @param attachment A pointer to the NanoAttachment structure.

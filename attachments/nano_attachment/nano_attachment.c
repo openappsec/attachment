@@ -842,6 +842,18 @@ freeCompressedBody(NanoAttachment *attachment, HttpSessionData *session_data, Na
     nano_free_compressed_body(attachment, bodies, session_data);
 }
 
+bool
+IsFailedSessionIDQueueEmpty(NanoAttachment *attachment)
+{
+    return NanoAsyncFailedSessionIDQueueIsEmpty(attachment);
+}
+
+SessionID
+PopFailedSessionID(NanoAttachment *attachment)
+{
+    return NanoAsyncFailedSessionIDQueuePop(attachment);
+}
+
 uint32_t
 GetRequestProcessingTimeout(NanoAttachment *attachment)
 {
