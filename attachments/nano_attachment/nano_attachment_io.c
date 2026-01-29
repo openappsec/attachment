@@ -61,6 +61,28 @@ get_nano_service_ipc(NanoAttachment *attachment, SignalUsageMode usage_mode)
     return (usage_mode == SIGNAL_USAGE_ASYNC) ? attachment->nano_service_ipc : attachment->nano_service_sync_ipc;
 }
 
+/// @brief Gets the appropriate timeout value based on usage mode and chunk type.
+///
+/// @param attachment A pointer to a NanoAttachment structure.
+/// @param chunk_type An enumeration representing the type of HTTP chunk being sent.
+/// @param usage_mode An enumeration representing whether the function is being used in SYNC or ASYNC mode.
+/// @return The timeout value in milliseconds to use for polling.
+///
+static inline unsigned int
+get_timeout(NanoAttachment *attachment, AttachmentDataType chunk_type, SignalUsageMode usage_mode)
+{
+    if (usage_mode == SIGNAL_USAGE_ASYNC) {
+        return 10u;
+    }
+
+    // SYNC mode
+    if (chunk_type == REQUEST_DELAYED_VERDICT) {
+        return attachment->fail_open_delayed_timeout;
+    }
+
+    return attachment->fail_open_timeout;
+}
+
 static void
 handle_counter_new_message_sent(unsigned amount, unsigned int *sync_sent_messages_counter, SignalUsageMode usage_mode)
 {
@@ -170,16 +192,9 @@ signal_for_session_data(NanoAttachment *attachment, uint32_t cur_session_id, Att
     struct pollfd s_poll;
     NanoCommunicationResult res = NANO_OK;
     uint32_t reply_from_service;
-    int timeout = attachment->fail_open_timeout;
+    int timeout = get_timeout(attachment, chunk_type, usage_mode);
     int retry;
     int comm_socket = get_comm_socket(attachment, usage_mode);
-
-    if (chunk_type == REQUEST_DELAYED_VERDICT) {
-        timeout = attachment->fail_open_delayed_timeout;
-    }
-    if (attachment->inspection_mode != NON_BLOCKING_THREAD) {
-        timeout = -1;
-    }
 
     res = notify_signal_to_service(attachment, cur_session_id, usage_mode);
     if (res != NANO_OK) return res;
