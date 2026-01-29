@@ -288,7 +288,6 @@ function nano.handle_start_transaction()
 
     local listening_ip = ngx.var.server_addr or "127.0.0.1"
     local listening_port = ngx.var.server_port or 80
-    kong.log.err("listening ip: ", listening_ip, ", listening_port: ", listening_port)
 
     local metadata = nano_attachment.create_http_metadata(
         scheme, method, host, listening_ip, tonumber(listening_port) or 0,
