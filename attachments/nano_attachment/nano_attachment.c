@@ -35,7 +35,7 @@ copy_attachment_metadata_file(int worker_id)
     struct stat st;
     static int is_dual_docker_env = -1;
     char temp_file_path[256];
-    
+
     if (is_dual_docker_env == -1) {
         is_dual_docker_env = (access(DUAL_DOCKER_FILE, F_OK) == 0) ? 1 : 0;
     }
@@ -47,23 +47,23 @@ copy_attachment_metadata_file(int worker_id)
     if (stat(ATTACHMENT_METADATA_FILE_PATH_SRC, &st) != 0) {
         return 0;
     }
-    
+
     snprintf(temp_file_path, sizeof(temp_file_path), "/dev/shm/attachment-metadata-%lu.tmp", (unsigned long)(worker_id + 1));
-    
+
     int src_fd = open(ATTACHMENT_METADATA_FILE_PATH_SRC, O_RDONLY);
     if (src_fd == -1) {
         return 0;
     }
-    
+
     int dest_fd = open(temp_file_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (dest_fd == -1) {
         close(src_fd);
         return 0;
     }
-    
+
     char buffer[4096];
     ssize_t bytes_read, bytes_written;
-    
+
     while ((bytes_read = read(src_fd, buffer, sizeof(buffer))) > 0) {
         bytes_written = write(dest_fd, buffer, bytes_read);
         if (bytes_written != bytes_read) {
@@ -73,23 +73,23 @@ copy_attachment_metadata_file(int worker_id)
             return 0;
         }
     }
-    
+
     if (bytes_read == -1) {
         close(src_fd);
         close(dest_fd);
         unlink(temp_file_path);
         return 0;
     }
-    
+
     close(src_fd);
     close(dest_fd);
-    
+
     // Atomic rename operation
     if (rename(temp_file_path, ATTACHMENT_METADATA_FILE_PATH_DEST) != 0) {
         unlink(temp_file_path);
         return 0;
     }
-    
+
     return 1;
 }
 
@@ -100,7 +100,7 @@ void
 remove_attachment_metadata_file()
 {
     static int is_dual_docker_env = -1;
-    
+
     if (is_dual_docker_env == -1) {
         is_dual_docker_env = (access(DUAL_DOCKER_FILE, F_OK) == 0) ? 1 : 0;
     }
@@ -112,11 +112,11 @@ remove_attachment_metadata_file()
     if (access(ATTACHMENT_METADATA_FILE_PATH_DEST, F_OK) != 0) {
         return;
     }
-    
+
     if (unlink(ATTACHMENT_METADATA_FILE_PATH_DEST) != 0) {
         return;
     }
-    
+
 }
 
 NanoAttachment *
@@ -207,10 +207,10 @@ InitNanoAttachment(uint8_t attachment_type, int worker_id, int num_of_workers, i
     attachment->is_async_mode_enabled = 0;
     memset(attachment->async_buckets, 0, sizeof(attachment->async_buckets));
 
-    memset(&attachment->session_id_queue, 0, sizeof(attachment->session_id_queue));
-    attachment->session_id_queue.head = 0;
-    attachment->session_id_queue.tail = 0;
-    attachment->session_id_queue.count = 0;
+    memset(&attachment->async_failed_bucket, 0, sizeof(attachment->async_failed_bucket));
+    attachment->async_failed_bucket.head = 0;
+    attachment->async_failed_bucket.tail = 0;
+    attachment->async_failed_bucket.count = 0;
 
     if (nano_attachment_init_process(attachment) != NANO_OK) {
         write_dbg(attachment, 0, DBG_LEVEL_WARNING, "Could not initialize nano attachment");

@@ -28,6 +28,16 @@
 #define LOGGING_FILE_NAME "nano_attachment" ///< Default logging file name.
 #define LOGGING_FILE_PATH LOGGING_DIRECTORY_PATH "/" LOGGING_FILE_NAME
 #define CP_ASYNC_CTX_BUCKETS_INIT 2048 ///< Hash table buckets for better distribution
+#define SESSION_ID_QUEUE_SIZE 1024 ///< Maximum size of the session ID queue
+
+typedef struct SessionIDQueue {
+    SessionID queue[SESSION_ID_QUEUE_SIZE]; ///< Circular buffer for session IDs
+    uint32_t head; ///< Index of the head (where elements are dequeued)
+    uint32_t tail; ///< Index of the tail (where elements are enqueued)
+    uint32_t count; ///< Current number of elements in the queue
+} SessionIDQueue; ///< Queue structure for holding session IDs
+
+typedef struct NanoAttachment NanoAttachment;
 
 typedef enum nano_attachment_registration_state {
     NOT_REGISTERED,

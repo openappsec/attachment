@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "nano_utils.h"
+
 #define CP_ASYNC_CTX_BUCKETS 2048 ///< Hash table buckets for better distribution
 
 ///
@@ -27,7 +29,7 @@ NanoAsyncFindResponse(NanoAttachment *attachment, SessionID session_id)
     response.session_id = attachment->async_buckets[bucket].session_id;
     response.modifications = attachment->async_buckets[bucket].modifications;
     response.web_response_data = attachment->async_buckets[bucket].web_response_data;
-    
+
     return response;
 }
 
@@ -60,7 +62,7 @@ NanoCommunicationResult
 NanoAsyncAddResponse(NanoAttachment *attachment, SessionID session_id, AttachmentVerdictResponse *response)
 {
     uint bucket;
-    
+
     if (response == NULL) {
         return NANO_ERROR;
     }
@@ -88,7 +90,7 @@ NanoAsyncFailedSessionIDQueueIsEmpty(NanoAttachment *attachment)
         return 1;
     }
 
-    return attachment->session_id_queue.count == 0;
+    return attachment->async_failed_bucket.count == 0;
 }
 
 NanoCommunicationResult
@@ -98,7 +100,7 @@ NanoAsyncFailedSessionIDQueueAdd(NanoAttachment *attachment, SessionID session_i
         return NANO_ERROR;
     }
 
-    SessionIDQueue *queue = &attachment->session_id_queue;
+    SessionIDQueue *queue = &attachment->async_failed_bucket;
 
     if (queue->count >= SESSION_ID_QUEUE_SIZE) {
         write_dbg(
@@ -134,7 +136,7 @@ NanoAsyncFailedSessionIDQueuePop(NanoAttachment *attachment)
         return 0;
     }
 
-    SessionIDQueue *queue = &attachment->session_id_queue;
+    SessionIDQueue *queue = &attachment->async_failed_bucket;
 
     if (queue->count == 0) {
         return 0;
