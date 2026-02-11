@@ -94,21 +94,27 @@ function nano.handle_custom_response(session_data, response, meta_data, req_head
     
     -- Helper function to do all cleanup before exiting
     local function cleanup_and_exit(code, body, headers)
-        -- Free response
-        nano.free_verdict_response(session_data, response)
-        -- Free async resources if provided
-        if meta_data then
-            nano_attachment.free_http_metadata(meta_data)
+        local is_async_mode = nano.get_is_async_mode_enabled() > 0
+
+        if is_async_mode then
+            -- Free async resources if provided
+            if meta_data then
+                nano_attachment.free_http_metadata(meta_data)
+            end
+            if req_headers then
+                nano_attachment.freeHttpHeaders(req_headers)
+            end
+
+            -- Free verdict response + finalize session only in async mode
+            nano.free_verdict_response(session_data, response)
+            nano.fini_session(session_data)
+
+            -- Remove from pending if session_id and pending_table provided
+            if session_id and pending_table then
+                pending_table[session_id] = nil
+            end
         end
-        if req_headers then
-            nano_attachment.freeHttpHeaders(req_headers)
-        end
-        -- Finalize session
-        nano.fini_session(session_data)
-        -- Remove from pending if session_id and pending_table provided
-        if session_id and pending_table then
-            pending_table[session_id] = nil
-        end
+
         return kong.response.exit(code, body, headers)
     end
 

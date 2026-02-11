@@ -26,6 +26,9 @@ build = {
     ["kong.plugins.open-appsec-waf-kong-plugin.handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/handler.lua",
     ["kong.plugins.open-appsec-waf-kong-plugin.nano_ffi"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/nano_ffi.lua",
     ["kong.plugins.open-appsec-waf-kong-plugin.schema"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/schema.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.lib.verdict_poller"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/verdict_poller.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.lib.verdict_handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/verdict_handler.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.lib.utils"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/utils.lua",
     ["lua_attachment_wrapper"] = {
       sources = {
         "attachments/kong/plugins/open-appsec-waf-kong-plugin/lua_attachment_wrapper.c",
