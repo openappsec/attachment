@@ -134,7 +134,7 @@ SendRequestFilterThread(void *_ctx)
             ctx,
             session_data_p->session_id,
             &session_data_p->remaining_messages_to_reply,
-            is_verdict_requested,
+            true,
             SIGNAL_USAGE_SYNC
         );
     }
