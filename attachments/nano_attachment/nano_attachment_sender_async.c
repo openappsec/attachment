@@ -82,7 +82,7 @@ SendMetadataAsyncImpl(
         return ctx.res;
     }
 
-    NanoCommunicationResult signal_res = signal_for_session_data(attachment, session_data_p->session_id, HTTP_REQUEST_METADATA, SIGNAL_USAGE_ASYNC);
+    NanoCommunicationResult signal_res = signal_for_session_data(attachment, session_data_p->session_id, REQUEST_START, SIGNAL_USAGE_ASYNC);
     if (signal_res != NANO_OK) {
         NanoAsyncFailedSessionIDQueueAdd(attachment, session_data_p->session_id);
         return signal_res;
@@ -128,7 +128,7 @@ SendRequestHeadersAsyncImpl(
         return ctx.res;
     }
 
-    NanoCommunicationResult signal_res = signal_for_session_data(attachment, session_data_p->session_id, HTTP_REQUEST_HEADER, SIGNAL_USAGE_ASYNC);
+    NanoCommunicationResult signal_res = signal_for_session_data(attachment, session_data_p->session_id, REQUEST_HEADER, SIGNAL_USAGE_ASYNC);
     if (signal_res != NANO_OK) {
         NanoAsyncFailedSessionIDQueueAdd(attachment, session_data_p->session_id);
         return signal_res;
