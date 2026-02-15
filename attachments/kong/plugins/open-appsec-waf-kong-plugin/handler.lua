@@ -40,9 +40,15 @@ local function handle_access_async(ctx, session_id, session_data, meta_data, req
     ctx.fail_open_mode = false
     ctx.is_final_verdict = false
 
-    nano.send_data_async(session_id, session_data, meta_data, req_headers, contains_body, nano.HttpChunkType.HTTP_REQUEST_FILTER)
+    local verdict, response
+    local result = nano.send_data_async(session_id, session_data, meta_data, req_headers, contains_body, nano.HttpChunkType.HTTP_REQUEST_FILTER)
+    if result ~= nano.NanoCommunicationResult.NANO_OK then
+        kong.log.debug("send_data_async failed (session=", session_id, ", result=", result, ")")
+        ctx.fail_open_mode = true
+        goto cleanup
+    end
 
-    local verdict, response = verdict_handler.wait_for_verdict_async(nano, sem, session_id, nano.get_req_header_thread_timeout, 3, ctx, "headers")
+    verdict, response = verdict_handler.wait_for_verdict_async(nano, sem, session_id, nano.get_req_header_thread_timeout, 3, ctx, "headers")
     if not verdict then
         ctx.fail_open_mode = true
         if response == "blocked" then
@@ -72,7 +78,12 @@ local function handle_access_async(ctx, session_id, session_data, meta_data, req
     if contains_body == 1 then
         local body = kong.request.get_raw_body()
         if body and #body > 0 then
-            nano.send_body_async(session_id, session_data, body, nano.HttpChunkType.HTTP_REQUEST_BODY)
+            local body_result = nano.send_body_async(session_id, session_data, body, nano.HttpChunkType.HTTP_REQUEST_BODY)
+            if body_result ~= nano.NanoCommunicationResult.NANO_OK then
+                kong.log.debug("send_body_async failed (session=", session_id, ", result=", body_result, ") - failing open")
+                ctx.fail_open_mode = true
+                goto cleanup
+            end
 
             verdict, response = verdict_handler.wait_for_verdict_async(nano, sem, session_id, nano.get_req_body_thread_timeout, 3, ctx, "body")
             if not verdict then
@@ -170,7 +181,13 @@ local function handle_access_async(ctx, session_id, session_data, meta_data, req
         end)
 
         if not ok then
-            kong.log.debug("Error ending request inspection (session=", session_id, ", error=", result, ") - failing open")
+            kong.log.debug("Error ending request inspection (session=", session_id, ", error=", result, ")")
+            ctx.fail_open_mode = true
+            goto cleanup
+        end
+
+        if result ~= nano.NanoCommunicationResult.NANO_OK then
+            kong.log.debug("end_inspection_async failed (session=", session_id, ", result=", result, ")")
             ctx.fail_open_mode = true
             goto cleanup
         end
@@ -211,7 +228,12 @@ local function handle_access_async(ctx, session_id, session_data, meta_data, req
             response = nil
         end
     else
-        nano.end_inspection_async(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
+        local end_result = nano.end_inspection_async(session_id, session_data, nano.HttpChunkType.HTTP_REQUEST_END)
+        if end_result ~= nano.NanoCommunicationResult.NANO_OK then
+            kong.log.debug("end_inspection_async failed (session=", session_id, ", result=", end_result, ")")
+            ctx.fail_open_mode = true
+            goto cleanup
+        end
 
         verdict, response = verdict_handler.wait_for_verdict_async(nano, sem, session_id, nano.get_req_header_thread_timeout, 3, ctx, "end inspection (no body)")
         if not verdict then

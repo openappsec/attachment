@@ -29,6 +29,16 @@ nano.HttpChunkType = {
     HOLD_DATA = 8
 }
 
+nano.NanoCommunicationResult = {
+    NANO_OK = 0,
+    NANO_ERROR = 1,
+    NANO_ABORT = 2,
+    NANO_AGAIN = 3,
+    NANO_HTTP_FORBIDDEN = 4,
+    NANO_DECLINED = 5,
+    NANO_TIMEOUT = 6
+}
+
 nano.WebResponseType = {
     CUSTOM_WEB_RESPONSE = 0,
     RESPONSE_CODE_ONLY = 1,
@@ -376,13 +386,14 @@ function nano.send_data_async(session_id, session_data, meta_data, header_data, 
 
     if not attachment then
         kong.log.warn("Attachment not available for worker ", worker_id, " - failing open")
-        return nil
+        return nano.NanoCommunicationResult.NANO_ERROR
     end
 
     contains_body = tonumber(contains_body) or 0
     contains_body = (contains_body > 0) and 1 or 0
 
-    return nano_attachment.send_data_async(attachment, session_id, session_data, chunk_type, meta_data, header_data, contains_body)
+    local _, result = nano_attachment.send_data_async(attachment, session_id, session_data, chunk_type, meta_data, header_data, contains_body)
+    return result
 end
 
 function nano.send_body(session_id, session_data, body_chunk, chunk_type)
@@ -409,10 +420,11 @@ function nano.send_body_async(session_id, session_data, body_chunk, chunk_type)
 
     if not attachment then
         kong.log.warn("Attachment not available for worker ", worker_id, " - failing open")
-        return nil
+        return nano.NanoCommunicationResult.NANO_ERROR
     end
 
-    return nano_attachment.send_body_async(attachment, session_id, session_data, body_chunk, chunk_type)
+    local _, result = nano_attachment.send_body_async(attachment, session_id, session_data, body_chunk, chunk_type)
+    return result
 end
 
 function nano.send_wait_signal(session_id, session_data)
@@ -421,10 +433,11 @@ function nano.send_wait_signal(session_id, session_data)
 
     if not attachment then
         kong.log.warn("Attachment not available for worker ", worker_id, " - failing open")
-        return nil
+        return nano.NanoCommunicationResult.NANO_ERROR
     end
 
-    nano_attachment.send_wait_signal(attachment, session_id, session_data)
+    local result = nano_attachment.send_wait_signal(attachment, session_id, session_data)
+    return result
 end
 
 function nano.inject_at_position(buffer, injection, pos)
@@ -576,15 +589,16 @@ function nano.end_inspection_async(session_id, session_data, chunk_type)
 
     if not attachment then
         kong.log.warn("Attachment not available for worker ", worker_id, " - failing open during end_inspection_async")
-        return nil
+        return nano.NanoCommunicationResult.NANO_ERROR
     end
 
     if not session_data then
         kong.log.err("Cannot end inspection async: Invalid session_data for session ", session_id)
-        return nil
+        return nano.NanoCommunicationResult.NANO_ERROR
     end
 
-    return nano_attachment.end_inspection_async(attachment, session_id, session_data, chunk_type)
+    local _, result = nano_attachment.end_inspection_async(attachment, session_id, session_data, chunk_type)
+    return result
 end
 
 function nano.get_attachment_verdict_response(session_id)

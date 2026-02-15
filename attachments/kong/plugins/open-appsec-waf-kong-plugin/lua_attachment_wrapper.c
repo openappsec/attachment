@@ -379,12 +379,13 @@ static int lua_send_data_async(lua_State *L) {
     attachment_data.chunk_type = chunk_type;
     attachment_data.data = (void*)filter_data;
 
-    SendDataNanoAttachmentAsync(attachment, &attachment_data);
+    NanoCommunicationResult result = SendDataNanoAttachmentAsync(attachment, &attachment_data);
 
     free(filter_data);
 
     lua_pushinteger(L, session_id);
-    return 1;
+    lua_pushinteger(L, (int)result);
+    return 2;
 }
 
 static int lua_send_body(lua_State *L) {
@@ -506,10 +507,11 @@ static int lua_send_body_async(lua_State *L) {
         attachment_data.chunk_type = chunk_type;
         attachment_data.data = &http_chunks;
 
-        SendDataNanoAttachmentAsync(attachment, &attachment_data);
+        NanoCommunicationResult result = SendDataNanoAttachmentAsync(attachment, &attachment_data);
 
         lua_pushinteger(L, session_id);
-        return 1;
+        lua_pushinteger(L, (int)result);
+        return 2;
     }
 
     const size_t CHUNK_SIZE = 8 * 1024;
@@ -543,12 +545,13 @@ static int lua_send_body_async(lua_State *L) {
     attachment_data.chunk_type = chunk_type;
     attachment_data.data = &http_chunks;
 
-    SendDataNanoAttachmentAsync(attachment, &attachment_data);
+    NanoCommunicationResult result = SendDataNanoAttachmentAsync(attachment, &attachment_data);
 
     free(http_chunks.data);
 
     lua_pushinteger(L, session_id);
-    return 1;
+    lua_pushinteger(L, (int)result);
+    return 2;
 }
 
 static int lua_send_wait_signal(lua_State *L) {
@@ -571,9 +574,10 @@ static int lua_send_wait_signal(lua_State *L) {
     attachment_data.chunk_type = HOLD_DATA;
     attachment_data.data = &http_chunks;
 
-    SendDataNanoAttachmentAsync(attachment, &attachment_data);
+    NanoCommunicationResult result = SendDataNanoAttachmentAsync(attachment, &attachment_data);
 
-    return 0;
+    lua_pushinteger(L, (int)result);
+    return 1;
 }
 
 static int lua_end_inspection(lua_State *L) {
@@ -619,10 +623,11 @@ static int lua_end_inspection_async(lua_State *L) {
     attachment_data.chunk_type = chunk_type;
     attachment_data.data = NULL;
 
-    SendDataNanoAttachmentAsync(attachment, &attachment_data);
+    NanoCommunicationResult result = SendDataNanoAttachmentAsync(attachment, &attachment_data);
 
     lua_pushinteger(L, session_id);
-    return 1;
+    lua_pushinteger(L, (int)result);
+    return 2;
 }
 
 static int lua_get_attachment_verdict_response(lua_State *L) {
