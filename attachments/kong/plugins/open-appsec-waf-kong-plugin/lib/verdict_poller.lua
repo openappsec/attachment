@@ -10,6 +10,8 @@ local _M = {}
 
 -- Module state
 local verdict_listener_started = false
+local recv_buf = ffi.new("char[1024]")
+local EAGAIN = 11
 
 function _M.drain_queue(nano, pending)
     local drained_count = 0
@@ -58,10 +60,18 @@ function _M.start_verdict_listener(nano, pending)
 
         local current_socket_fd = nano.get_attachment_socket()
         if current_socket_fd and current_socket_fd >= 0 then
-            local buf = ffi.new("char[1024]")
             while true do
-                local bytes_read = ffi.C.recv(current_socket_fd, buf, 1024, 0x40)
-                if bytes_read <= 0 then
+                local bytes_read = ffi.C.recv(current_socket_fd, recv_buf, 1024, 0x40)
+                if bytes_read > 0 then
+                    -- consumed data, continue draining
+                elseif bytes_read == 0 then
+                    kong.log.debug("Verdict socket closed by peer")
+                    break
+                else
+                    local errno = ffi.errno()
+                    if errno ~= EAGAIN then
+                        kong.log.debug("Verdict socket recv error, errno=", errno)
+                    end
                     break
                 end
             end
