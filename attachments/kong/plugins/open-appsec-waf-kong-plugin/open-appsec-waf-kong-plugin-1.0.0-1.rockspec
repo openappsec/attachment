@@ -1,11 +1,11 @@
-package = "open-appsec-waf-kong-plugin"
+package = "cloudguard-waf-kong-plugin"
 version = "1.0.0-1"
-
+ 
 source = {
   url = "git://github.com/openappsec/attachment.git",
   tag = "feature/async_kong_nano_attachment"
 }
-
+ 
 description = {
   summary = "Kong plugin for scanning headers",
   detailed = [[
@@ -14,21 +14,21 @@ description = {
   homepage = "https://github.com/openappsec/attachment",
   license = "Apache"
 }
-
+ 
 dependencies = {
   "lua >= 2.1"
 }
-
+ 
 build = {
   type = "builtin",
-
+ 
   modules = {
-    ["kong.plugins.open-appsec-waf-kong-plugin.handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/handler.lua",
-    ["kong.plugins.open-appsec-waf-kong-plugin.nano_ffi"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/nano_ffi.lua",
-    ["kong.plugins.open-appsec-waf-kong-plugin.schema"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/schema.lua",
-    ["kong.plugins.open-appsec-waf-kong-plugin.lib.verdict_poller"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/verdict_poller.lua",
-    ["kong.plugins.open-appsec-waf-kong-plugin.lib.verdict_handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/verdict_handler.lua",
-    ["kong.plugins.open-appsec-waf-kong-plugin.lib.utils"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/utils.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/handler.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.nano_ffi"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/nano_ffi.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.schema"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/schema.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.lib.verdict_poller"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/verdict_poller.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.lib.verdict_handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/verdict_handler.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.lib.utils"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/utils.lua",
     ["lua_attachment_wrapper"] = {
       sources = {
         "attachments/kong/plugins/open-appsec-waf-kong-plugin/lua_attachment_wrapper.c",
@@ -42,8 +42,8 @@ build = {
         "attachments/nano_attachment/nano_configuration.c",
         "attachments/nano_attachment/nano_initializer.c",
         "attachments/nano_attachment/nano_utils.c",
-   "attachments/nano_attachment/nano_attachment_sender_async.c",
-"attachments/nano_attachment/nano_attachment_bucket.c",
+        "attachments/nano_attachment/nano_attachment_sender_async.c",
+        "attachments/nano_attachment/nano_attachment_bucket.c",
         "attachments/nano_attachment/nano_attachment_util/nano_attachment_util.cc",
         "core/attachments/http_configuration/http_configuration.cc",
         "core/compression/compression_utils.cc",
