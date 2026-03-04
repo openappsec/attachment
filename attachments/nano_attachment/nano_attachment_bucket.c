@@ -106,7 +106,7 @@ NanoAsyncFailedSessionIDQueueAdd(NanoAttachment *attachment, SessionID session_i
         write_dbg(
             attachment,
             session_id,
-            DBG_LEVEL_WARNING,
+            DBG_LEVEL_TRACE,
             "Session ID queue is full, cannot add session ID: %u",
             session_id
         );

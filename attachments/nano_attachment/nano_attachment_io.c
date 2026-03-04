@@ -276,7 +276,7 @@ signal_for_session_data(NanoAttachment *attachment, uint32_t cur_session_id, Att
             return NANO_AGAIN;
         }
     }
-    write_dbg(attachment, cur_session_id, DBG_LEVEL_WARNING, "Reached timeout during attempt to signal nano service");
+    write_dbg(attachment, cur_session_id, DBG_LEVEL_TRACE, "Reached timeout during attempt to signal nano service");
     return NANO_TIMEOUT;
 }
 
