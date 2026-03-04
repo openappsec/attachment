@@ -26,9 +26,9 @@ RUN curl -fSL https://luarocks.org/releases/luarocks-${LUAROCKS_VER}.tar.gz -o l
 RUN echo "EFFECTIVE_SHM_SEGMENT_SIZE=4096" > /etc/attachment-metadata
 
 # Install the plugin via LuaRocks
-RUN luarocks install https://raw.githubusercontent.com/openappsec/attachment/main/attachments/kong/plugins/open-appsec-waf-kong-plugin/open-appsec-waf-kong-plugin-1.0.0-1.rockspec
+RUN luarocks install https://raw.githubusercontent.com/openappsec/attachment/main/attachments/kong/plugins/cloudguard-waf-kong-plugin/cloudguard-waf-kong-plugin-1.0.0-1.rockspec
 
 USER kong
 
 # Enable the plugin
-ENV KONG_PLUGINS=bundled,open-appsec-waf-kong-plugin
+ENV KONG_PLUGINS=bundled,cloudguard-waf-kong-plugin
