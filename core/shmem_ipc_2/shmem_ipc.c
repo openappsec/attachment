@@ -196,8 +196,7 @@ initIpc(
 {
     UNUSED(debug_func);
     SharedMemoryIPC *ipc = NULL;
-    // debug_int = debug_func;
-    debug_int = debugInitial;
+    debug_int = debug_func;
 
     writeDebug(
         logging_data,
