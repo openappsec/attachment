@@ -23,15 +23,15 @@ build = {
   type = "builtin",
  
   modules = {
-    ["kong.plugins.cloudguard-waf-kong-plugin.handler"] = "attachments/kong/plugins/cloudguard-waf-kong-plugin/handler.lua",
-    ["kong.plugins.cloudguard-waf-kong-plugin.nano_ffi"] = "attachments/kong/plugins/cloudguard-waf-kong-plugin/nano_ffi.lua",
-    ["kong.plugins.cloudguard-waf-kong-plugin.schema"] = "attachments/kong/plugins/cloudguard-waf-kong-plugin/schema.lua",
-    ["kong.plugins.cloudguard-waf-kong-plugin.lib.verdict_poller"] = "attachments/kong/plugins/cloudguard-waf-kong-plugin/lib/verdict_poller.lua",
-    ["kong.plugins.cloudguard-waf-kong-plugin.lib.verdict_handler"] = "attachments/kong/plugins/cloudguard-waf-kong-plugin/lib/verdict_handler.lua",
-    ["kong.plugins.cloudguard-waf-kong-plugin.lib.utils"] = "attachments/kong/plugins/cloudguard-waf-kong-plugin/lib/utils.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/handler.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.nano_ffi"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/nano_ffi.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.schema"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/schema.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.lib.verdict_poller"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/verdict_poller.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.lib.verdict_handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/verdict_handler.lua",
+    ["kong.plugins.cloudguard-waf-kong-plugin.lib.utils"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/utils.lua",
     ["lua_attachment_wrapper"] = {
       sources = {
-        "attachments/kong/plugins/cloudguard-waf-kong-plugin/lua_attachment_wrapper.c",
+        "attachments/kong/plugins/open-appsec-waf-kong-plugin/lua_attachment_wrapper.c",
         "attachments/nano_attachment/nano_attachment.c",
         "attachments/nano_attachment/nano_attachment_io.c",
         "attachments/nano_attachment/nano_attachment_metric.c",
