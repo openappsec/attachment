@@ -1138,7 +1138,7 @@ connect_to_comm_socket(NanoAttachment *attachment)
     write_dbg(
         attachment,
         0,
-        DBG_LEVEL_DEBUG,
+        DBG_LEVEL_WARNING,
         "Could not connect to nano service. Path: %s, Error: %s, Errno: %d",
         server.sun_path,
         strerror(errno),
