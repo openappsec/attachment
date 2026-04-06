@@ -241,7 +241,7 @@ ngx_cp_attachment_create_conf(ngx_conf_t *conf)
     module_conf->async_mode = NGX_CONF_UNSET;
 #endif
     ngx_str_null(&module_conf->waf_tag);
-    write_dbg(DBG_LEVEL_TRACE, "Successfully created attachment module configuration");
+    write_dbg(DBG_LEVEL_DEBUG, "Successfully created attachment module configuration");
     return module_conf;
 }
 
@@ -279,7 +279,7 @@ is_ngx_cp_attachment_disabled(ngx_http_request_t *request)
         conf->current_loc_config_version =  current_config_version;
         write_dbg(DBG_LEVEL_INFO, "Reconfiguring the local NGINX attachment state");
     }
-    write_dbg(DBG_LEVEL_TRACE, "NGINX attachment state: %s", conf->enable ? "enabled" : "disabled");
+    write_dbg(DBG_LEVEL_DEBUG, "NGINX attachment state: %s", conf->enable ? "enabled" : "disabled");
     return !conf->enable;
 }
 
@@ -337,7 +337,7 @@ ngx_cp_attachment_merge_conf(ngx_conf_t *configure, void *curr, void *next)
 #endif
     ngx_conf_merge_str_value(conf->waf_tag, prev->waf_tag, "");
 
-    write_dbg(DBG_LEVEL_TRACE, "Successfully set attachment module configuration in nginx configuration chain");
+    write_dbg(DBG_LEVEL_DEBUG, "Successfully set attachment module configuration in nginx configuration chain");
     return NGX_CONF_OK;
 }
 
@@ -419,7 +419,7 @@ ngx_send_keep_alive(ngx_event_t *event)
         );
         goto keep_alive_handler_out;
     }
-    write_dbg(DBG_LEVEL_DEBUG, "connected to socket: %d. sending keep alive signals");
+    write_dbg(DBG_LEVEL_DEBUG, "connected to socket: %d. sending keep alive signals", keep_alive_socket);
 
     // Exchanging worker id with the nano service.
     res = exchange_communication_data_with_service(
@@ -468,7 +468,7 @@ ngx_send_keep_alive(ngx_event_t *event)
 
 keep_alive_handler_out:
     // Sends another signal.
-    write_dbg(DBG_LEVEL_DEBUG, "send signal again in %u sec", (timer_interval_msec / 1000));
+    write_dbg(DBG_LEVEL_TRACE, "send signal again in %u sec", (timer_interval_msec / 1000));
     ngx_add_timer(event, timer_interval_msec);
     if (keep_alive_socket > 0) {
         close(keep_alive_socket);
@@ -481,6 +481,8 @@ ngx_cp_attachment_init_worker(ngx_cycle_t *cycle)
 {
     ngx_core_conf_t *core_main_conf;
     ngx_cp_attachment_conf_t *attachment_conf;
+    
+    init_global_logging_data();
 
     write_dbg(DBG_LEVEL_INFO, "entering init worker. ngx_exiting=%d", ngx_exiting);
 
@@ -505,6 +507,7 @@ ngx_cp_attachment_init_worker(ngx_cycle_t *cycle)
         ngx_keep_alive_event.handler = ngx_send_keep_alive;
         ngx_keep_alive_event.log = cycle->log;
         ngx_keep_alive_event.data = &dumb_connection;
+        ngx_keep_alive_event.cancelable = 1;
         dumb_connection.fd = (ngx_socket_t) -1;
         keep_alive_interval_msec = get_keep_alive_interval_msec();
         if (keep_alive_interval_msec == 0) {
@@ -521,21 +524,22 @@ ngx_cp_attachment_init_worker(ngx_cycle_t *cycle)
             timer_interval_msec
         );
 
-        ngx_cp_init_env_async_mode();
-        init_attachment_registration_thread();
-        
-#ifdef NGINX_ASYNC_SUPPORTED
-        if (g_env_async_mode || is_async_mode_enabled) {
-            if (ngx_cp_async_init() != NGX_OK) {
-                write_dbg(DBG_LEVEL_WARNING, "Failed to initialize async connection management");
-            }
-        } else {
-            write_dbg(DBG_LEVEL_INFO, "Async mode disabled, skipping async connection management initialization");
-        }
-#else
-        write_dbg(DBG_LEVEL_INFO, "Nginx version does not support async mode");
-#endif
+        init_attachment_registration_thread();        
     }
+
+    ngx_cp_init_env_async_mode();
+#ifdef NGINX_ASYNC_SUPPORTED
+    if (g_env_async_mode || is_async_mode_enabled) {
+        if (ngx_cp_async_init() != NGX_OK) {
+            write_dbg(DBG_LEVEL_WARNING, "Failed to initialize async connection management");
+        }
+    } else {
+        write_dbg(DBG_LEVEL_INFO, "Async mode disabled, skipping async connection management initialization");
+    }
+#else
+    write_dbg(DBG_LEVEL_INFO, "Nginx version does not support async mode");
+#endif
+
     return NGX_OK;
 }
 
@@ -546,19 +550,19 @@ ngx_cp_attachment_fini_worker(ngx_cycle_t *cycle)
 
     // only worker number 0 (always exists since it is worker number 1 is allowed to create
     // the single instance of the timer and destroy it)
-    if (ngx_worker != 0) return;
+    if (ngx_worker == 0) {
+        reset_attachment_registration();
+    
+        (void)cycle;
+        if (is_timer_active) ngx_del_timer(&ngx_keep_alive_event);
+        write_dbg(DBG_LEVEL_INFO, "Timer successfully deleted");
+        is_timer_active = 0;
 
-    reset_attachment_registration();
-
+        remove_attachment_metadata_file();
+    }
 #ifdef NGINX_ASYNC_SUPPORTED
-    // Cleanup async connection management
     ngx_cp_async_cleanup();
 #endif
-
-    (void)cycle;
-    if (is_timer_active) ngx_del_timer(&ngx_keep_alive_event);
-    write_dbg(DBG_LEVEL_INFO, "Timer successfully deleted");
-    is_timer_active = 0;
 }
 
 static ngx_int_t
@@ -568,7 +572,7 @@ ngx_cp_attachment_init(ngx_conf_t *conf)
     ngx_http_handler_pt *size_metrics_handler;
     ngx_http_core_main_conf_t *http_core_main_conf;
     
-    write_dbg(DBG_LEVEL_TRACE, "Setting the memory pool used in the current context");
+    write_dbg(DBG_LEVEL_DEBUG, "Setting the memory pool used in the current context");
     if (conf->pool == NULL) {
         write_dbg(
             DBG_LEVEL_WARNING,
@@ -579,7 +583,7 @@ ngx_cp_attachment_init(ngx_conf_t *conf)
     }
     set_memory_pool(conf->pool);
     write_dbg(
-        DBG_LEVEL_TRACE,
+        DBG_LEVEL_DEBUG,
         "Successfully set the memory pool in the current context. Setting attachment module's hooks."
     );
 
@@ -612,7 +616,7 @@ ngx_cp_attachment_init(ngx_conf_t *conf)
 
     *size_metrics_handler = ngx_http_cp_request_and_response_size_handler;
 
-    write_dbg(DBG_LEVEL_TRACE, "Successfully set attachment module's hooks");
+    write_dbg(DBG_LEVEL_DEBUG, "Successfully set attachment module's hooks");
 
     return NGX_OK;
 }

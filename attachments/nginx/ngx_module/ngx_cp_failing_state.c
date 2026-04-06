@@ -168,7 +168,7 @@ handle_inspection_failure(int weight, ngx_int_t fail_mode_verdict, ngx_http_cp_s
 {
     if (state->verdict != TRAFFIC_VERDICT_INSPECT) {
         // Skipping already inspected data.
-        write_dbg(DBG_LEVEL_TRACE, "Skipping already inspected data");
+        write_dbg(DBG_LEVEL_DEBUG, "Skipping already inspected data");
         return;
     }
 

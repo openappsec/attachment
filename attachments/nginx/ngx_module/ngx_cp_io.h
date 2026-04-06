@@ -21,7 +21,7 @@
 
 #include <unistd.h>
 
-#include "shmem_ipc.h"
+#include "shmem_ipc_2.h"
 #include "nano_attachment_common.h"
 #include "ngx_cp_custom_response.h"
 #include "ngx_cp_hooks.h"
@@ -29,7 +29,10 @@
 #define INSPECTION_IRRELEVANT NGX_DECLINED
 
 extern SharedMemoryIPC *nano_service_ipc; ///< Nano service's IPC.
+extern SharedMemoryIPC *nano_service_secondary_sync_ipc; ///< Secondary sync IPC.
 extern int comm_socket; ///< Communication socket.
+extern int secondary_comm_socket; ///< Secondary communication socket.
+extern LoggingData logging_data; ///< Global logging data for shmem_ipc_2 (process-based)
 
 ///
 /// @brief Receives nano service's response.
@@ -49,6 +52,7 @@ extern int comm_socket; ///< Communication socket.
 /// @param[in] modification_list
 /// @param[in] chunk_type Chunk type that the attachment is waiting for a response from nano service.
 /// @param[in] processed_body_size Processed body size to determinate number of retries from nano service.
+/// @param[in] filter_mode Whether to use async mode (ASYNC_FILTER) or sync mode (SYNC_FILTER).
 /// @returns ngx_int_t
 ///         - #NGX_OK
 ///         - #NGX_HTTP_FORBIDDEN
@@ -63,7 +67,8 @@ ngx_http_cp_reply_receiver(
     ngx_http_request_t *request,
     ngx_http_cp_modification_list **modification_list,
     AttachmentDataType chunk_type,
-    uint64_t processed_body_size
+    uint64_t processed_body_size,
+    ngx_uint_t filter_mode
 );
 
 ///
@@ -91,6 +96,7 @@ ngx_http_cp_meta_data_sender(
 ///         - #RESPONSE_END
 /// @param[in] cur_request_id Request session's Id.
 /// @param[in, out] num_messages_sent Number of messages sent will be saved onto this parameter.
+/// @param[in] filter_mode Whether to use async mode (ASYNC_FILTER) or sync mode (SYNC_FILTER).
 /// @returns ngx_int_t
 ///         - #NGX_OK
 ///         - #NGX_ERROR
@@ -99,7 +105,8 @@ ngx_int_t
 ngx_http_cp_end_transaction_sender(
     AttachmentDataType end_transaction_type,
     uint32_t cur_request_id,
-    ngx_uint_t *num_messages_sent
+    ngx_uint_t *num_messages_sent,
+    ngx_uint_t filter_mode
 );
 
 ///
@@ -107,6 +114,7 @@ ngx_http_cp_end_transaction_sender(
 /// @param[in] response_code response code to send.
 /// @param[in] cur_request_id Request session's Id.
 /// @param[in, out] num_messages_sent Number of messages sent will be saved onto this parameter.
+/// @param[in] filter_mode Whether to use async mode (ASYNC_FILTER) or sync mode (SYNC_FILTER).
 /// @returns ngx_int_t
 ///         - #NGX_OK
 ///         - #NGX_ERROR
@@ -114,7 +122,8 @@ ngx_http_cp_end_transaction_sender(
 ngx_int_t ngx_http_cp_res_code_sender(
     uint16_t response_code,
     uint32_t cur_request_id,
-    ngx_uint_t *num_messages_sent
+    ngx_uint_t *num_messages_sent,
+    ngx_uint_t filter_mode
 );
 
 ///
@@ -122,6 +131,7 @@ ngx_int_t ngx_http_cp_res_code_sender(
 /// @param[in] content_length_n content length to send.
 /// @param[in] cur_req_id Request session's Id.
 /// @param[in, out] num_messages_sent Number of messages sent will be saved onto this parameter.
+/// @param[in] filter_mode Whether to use async mode (ASYNC_FILTER) or sync mode (SYNC_FILTER).
 /// @returns ngx_int_t
 ///         - #NGX_OK
 ///         - #NGX_ERROR
@@ -130,7 +140,8 @@ ngx_int_t
 ngx_http_cp_content_length_sender(
     uint64_t content_length_n,
     uint32_t cur_req_id,
-    ngx_uint_t *num_messages_sent
+    ngx_uint_t *num_messages_sent,
+    ngx_uint_t filter_mode
 );
 
 ///
@@ -141,6 +152,7 @@ ngx_http_cp_content_length_sender(
 ///         - #RESPONSE_HEADER
 /// @param[in] cur_request_id Request session's Id.
 /// @param[in, out] num_messages_sent Number of messages sent will be saved onto this parameter.
+/// @param[in] filter_mode Whether to use async mode (ASYNC_FILTER) or sync mode (SYNC_FILTER).
 /// @returns ngx_int_t
 ///         - #NGX_OK
 ///         - #NGX_ERROR
@@ -150,7 +162,8 @@ ngx_http_cp_header_sender(
     ngx_list_part_t *headers,
     AttachmentDataType header_type,
     uint32_t cur_request_id,
-    ngx_uint_t *num_messages_sent
+    ngx_uint_t *num_messages_sent,
+    ngx_uint_t filter_mode
 );
 
 ///
@@ -163,6 +176,7 @@ ngx_http_cp_header_sender(
 /// @param[in, out] is_last_part If the last part will be saved onto this parameter.
 /// @param[in, out] num_messages_sent Number of messages sent will be saved onto this parameter.
 /// @param[in, out] next_elem_to_inspect Next NGX chain to inspect.
+/// @param[in] filter_mode Whether to use async mode (ASYNC_FILTER) or sync mode (SYNC_FILTER).
 /// @returns ngx_int_t
 ///         - #NGX_OK
 ///         - #NGX_ERROR
@@ -175,7 +189,8 @@ ngx_http_cp_body_sender(
     ngx_int_t *part_number,
     ngx_int_t *is_last_part,
     ngx_uint_t *num_messages_sent,
-    ngx_chain_t **next_elem_to_inspect
+    ngx_chain_t **next_elem_to_inspect,
+    ngx_uint_t filter_mode
 );
 
 ///
@@ -183,11 +198,13 @@ ngx_http_cp_body_sender(
 /// @details REQUEST_DELAYED_VERDICT request is a request that asks the nano service to provide with an updated verdict.
 /// @param[in] cur_request_id Request session's Id.
 /// @param[in, out] num_messages_sent Number of messages sent will be saved onto this parameter.
+/// @param[in] filter_mode Whether to use async mode (ASYNC_FILTER) or sync mode (SYNC_FILTER).
+/// @returns ngx_int_t
 ///         - #NGX_OK
 ///         - #NGX_ERROR
 ///
 ngx_int_t
-ngx_http_cp_wait_sender(uint32_t cur_request_id, ngx_uint_t *num_messages_sent);
+ngx_http_cp_wait_sender(uint32_t cur_request_id, ngx_uint_t *num_messages_sent, ngx_uint_t filter_mode);
 
 ///
 /// @brief Checks if reconf is needed and reconfigs if necessary.
@@ -253,7 +270,7 @@ set_fragments_identifiers(
 void set_fragment_elem(char **meta_data_elems, uint16_t *meta_data_sizes, void *data, uint16_t size, uint idx);
 void add_header_to_bulk(char **fragments, uint16_t *fragments_sizes, ngx_table_elt_t *header, ngx_uint_t index);
 
-ngx_int_t handle_custom_json_response(HttpJsonResponseData *json_response_data);
+ngx_int_t handle_custom_response(HttpCustomResponseData *custom_response_data);
 void handle_custom_web_response(HttpWebResponseData *web_response_data);
 
 #endif // __NGX_CP_IO_H__

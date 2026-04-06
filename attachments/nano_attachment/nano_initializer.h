@@ -73,11 +73,12 @@ typedef struct NanoAttachment {
     unsigned int res_body_thread_timeout_msec; ///< Response body processing timeout in milliseconds.
     unsigned int waiting_for_verdict_thread_timeout_msec; ///< Wait thread processing timeout in milliseconds.
     unsigned int hold_verdict_retries; ///< Number of retries when handling delayed verdict.
-    unsigned int hold_verdict_polling_time; ///< Polling time in milliseconds between retries when handling delayed verdict.
+    unsigned int hold_verdict_polling_time; ///< Polling time in ms between retries for delayed verdict.
     unsigned int metric_timeout_timeout; ///< Metric timeout in milliseconds.
     NanoHttpInspectionMode inspection_mode; ///< Default inspection mode.
     unsigned int num_of_nano_ipc_elements; ///< Number of NANO IPC elements.
     uint64_t keep_alive_interval_msec; ///< Keep alive interval in milliseconds.
+    uint64_t paired_affinity_enabled; ///< Paired affinity enabled flag.
 
 #ifdef __cplusplus
     uint64_t metric_data[static_cast<int>(AttachmentMetricType::METRIC_TYPES_COUNT)];

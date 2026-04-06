@@ -21,6 +21,9 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <fcntl.h>
+#include <errno.h>
+#include <string.h>
+#include <stdlib.h>
 
 #include <ngx_log.h>
 #include <ngx_core.h>
@@ -37,6 +40,116 @@
 #include "ngx_http_cp_attachment_module.h"
 #include "async/ngx_cp_async_core.h"
 
+#define ATTACHMENT_METADATA_FILE_PATH_SRC "/etc/attachment-metadata"
+#define ATTACHMENT_METADATA_FILE_PATH_DEST "/dev/shm/attachment-metadata"
+#define DUAL_DOCKER_NGINX_FILE "/etc/dual_docker_nginx"
+
+///
+/// @brief Copy attachment metadata file if source exists
+/// @returns int NGX_OK on success, NGX_ERROR on failure
+///
+static int
+copy_attachment_metadata_file()
+{
+    struct stat st;
+    static int is_dual_docker_nginx_env = -1;
+    char temp_file_path[256];
+    
+    if (is_dual_docker_nginx_env == -1) {
+        is_dual_docker_nginx_env = (access(DUAL_DOCKER_NGINX_FILE, F_OK) == 0) ? 1 : 0;
+    }
+
+    if (!is_dual_docker_nginx_env) {
+        write_dbg(DBG_LEVEL_DEBUG, "Not a dual docker nginx environment, skipping attachment metadata file copy");
+        return NGX_OK;
+    }
+
+    if (stat(ATTACHMENT_METADATA_FILE_PATH_SRC, &st) != 0) {
+        write_dbg(DBG_LEVEL_DEBUG, "Source attachment metadata file does not exist: %s", ATTACHMENT_METADATA_FILE_PATH_SRC);
+        return NGX_ERROR;
+    }
+    
+    snprintf(temp_file_path, sizeof(temp_file_path), "/dev/shm/attachment-metadata-%lu.tmp", (unsigned long)(ngx_worker + 1));
+    
+    int src_fd = open(ATTACHMENT_METADATA_FILE_PATH_SRC, O_RDONLY);
+    if (src_fd == -1) {
+        write_dbg(DBG_LEVEL_WARNING, "Failed to open source file %s: %s", ATTACHMENT_METADATA_FILE_PATH_SRC, strerror(errno));
+        return NGX_ERROR;
+    }
+    
+    int dest_fd = open(temp_file_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (dest_fd == -1) {
+        write_dbg(DBG_LEVEL_WARNING, "Failed to create temporary file %s: %s", temp_file_path, strerror(errno));
+        close(src_fd);
+        return NGX_ERROR;
+    }
+    
+    char buffer[4096];
+    ssize_t bytes_read, bytes_written;
+    
+    while ((bytes_read = read(src_fd, buffer, sizeof(buffer))) > 0) {
+        bytes_written = write(dest_fd, buffer, bytes_read);
+        if (bytes_written != bytes_read) {
+            write_dbg(DBG_LEVEL_WARNING, "Failed to write to temporary file %s: %s", temp_file_path, strerror(errno));
+            close(src_fd);
+            close(dest_fd);
+            unlink(temp_file_path);
+            return NGX_ERROR;
+        }
+    }
+    
+    if (bytes_read == -1) {
+        write_dbg(DBG_LEVEL_WARNING, "Failed to read from source file %s: %s", ATTACHMENT_METADATA_FILE_PATH_SRC, strerror(errno));
+        close(src_fd);
+        close(dest_fd);
+        unlink(temp_file_path);
+        return NGX_ERROR;
+    }
+    
+    close(src_fd);
+    close(dest_fd);
+    
+    // Atomic rename operation
+    if (rename(temp_file_path, ATTACHMENT_METADATA_FILE_PATH_DEST) != 0) {
+        write_dbg(DBG_LEVEL_WARNING, "Failed to rename %s to %s: %s", temp_file_path, ATTACHMENT_METADATA_FILE_PATH_DEST, strerror(errno));
+        unlink(temp_file_path);
+        return NGX_ERROR;
+    }
+    
+    write_dbg(DBG_LEVEL_DEBUG, "Successfully copied attachment metadata file from %s to %s", ATTACHMENT_METADATA_FILE_PATH_SRC, ATTACHMENT_METADATA_FILE_PATH_DEST);
+    return NGX_OK;
+}
+
+///
+/// @brief Remove attachment metadata file if it exists in dual docker environment
+///
+void
+remove_attachment_metadata_file()
+{
+    static int is_dual_docker_nginx_env = -1;
+    
+    if (is_dual_docker_nginx_env == -1) {
+        is_dual_docker_nginx_env = (access(DUAL_DOCKER_NGINX_FILE, F_OK) == 0) ? 1 : 0;
+    }
+
+    if (!is_dual_docker_nginx_env) {
+        write_dbg(DBG_LEVEL_DEBUG, "Not a dual docker nginx environment, skipping attachment metadata file removal");
+        return;
+    }
+
+    if (access(ATTACHMENT_METADATA_FILE_PATH_DEST, F_OK) != 0) {
+        write_dbg(DBG_LEVEL_DEBUG, "Attachment metadata file does not exist: %s", ATTACHMENT_METADATA_FILE_PATH_DEST);
+        return;
+    }
+    
+    if (unlink(ATTACHMENT_METADATA_FILE_PATH_DEST) != 0) {
+        write_dbg(DBG_LEVEL_WARNING, "Failed to remove attachment metadata file %s: %s", ATTACHMENT_METADATA_FILE_PATH_DEST, strerror(errno));
+        return;
+    }
+    
+    write_dbg(DBG_LEVEL_DEBUG, "Successfully removed attachment metadata file: %s", ATTACHMENT_METADATA_FILE_PATH_DEST);
+}
+
 typedef enum ngx_cp_attachment_registration_state {
     NOT_REGISTERED,
     PENDING,
@@ -49,6 +162,19 @@ char shared_verdict_signal_path[128]; // Holds the path associating the attachme
 
 int registration_socket = -1; // Holds the file descriptor used for registering the instance.
 
+LoggingData logging_data = {0}; // Global logging data for shmem_ipc_2 (process-based)
+
+///
+/// @brief Initialize global logging data if not already initialized
+///
+void
+init_global_logging_data()
+{
+    logging_data.dbg_level = get_cp_ngx_attachment_debug_level();
+    logging_data.worker_id = ngx_worker;
+    logging_data.fd = ngx_stderr;
+}
+
 static pthread_t registration_thread;
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -56,6 +182,7 @@ static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static ngx_cp_attachment_registration_state_e need_registration = NOT_REGISTERED;
 
 struct sockaddr_un server;
+struct sockaddr_un secondary_server;
 
 uint32_t nginx_user_id, nginx_group_id; // Hold the process UID and GID respectively.
 
@@ -191,7 +318,7 @@ exchange_communication_data_with_service(
         if (res < 0) {
             close(socket);
             socket = -1;
-            write_dbg(DBG_LEVEL_TRACE, "Failed to communicate with the socket, Error: %s", strerror(errno));
+            write_dbg(DBG_LEVEL_DEBUG, "Failed to communicate with the socket, Error: %s", strerror(errno));
             break;
         }
 
@@ -202,7 +329,7 @@ exchange_communication_data_with_service(
         if (is_timeout_reached(remaining_timeout)) {
             close(socket);
             socket = -1;
-            write_dbg(DBG_LEVEL_TRACE, "Reached timeout while communicating with the socket");
+            write_dbg(DBG_LEVEL_DEBUG, "Reached timeout while communicating with the socket");
             break;
         }
     }
@@ -228,7 +355,7 @@ init_signaling_socket()
         close(comm_socket);
         comm_socket = -1;
     }
-
+    
     // Setup a new socket
     comm_socket = socket(AF_UNIX, SOCK_STREAM, 0);
     if (comm_socket < 0) {
@@ -347,6 +474,36 @@ init_signaling_socket()
     }
 
     write_dbg(DBG_LEVEL_WARNING, "Successfully connected on client socket %d", comm_socket);
+
+    if (secondary_comm_socket > 0) {
+        close(secondary_comm_socket);
+        secondary_comm_socket = -1;
+    }
+
+    secondary_comm_socket = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (secondary_comm_socket < 0) {
+        write_dbg(DBG_LEVEL_WARNING, "Could not create secondary socket, Error: %s", strerror(errno));
+        return NGX_ERROR;
+    }
+
+    secondary_server.sun_family = AF_UNIX;
+    strncpy(secondary_server.sun_path, shared_verdict_signal_path, sizeof(secondary_server.sun_path) - 1);
+    strncat(secondary_server.sun_path, "_secondary", sizeof(secondary_server.sun_path) - strlen(secondary_server.sun_path) - 1);
+
+    if (connect(secondary_comm_socket, (struct sockaddr *)&secondary_server, sizeof(struct sockaddr_un)) == -1) {
+        close(secondary_comm_socket);
+        secondary_comm_socket = -1;
+        write_dbg(
+            DBG_LEVEL_WARNING,
+            "Could not connect to nano service. Path: %s, Error: %s",
+            secondary_server.sun_path,
+            strerror(errno)
+        );
+        return NGX_ERROR;
+    }
+
+    write_dbg(DBG_LEVEL_INFO, "Successfully connected on secondary client socket %d", secondary_comm_socket);
+
     return NGX_OK;
 }
 
@@ -667,7 +824,7 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
     // 3. Signal to the service to start communication.
     // 4. Make sure that the configuration is up-to-date.
     if (access(SHARED_REGISTRATION_SIGNAL_PATH, F_OK) != 0) {
-        write_dbg(DBG_LEVEL_TRACE, "Attachment registration manager is turned off");
+        write_dbg(DBG_LEVEL_DEBUG, "Attachment registration manager is turned off");
         return NGX_ABORT;
     }
 
@@ -675,6 +832,13 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
         write_dbg(DBG_LEVEL_DEBUG, "Setting attachment's unique id");
         if (set_unique_id() == NGX_ERROR) {
     	    write_dbg(DBG_LEVEL_INFO, "Failed to set attachment's unique_id");
+            return NGX_ERROR;
+        }
+    }
+
+    if (access(ATTACHMENT_METADATA_FILE_PATH_DEST, F_OK) != 0) {
+        if (copy_attachment_metadata_file() == NGX_ERROR) {
+            write_dbg(DBG_LEVEL_WARNING, "Failed to copy attachment metadata file");
             return NGX_ERROR;
         }
     }
@@ -692,7 +856,7 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
         set_need_registration(REGISTERED);
     }
 
-    if (comm_socket < 0 || is_async_toggled_in_last_reconfig()) {
+    if (comm_socket < 0 || secondary_comm_socket < 0 || is_async_toggled_in_last_reconfig()) {
         write_dbg(DBG_LEVEL_DEBUG, "Registering to nano service");
         if (init_signaling_socket() == NGX_ERROR) {
             write_dbg(DBG_LEVEL_DEBUG, "Failed to register to the Nano Service");
@@ -721,13 +885,35 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
             nginx_group_id,
             0,
             num_of_nginx_ipc_elements,
-            write_dbg_impl
+            &logging_data,
+            shmem_ipc_2_write_dbg_wrapper
         );
         if (nano_service_ipc == NULL) {
             if (max_retry_count-- == 0) {
                 restart_communication(request);
             }
             write_dbg(DBG_LEVEL_INFO, "Failed to initialize IPC with nano service");
+            return NGX_ERROR;
+        }
+    }
+
+    // Initialize secondary sync IPC channel
+    if (nano_service_secondary_sync_ipc == NULL) {
+        char secondary_unique_id[MAX_NGINX_UID_LEN + 10]; // Extra space for suffix
+        snprintf(secondary_unique_id, sizeof(secondary_unique_id), "%s_sync", unique_id);
+        
+        write_dbg(DBG_LEVEL_INFO, "Initializing secondary sync IPC channel");
+        nano_service_secondary_sync_ipc = initIpc(
+            secondary_unique_id,
+            nginx_user_id,
+            nginx_group_id,
+            0,
+            200,
+            &logging_data,
+            shmem_ipc_2_write_dbg_wrapper
+        );
+        if (nano_service_secondary_sync_ipc == NULL) {
+            write_dbg(DBG_LEVEL_INFO, "Failed to initialize secondary sync IPC with nano service");
             return NGX_ERROR;
         }
     }
@@ -785,10 +971,15 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
 int
 restart_communication(ngx_http_request_t *request)
 {
-    write_dbg(DBG_LEVEL_TRACE, "Restarting communication channels with nano service");
+    write_dbg(DBG_LEVEL_DEBUG, "Restarting communication channels with nano service");
     if (nano_service_ipc != NULL) {
         destroyIpc(nano_service_ipc, 0);
         nano_service_ipc = NULL;
+    }
+
+    if (nano_service_secondary_sync_ipc != NULL) {
+        destroyIpc(nano_service_secondary_sync_ipc, 0);
+        nano_service_secondary_sync_ipc = NULL;
     }
 
     if (init_signaling_socket() == NGX_ERROR) {
@@ -799,8 +990,27 @@ restart_communication(ngx_http_request_t *request)
 
         if (init_signaling_socket() == NGX_ERROR) return -1;
     }
-    nano_service_ipc = initIpc(unique_id, nginx_user_id, nginx_group_id, 0, num_of_nginx_ipc_elements, write_dbg_impl);
+    
+    init_global_logging_data();
+    nano_service_ipc = initIpc(unique_id, nginx_user_id, nginx_group_id, 0, num_of_nginx_ipc_elements, &logging_data, shmem_ipc_2_write_dbg_wrapper);
     if (nano_service_ipc == NULL) return -2;
+    
+    // Reinitialize secondary sync IPC
+    char secondary_unique_id[MAX_NGINX_UID_LEN + 10]; // Extra space for suffix
+    snprintf(secondary_unique_id, sizeof(secondary_unique_id), "%s_sync", unique_id);
+
+    nano_service_secondary_sync_ipc = initIpc(
+        secondary_unique_id,
+        nginx_user_id,
+        nginx_group_id,
+        0,
+        200,
+        &logging_data,
+        shmem_ipc_2_write_dbg_wrapper
+    );
+
+    if (nano_service_secondary_sync_ipc == NULL) return -3;
+    
     return 0;
 }
 
@@ -811,9 +1021,17 @@ disconnect_communication()
         close(comm_socket);
         comm_socket = -1;
     }
+    if (secondary_comm_socket > 0) {
+        close(secondary_comm_socket);
+        secondary_comm_socket = -1;
+    }
     if (nano_service_ipc != NULL) {
         destroyIpc(nano_service_ipc, 0);
         nano_service_ipc = NULL;
+    }
+    if (nano_service_secondary_sync_ipc != NULL) {
+        destroyIpc(nano_service_secondary_sync_ipc, 0);
+        nano_service_secondary_sync_ipc = NULL;
     }
 
 #ifdef NGINX_ASYNC_SUPPORTED
@@ -826,9 +1044,9 @@ disconnect_communication()
 ngx_int_t
 handle_shmem_corruption()
 {
-    if (nano_service_ipc == NULL) return NGX_OK;
+    if (nano_service_ipc == NULL && nano_service_secondary_sync_ipc == NULL) return NGX_OK;
 
-    if (isCorruptedShmem(nano_service_ipc, 0)) {
+    if (nano_service_ipc != NULL && isCorruptedShmem(nano_service_ipc, 0)) {
         write_dbg(DBG_LEVEL_WARNING, "Shared memory is corrupted! restarting communication");
         disconnect_communication();
         return NGX_ERROR;
@@ -840,5 +1058,11 @@ handle_shmem_corruption()
 ngx_int_t
 isIpcReady()
 {
-    return nano_service_ipc != NULL && comm_socket > 0;
+    return nano_service_ipc != NULL && nano_service_secondary_sync_ipc != NULL && comm_socket > 0 && secondary_comm_socket > 0;
+}
+
+void
+set_unregistered()
+{
+    set_need_registration(NOT_REGISTERED);
 }

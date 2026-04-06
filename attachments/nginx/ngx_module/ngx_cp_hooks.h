@@ -27,6 +27,9 @@
 #include "nano_attachment_common.h"
 #include "ngx_cp_hook_threads.h"
 
+#define SYNC_FILTER 0
+#define ASYNC_FILTER 1
+
 static const int registration_failure_weight = 2; ///< Registration failure weight.
 static const int inspection_failure_weight = 1; ///< Inspection failure weight.
 static const ngx_int_t METRIC_TIMEOUT_VAL = METRIC_PERIODIC_TIMEOUT;
@@ -155,6 +158,14 @@ ngx_int_t ngx_http_cp_finalize_request_headers_hook(
 // Sync and async handlers
 ngx_int_t ngx_http_cp_req_header_handler_sync(ngx_http_request_t *request);
 ngx_int_t ngx_http_cp_req_body_filter_sync(ngx_http_request_t *request, ngx_chain_t *request_body_chain);
+ngx_int_t ngx_http_cp_res_body_filter_sync(ngx_http_request_t *request, ngx_chain_t *body_chain);
+ngx_int_t ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_chain, int filter_mode);
+ngx_int_t ngx_http_cp_res_header_filter_sync(ngx_http_request_t *request);
+ngx_int_t ngx_http_cp_res_header_filter_core(ngx_http_request_t *request, int filter_mode);
+ngx_int_t remove_server_header(ngx_http_request_t *r);
+void fini_cp_session_data(ngx_http_cp_session_data *session_data);
+ngx_int_t init_cp_session_original_body(ngx_http_cp_session_data *session_data, ngx_pool_t *pool);
+ngx_int_t copy_compressed_to_original_buffers(ngx_chain_t *original_chain, ngx_chain_t *compressed_chain, ngx_pool_t *request_pool);
 
 #ifdef NGINX_ASYNC_SUPPORTED
 ngx_int_t ngx_http_cp_req_header_handler_async(ngx_http_request_t *request);

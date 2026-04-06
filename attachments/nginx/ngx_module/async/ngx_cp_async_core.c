@@ -32,7 +32,9 @@ ngx_uint_t context_count = 0;
 
 static ngx_uint_t pending_inspection_chunks = 0;
 static ngx_event_t backpressure_drain_event;
+static ngx_event_t async_cleanup_event;
 static ngx_int_t backpressure_event_initialized = 0;
+static ngx_int_t cleanup_event_initialized = 0;
 
 // Event-driven IPC infrastructure
 static ngx_connection_t *ipc_verdict_conn = NULL; // Connection obtained via ngx_get_connection
@@ -41,6 +43,7 @@ static ngx_connection_t *ipc_verdict_conn = NULL; // Connection obtained via ngx
 static int g_backpressure_epoll_fd = -1;
 static int g_backpressure_registered_socket = -1;  ///< Track which socket is registered
 
+ngx_int_t should_register_to_nano_service = 1;
 ngx_int_t is_initialized = 0;
 ngx_uint_t async_backpressure_threshold = 10;
 ngx_msec_t async_header_timeout_ms = 1000; // Default 1s for headers/meta_data/end_transaction
@@ -58,6 +61,8 @@ static void cp_async_resume_event_handler(ngx_event_t *ev);
 static void cp_async_post_request(ngx_http_cp_async_ctx_t *ctx);
 static void ngx_cp_async_context_cleanup_handler(ngx_event_t *ev);
 static void ngx_cp_async_backpressure_drain_handler(ngx_event_t *ev);
+static void ngx_cp_async_cleanup_handler(ngx_event_t *ev);
+static void ngx_cp_async_cleanup_impl(void);
 static void ngx_cp_async_cancel_deadline_timer(ngx_http_cp_async_ctx_t *ctx);
 static ngx_int_t drain_ipc_queue(ngx_uint_t *verdicts_drained);
 static ngx_int_t is_verdict_final(ServiceVerdict verdict);
@@ -75,7 +80,7 @@ void
 ngx_cp_async_increment_pending_chunks(uint32_t session_id, const char *chunk_type)
 {
     pending_inspection_chunks++;
-    write_dbg(DBG_LEVEL_DEBUG, "ASYNC_CHUNKS: Incremented pending chunks to %d for session %d (%s)", 
+    write_dbg(DBG_LEVEL_DEBUG, "Incremented pending chunks to %d for session %d (%s)", 
               pending_inspection_chunks, session_id, chunk_type);
     
     if (
@@ -86,7 +91,7 @@ ngx_cp_async_increment_pending_chunks(uint32_t session_id, const char *chunk_typ
     ) {
         write_dbg(
             DBG_LEVEL_DEBUG,
-            "ASYNC_BACKPRESSURE: Threshold %d reached (%d pending chunks) - posting drain event", 
+            "Backpressure threshold %d reached (%d pending chunks) - posting drain event", 
             async_backpressure_threshold,
             pending_inspection_chunks
         );
@@ -106,7 +111,7 @@ ngx_cp_async_decrement_pending_chunks(uint32_t session_id, const char *verdict_t
         pending_inspection_chunks--;
         write_dbg(
             DBG_LEVEL_DEBUG,
-            "ASYNC_CHUNKS: Decremented pending chunks to %d for session %d (%s)", 
+            "Decremented pending chunks to %d for session %d (%s)", 
             pending_inspection_chunks,
             session_id,
             verdict_type
@@ -114,7 +119,7 @@ ngx_cp_async_decrement_pending_chunks(uint32_t session_id, const char *verdict_t
     } else {
         write_dbg(
             DBG_LEVEL_DEBUG,
-            "ASYNC_CHUNKS: Attempted to decrement pending chunks below zero for session %d (%s)",
+            "Attempted to decrement pending chunks below zero for session %d (%s)",
             session_id,
             verdict_type
         );
@@ -141,28 +146,31 @@ ngx_cp_async_reset_pending_chunks(void)
     if (pending_inspection_chunks > 0) {
         write_dbg(
             DBG_LEVEL_INFO,
-            "ASYNC_CHUNKS: Resetting pending chunks from %d to 0 (IPC disconnect/reset)",
+            "Resetting pending chunks from %d to 0 (IPC disconnect/reset)",
             pending_inspection_chunks
         );
 
         if (backpressure_event_initialized && backpressure_drain_event.posted) {
             ngx_delete_posted_event(&backpressure_drain_event);
-            write_dbg(DBG_LEVEL_INFO, "ASYNC_BACKPRESSURE: Cancelled pending drain event due to reset");
+            write_dbg(DBG_LEVEL_INFO, "Backpressure: cancelled pending drain event due to reset");
         }
     }
     pending_inspection_chunks = 0;
 }
 
-// Simplified macro for stage transitions
 #define ASYNC_STAGE_TRANSITION(ctx, new_stage) do { \
     if ((new_stage) == NGX_CP_ASYNC_STAGE_COMPLETE) { \
         if (ctx->deadline_event.timer_set) { \
             ngx_del_timer(&ctx->deadline_event); \
-            write_dbg(DBG_LEVEL_DEBUG, "Auto-cancelled deadline timer during transition to COMPLETE for session %d", ctx->session_id); \
+            write_dbg(DBG_LEVEL_DEBUG, "Auto-cancelled deadline timer during transition to complete for session %d", ctx->session_id); \
         } \
         if (ctx->cleanup_event.timer_set) { \
             ngx_del_timer(&ctx->cleanup_event); \
-            write_dbg(DBG_LEVEL_DEBUG, "Auto-cancelled cleanup timer during transition to COMPLETE for session %d", ctx->session_id); \
+            write_dbg(DBG_LEVEL_DEBUG, "Auto-cancelled cleanup timer during transition to complete for session %d", ctx->session_id); \
+        } \
+        if (ctx->agent_event.timer_set) { \
+            ngx_del_timer(&ctx->agent_event); \
+            write_dbg(DBG_LEVEL_DEBUG, "Auto-cancelled agent signal timer during transition to complete for session %d", ctx->session_id); \
         } \
     } \
     ctx->stage = new_stage; \
@@ -192,9 +200,9 @@ static void ngx_cp_async_init_timeout_config(void) {
         ngx_uint_t timeout = (ngx_uint_t)atoi(env_value);
         if (timeout >= 100 && timeout <= 30000) { // 100ms to 30s range
             async_header_timeout_ms = (ngx_msec_t)timeout;
-            write_dbg(DBG_LEVEL_INFO, "Async header timeout set to %dms from environment", async_header_timeout_ms);
+            write_dbg(DBG_LEVEL_INFO, "Header timeout configuration set to %dms from environment", async_header_timeout_ms);
         } else {
-            write_dbg(DBG_LEVEL_WARNING, "Invalid async header timeout %d from environment, using default %dms", timeout, async_header_timeout_ms);
+            write_dbg(DBG_LEVEL_WARNING, "Invalid header timeout %d from environment, using default %dms", timeout, async_header_timeout_ms);
         }
     }
     
@@ -203,9 +211,9 @@ static void ngx_cp_async_init_timeout_config(void) {
         ngx_uint_t timeout = (ngx_uint_t)atoi(env_value);
         if (timeout >= 50 && timeout <= 10000) { // 50ms to 10s range
             async_wait_verdict_timeout_ms = (ngx_msec_t)timeout;
-            write_dbg(DBG_LEVEL_INFO, "Async wait verdict timeout set to %dms from environment", async_wait_verdict_timeout_ms);
+            write_dbg(DBG_LEVEL_INFO, "Wait verdict timeout configuration set to %dms from environment", async_wait_verdict_timeout_ms);
         } else {
-            write_dbg(DBG_LEVEL_WARNING, "Invalid async wait verdict timeout %d from environment, using default %dms", timeout, async_wait_verdict_timeout_ms);
+            write_dbg(DBG_LEVEL_WARNING, "Invalid wait verdict timeout %d from environment, using default %dms", timeout, async_wait_verdict_timeout_ms);
         }
     }
         
@@ -214,9 +222,9 @@ static void ngx_cp_async_init_timeout_config(void) {
         ngx_uint_t timeout = (ngx_uint_t)atoi(env_value);
         if (timeout >= 1000 && timeout <= 600000) { // 1s to 10min range
             async_body_stage_timeout = (ngx_msec_t)timeout;
-            write_dbg(DBG_LEVEL_INFO, "Async body stage timeout set to %dms from environment", async_body_stage_timeout);
+            write_dbg(DBG_LEVEL_INFO, "Body stage timeout configuration set to %dms from environment", async_body_stage_timeout);
         } else {
-            write_dbg(DBG_LEVEL_WARNING, "Invalid async body stage timeout %d from environment, using default %dms", timeout, async_body_stage_timeout);
+            write_dbg(DBG_LEVEL_WARNING, "Invalid body stage timeout %d from environment, using default %dms", timeout, async_body_stage_timeout);
         }
     }
     
@@ -225,9 +233,9 @@ static void ngx_cp_async_init_timeout_config(void) {
         ngx_uint_t timeout = (ngx_uint_t)atoi(env_value);
         if (timeout >= 10000 && timeout <= 300000) {
             async_context_cleanup_timeout_ms = (ngx_msec_t)timeout;
-            write_dbg(DBG_LEVEL_INFO, "Async context cleanup timeout set to %dms from environment", async_context_cleanup_timeout_ms);
+            write_dbg(DBG_LEVEL_INFO, "Context cleanup timeout configuration set to %dms from environment", async_context_cleanup_timeout_ms);
         } else {
-            write_dbg(DBG_LEVEL_WARNING, "Invalid async context cleanup timeout %d from environment, using default %dms", timeout, async_context_cleanup_timeout_ms);
+            write_dbg(DBG_LEVEL_WARNING, "Invalid context cleanup timeout %d from environment, using default %dms", timeout, async_context_cleanup_timeout_ms);
         }
     }
 
@@ -236,15 +244,15 @@ static void ngx_cp_async_init_timeout_config(void) {
         ngx_uint_t timeout = (ngx_uint_t)atoi(env_value);
         if (timeout >= 1 && timeout <= 1000) { // 1ms to 1s range
             async_signal_timeout_ms = (ngx_msec_t)timeout;
-            write_dbg(DBG_LEVEL_INFO, "Async signal timeout set to %dms from environment", async_signal_timeout_ms);
+            write_dbg(DBG_LEVEL_INFO, "Signal timeout configuration set to %dms from environment", async_signal_timeout_ms);
         } else {
-            write_dbg(DBG_LEVEL_WARNING, "Invalid async signal timeout %d from environment, using default %dms", timeout, async_signal_timeout_ms);
+            write_dbg(DBG_LEVEL_WARNING, "Invalid signal timeout %d from environment, using default %dms", timeout, async_signal_timeout_ms);
         }
     }
 
     write_dbg(
         DBG_LEVEL_INFO,
-        "Async timeout config: header=%dms, wait_verdict=%dms, first_wait_verdict=%dms, signal=%dms, context_cleanup=%dms", 
+        "Timeout configuration summary: header=%dms, wait_verdict=%dms, first_wait_verdict=%dms, signal=%dms, context_cleanup=%dms", 
         async_header_timeout_ms,
         async_wait_verdict_timeout_ms,
         req_max_proccessing_ms_time,
@@ -257,7 +265,7 @@ ngx_int_t
 ngx_cp_async_setup_verdict_event_handler(void)
 {
     if (comm_socket < 0) {
-        write_dbg(DBG_LEVEL_ERROR, "Cannot set up verdict event handler - comm_socket still not available after re-initialization");
+        write_dbg(DBG_LEVEL_ERROR, "Cannot set up verdict event handler - communication socket unavailable after re-initialization");
         return NGX_ERROR;
     }
 
@@ -271,33 +279,33 @@ ngx_cp_async_setup_verdict_event_handler(void)
         ipc_verdict_conn = NULL;
     }
 
-    write_dbg(DBG_LEVEL_DEBUG, "Setting up verdict event handler for comm_socket=%d", comm_socket);
+    write_dbg(DBG_LEVEL_DEBUG, "Setting up verdict event handler for communication socket %d", comm_socket);
     
     if (ngx_nonblocking(comm_socket) != NGX_OK) {
-        write_dbg(DBG_LEVEL_WARNING, "Failed to set comm_socket nonblocking");
+        write_dbg(DBG_LEVEL_WARNING, "Failed to set communication socket as nonblocking");
         return NGX_ERROR;
     }
 
     ngx_connection_t *c = ngx_get_connection(comm_socket, ngx_cycle ? ngx_cycle->log : NULL);
     if (c == NULL) {
-        write_dbg(DBG_LEVEL_ERROR, "Failed to get NGINX connection for verdict socket %d", comm_socket);
+        write_dbg(DBG_LEVEL_ERROR, "Failed to get connection for verdict socket %d", comm_socket);
         return NGX_ERROR;
     }
 
-    // Initialize the read event on this connection
     ngx_event_t *rev = c->read;
     rev->handler = ngx_cp_async_verdict_event_handler;
     rev->data = c;
     rev->log = ngx_cycle ? ngx_cycle->log : NULL;
+    rev->cancelable = 1;
 
     if (ngx_add_event(rev, NGX_READ_EVENT, 0) != NGX_OK) {
-        write_dbg(DBG_LEVEL_ERROR, "Failed to add verdict event to NGINX event system");
+        write_dbg(DBG_LEVEL_ERROR, "Failed to add verdict event to event system");
         ngx_free_connection(c);
         return NGX_ERROR;
     }
 
     ipc_verdict_conn = c;
-    write_dbg(DBG_LEVEL_INFO, "Added verdict notification socket %d to NGINX event system", comm_socket);
+    write_dbg(DBG_LEVEL_INFO, "Added verdict notification socket %d to event system", comm_socket);
     return NGX_OK;
 }
 
@@ -313,6 +321,10 @@ disable_ipc_verdict_event_handler()
         ipc_verdict_conn = NULL;
     }
     ngx_cp_async_reset_pending_chunks();
+
+    ngx_cp_async_cleanup();
+
+    should_register_to_nano_service = 1;
 }
 
 void
@@ -343,28 +355,36 @@ ngx_cp_async_init()
     
     ngx_cp_async_reset_pending_chunks();
     
-    // Initialize backpressure drain event
     if (!backpressure_event_initialized) {
         ngx_memzero(&backpressure_drain_event, sizeof(ngx_event_t));
         backpressure_drain_event.handler = ngx_cp_async_backpressure_drain_handler;
         backpressure_drain_event.data = NULL;
-        backpressure_drain_event.log = NULL;
+        backpressure_drain_event.log = ngx_cycle ? ngx_cycle->log : NULL;
+        backpressure_drain_event.cancelable = 1;
         backpressure_event_initialized = 1;
-        write_dbg(DBG_LEVEL_INFO, "ASYNC_BACKPRESSURE: Initialized drain event with threshold %d", async_backpressure_threshold);
+        write_dbg(DBG_LEVEL_INFO, "Initialized drain event with threshold %d", async_backpressure_threshold);
     }
     
-    // Initialize global epoll instance for backpressure handling (created once, reused)
+    if (!cleanup_event_initialized) {
+        ngx_memzero(&async_cleanup_event, sizeof(ngx_event_t));
+        async_cleanup_event.handler = ngx_cp_async_cleanup_handler;
+        async_cleanup_event.data = NULL;
+        async_cleanup_event.log = ngx_cycle ? ngx_cycle->log : NULL;
+        async_cleanup_event.cancelable = 1;
+        cleanup_event_initialized = 1;
+        write_dbg(DBG_LEVEL_DEBUG, "Initialized cleanup event");
+    }
+    
     if (g_backpressure_epoll_fd < 0) {
         g_backpressure_epoll_fd = epoll_create1(EPOLL_CLOEXEC);
         if (g_backpressure_epoll_fd < 0) {
-            write_dbg(DBG_LEVEL_WARNING, "ASYNC_BACKPRESSURE: Failed to create global epoll fd: %s", strerror(errno));
+            write_dbg(DBG_LEVEL_WARNING, "Failed to create global epoll fd: %s", strerror(errno));
         } else {
-            write_dbg(DBG_LEVEL_INFO, "ASYNC_BACKPRESSURE: Created global epoll fd %d", g_backpressure_epoll_fd);
+            write_dbg(DBG_LEVEL_INFO, "Created global epoll fd %d", g_backpressure_epoll_fd);
         }
         g_backpressure_registered_socket = -1;
     }
     
-    // Ensure no stale managed connection remains from previous cycles
     if (ipc_verdict_conn) {
         if (ipc_verdict_conn->read && ipc_verdict_conn->read->active) {
             ngx_del_event(ipc_verdict_conn->read, NGX_READ_EVENT, 0);
@@ -373,24 +393,59 @@ ngx_cp_async_init()
         ipc_verdict_conn = NULL;
     }
     
-    write_dbg(DBG_LEVEL_DEBUG, "ASYNC INIT: comm_socket=%d during initialization", comm_socket);
+    write_dbg(DBG_LEVEL_DEBUG, "Initialization: comm_socket=%d during initialization", comm_socket);
+
     if (comm_socket >= 0) {
-        write_dbg(DBG_LEVEL_DEBUG, "Setting up comm socket %d for async notifications during init", comm_socket);
+        write_dbg(DBG_LEVEL_DEBUG, "Setting up communication socket %d for async notifications during init", comm_socket);
         if (ngx_cp_async_setup_verdict_event_handler() == NGX_OK) {
-            write_dbg(DBG_LEVEL_DEBUG, "ASYNC INIT SUCCESS: Verdict event handler set up during initialization");
+            write_dbg(DBG_LEVEL_DEBUG, "Successfully set up verdict event handler during initialization");
         } else {
-            write_dbg(DBG_LEVEL_WARNING, "ASYNC INIT WARNING: Failed to set up verdict event handler during initialization");
+            write_dbg(DBG_LEVEL_WARNING, "Failed to set up verdict event handler during initialization");
         }
     } else {
-        write_dbg(DBG_LEVEL_WARNING, "Communication socket not available during async init - will set up later");
+        write_dbg(DBG_LEVEL_WARNING, "Communication socket not available during initialization - will set up later");
     }
 
     write_dbg(DBG_LEVEL_INFO, "Event-driven async system initialized successfully");
     return NGX_OK;
 }
 
-void
-ngx_cp_async_cleanup()
+static void
+ngx_cp_async_cancel_timers(ngx_http_cp_async_ctx_t *ctx)
+{
+    write_dbg(DBG_LEVEL_DEBUG, "Cancelling timers for session %d", ctx->session_id);
+
+    if (ctx->agent_event.timer_set) {
+        ngx_del_timer(&ctx->agent_event);
+    }
+    if (ctx->cleanup_event.timer_set) {
+        ngx_del_timer(&ctx->cleanup_event);
+    }
+    if (ctx->resume_event.timer_set) {
+        ngx_del_timer(&ctx->resume_event);
+    }
+    if (ctx->agent_event.posted) {
+        ngx_delete_posted_event(&ctx->agent_event);
+    }
+    if (ctx->cleanup_event.posted) {
+        ngx_delete_posted_event(&ctx->cleanup_event);
+    }
+    if (ctx->resume_event.posted) {
+        ngx_delete_posted_event(&ctx->resume_event);
+    }
+
+    ngx_cp_async_cancel_deadline_timer(ctx);
+}
+
+static void
+ngx_cp_async_cleanup_handler(ngx_event_t *ev)
+{
+    (void)ev;
+    ngx_cp_async_cleanup_impl();
+}
+
+static void
+ngx_cp_async_cleanup_impl()
 {
     ngx_uint_t i;
     ngx_http_cp_async_ctx_t *ctx, *next;
@@ -412,18 +467,19 @@ ngx_cp_async_cleanup()
             next = ctx->map_next;
             
             if (ngx_cp_async_ctx_is_valid(ctx)) {
-                write_dbg(
-                    DBG_LEVEL_INFO,
-                    "Releasing pending connection for session %d in stage %d during cleanup", 
-                    ctx->session_id,
-                    ctx->stage
-                );
-                
+                ngx_http_request_t *request = ngx_cp_async_ctx_get_request_safe(ctx);
+                request->keepalive = 0;
                 ctx->session_data->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
                 ctx->session_data->remaining_messages_to_reply = 0;
                 ctx->session_data->async_processing_needed = 0;
                 ctx->header_declined = 1;
                 ctx->req_seq = 0;
+
+                ngx_cp_async_cancel_timers(ctx);
+
+                if (ngx_cp_async_ctx_get_stage_safe(ctx) == NGX_CP_ASYNC_STAGE_WAIT_BODY_VERDICT) {
+                    ctx->stage = NGX_CP_ASYNC_STAGE_BODY;
+                }
 
                 if (ngx_cp_async_ctx_get_stage_safe(ctx) != NGX_CP_ASYNC_STAGE_BODY) {
                     ctx->flow_error = 1;
@@ -431,7 +487,7 @@ ngx_cp_async_cleanup()
                 }
  
                 write_dbg(
-                    DBG_LEVEL_INFO,
+                    DBG_LEVEL_DEBUG,
                     "Releasing session %d with verdict %d (fail_mode=%s)", 
                     ctx->session_id, 
                     ctx->session_data->verdict,
@@ -456,19 +512,34 @@ ngx_cp_async_cleanup()
             ngx_delete_posted_event(&backpressure_drain_event);
         }
         backpressure_event_initialized = 0;
-        write_dbg(DBG_LEVEL_DEBUG, "ASYNC_BACKPRESSURE: Cleaned up drain event");
+        write_dbg(DBG_LEVEL_DEBUG, "Cleaned up drain event");
     }
     
-    // Clean up global epoll instance
+    if (cleanup_event_initialized) {
+        if (async_cleanup_event.posted) {
+            ngx_delete_posted_event(&async_cleanup_event);
+        }
+        cleanup_event_initialized = 0;
+        write_dbg(DBG_LEVEL_DEBUG, "Cleaned up posted cleanup event");
+    }
+    
     if (g_backpressure_epoll_fd >= 0) {
         close(g_backpressure_epoll_fd);
         g_backpressure_epoll_fd = -1;
         g_backpressure_registered_socket = -1;
-        write_dbg(DBG_LEVEL_DEBUG, "ASYNC_BACKPRESSURE: Closed global epoll fd");
+        write_dbg(DBG_LEVEL_DEBUG, "Closed global epoll fd");
     }
     
     is_initialized = 0;
     write_dbg(DBG_LEVEL_DEBUG, "Event-driven async system cleanup complete");
+}
+
+void
+ngx_cp_async_cleanup()
+{
+    if (cleanup_event_initialized && !async_cleanup_event.posted) {
+        ngx_post_event(&async_cleanup_event, &ngx_posted_events);
+    }
 }
 
 ngx_http_cp_async_ctx_t *
@@ -490,15 +561,13 @@ ngx_cp_async_create_ctx(ngx_http_request_t *request, ngx_http_cp_session_data *s
         return NULL;
     }
     
-    // Initialize context with minimal fields
     ctx->request = request;
     ctx->session_data = session_data;
     ctx->session_id = session_data->session_id;
     ctx->stage = NGX_CP_ASYNC_STAGE_INIT;
     ctx->modifications = NULL;
-    ctx->map_next = NULL; // Initialize hash chain pointer
+    ctx->map_next = NULL;
     
-    // Initialize unbuffered body processing fields
     ctx->req_seen_last = 0;
     ctx->req_seq = 0;
     ctx->waiting = 0;
@@ -522,16 +591,19 @@ ngx_cp_async_create_ctx(ngx_http_request_t *request, ngx_http_cp_session_data *s
     ctx->agent_event.handler = ngx_cp_async_event_handler;
     ctx->agent_event.data = ctx;
     ctx->agent_event.log = request->connection->log;
+    ctx->agent_event.cancelable = 1;
 
     ngx_memzero(&ctx->cleanup_event, sizeof(ngx_event_t));
     ctx->cleanup_event.handler = ngx_cp_async_context_cleanup_handler;
     ctx->cleanup_event.data = ctx;
     ctx->cleanup_event.log = request->connection->log;
+    ctx->cleanup_event.cancelable = 1;
 
     ngx_memzero(&ctx->resume_event, sizeof(ngx_event_t));
     ctx->resume_event.handler = cp_async_resume_event_handler;
     ctx->resume_event.data = ctx;
     ctx->resume_event.log = request->connection->log;
+    ctx->resume_event.cancelable = 1;
     
     cln = ngx_pool_cleanup_add(request->pool, 0);
     if (cln == NULL) {
@@ -568,30 +640,8 @@ ngx_cp_async_destroy_ctx(ngx_http_cp_async_ctx_t *ctx)
     
     write_dbg(DBG_LEVEL_DEBUG, "Destroying async context for session %d", session_id);
 
-    // Nullify all event data references first
     ngx_cp_async_nullify_ctx_refs(ctx);
-    
-    if (ctx->agent_event.timer_set) {
-        ngx_del_timer(&ctx->agent_event);
-    }
-    
-    if (ctx->cleanup_event.timer_set) {
-        ngx_del_timer(&ctx->cleanup_event);
-    }
-    if (ctx->resume_event.timer_set) {
-        ngx_del_timer(&ctx->resume_event);
-    }
-    if (ctx->agent_event.posted) {
-        ngx_delete_posted_event(&ctx->agent_event);
-    }
-    if (ctx->cleanup_event.posted) {
-        ngx_delete_posted_event(&ctx->cleanup_event);
-    }
-    if (ctx->resume_event.posted) {
-        ngx_delete_posted_event(&ctx->resume_event);
-    }
-
-    ngx_cp_async_cancel_deadline_timer(ctx);
+    ngx_cp_async_cancel_timers(ctx);
     ngx_cp_async_remove_ctx(ctx);
 
     write_dbg(DBG_LEVEL_DEBUG, "Simplified async context destroyed for session %d", session_id);
@@ -683,16 +733,24 @@ ngx_cp_async_handle_wait_verdict(ngx_http_cp_async_ctx_t *ctx, const char *stage
         return NGX_ERROR;
     }
     
-    // Check for flow error before processing
-    if (ngx_cp_async_ctx_get_flow_error_safe(ctx)) {
-        write_dbg(DBG_LEVEL_ERROR, "Flow error flag set, skipping wait verdict for %s", stage_name);
-        return NGX_ERROR;
-    }
-    
     session_data = ngx_cp_async_ctx_get_session_data_safe(ctx);
     if (session_data == NULL) {
         write_dbg(DBG_LEVEL_ERROR, "Handle wait verdict: invalid session data for %s session %d", stage_name, session_id);
         return NGX_ERROR;
+    }
+    
+    if (ngx_cp_async_ctx_get_flow_error_safe(ctx)) {
+        write_dbg(DBG_LEVEL_ERROR, "Flow error flag set, skipping wait verdict for %s", stage_name);
+        session_data->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+        updateMetricField(HOLD_THREAD_TIMEOUT, 1);
+        ctx->session_data->remaining_messages_to_reply = 0;
+        ctx->session_data->async_processing_needed = 0;
+        ctx->header_declined = 1;
+        ctx->req_seq = 0;
+        ngx_cp_async_cancel_timers(ctx);
+        ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_BODY);
+        ngx_cp_async_event_handler(&ctx->agent_event);
+        return NGX_AGAIN;
     }
     
     write_dbg(
@@ -726,13 +784,16 @@ ngx_cp_async_handle_wait_verdict(ngx_http_cp_async_ctx_t *ctx, const char *stage
     rc = ngx_cp_async_wait_signal_sender(ctx, &num_messages_sent);
     if (rc != NGX_OK && rc != NGX_HTTP_REQUEST_TIME_OUT) {
         write_dbg(DBG_LEVEL_WARNING, "Failed to send %s wait signal for session %d", stage_name, session_id);
-        ctx->flow_error = 1;
         session_data->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
         updateMetricField(HOLD_THREAD_TIMEOUT, 1);
-        session_data->async_processing_needed = 0;
-        ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_COMPLETE);
+        ctx->session_data->remaining_messages_to_reply = 0;
+        ctx->session_data->async_processing_needed = 0;
+        ctx->header_declined = 1;
+        ctx->req_seq = 0;
+        ngx_cp_async_cancel_timers(ctx);
+        ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_BODY);
         ngx_cp_async_event_handler(&ctx->agent_event);
-        return NGX_DECLINED;
+        return NGX_AGAIN;
     }
 
     ngx_add_timer(&ctx->agent_event, async_wait_verdict_timeout_ms);
@@ -830,7 +891,6 @@ ngx_cp_async_event_handler(ngx_event_t *ev)
     
     ctx = (ngx_http_cp_async_ctx_t *) ev->data;
     
-    // Validate context before any access
     if (!ngx_cp_async_ctx_is_valid(ctx)) {
         write_dbg(DBG_LEVEL_WARNING, "Event handler called with invalid/destroyed context - ignoring");
         return;
@@ -842,67 +902,58 @@ ngx_cp_async_event_handler(ngx_event_t *ev)
         return;
     }
 
+    ngx_cp_async_stage_t stage = ngx_cp_async_ctx_get_stage_safe(ctx);
     write_dbg(
         DBG_LEVEL_DEBUG,
-        "=== EVENT HANDLER: SESSION %u, STAGE %d (load: %d) ===", 
+        "Entered main event handler for session %u, stage %d (load: %d)", 
         session_id,
-        (int)ngx_cp_async_ctx_get_stage_safe(ctx),
+        (int)stage,
         context_count
     );
 
     set_current_session_id(session_id);
     rc = ngx_cp_async_continue_processing(ctx);
-    write_dbg(DBG_LEVEL_DEBUG, "Continue processing returned: %d for session %d", rc, session_id);
+    write_dbg(DBG_LEVEL_DEBUG, "Stage processing returned: %d for session %d", rc, session_id);
     
-    if (rc != NGX_AGAIN) {
-        write_dbg(DBG_LEVEL_DEBUG, "Async processing complete for session %d with rc: %d - finalizing request", session_id, rc);
-        
-        ngx_http_request_t *request = ngx_cp_async_ctx_get_request_safe(ctx);
-        if (request == NULL) {
-            write_dbg(DBG_LEVEL_DEBUG, "Event handler: invalid request for session %d - cannot finalize", session_id);
-            return;
-        }
-        
-        ngx_http_cp_session_data *session_data = ngx_cp_async_ctx_get_session_data_safe(ctx);
-        if (session_data == NULL) {
-            write_dbg(DBG_LEVEL_WARNING, "Event handler: invalid session data for session %d - cannot finalize", session_id);
-            return;
-        }
-        
-        if (is_verdict_drop_or_custom(session_data->verdict)) {
-            write_dbg(
-                DBG_LEVEL_DEBUG,
-                "Request BLOCKED - finalizing with status %d for session %d",
-                NGX_HTTP_FORBIDDEN,
-                session_id
-            );            
-            request->keepalive = 0;
+    if (rc == NGX_AGAIN) {
+        write_dbg(DBG_LEVEL_DEBUG, "Stage processing yielded - expecting further events for session %d", session_id);
+        return;
+    }
+
+    ngx_http_request_t *request = ngx_cp_async_ctx_get_request_safe(ctx);
+    if (request == NULL) {
+        write_dbg(DBG_LEVEL_WARNING, "Event handler: invalid request for session %d - cannot finalize", session_id);
+        return;
+    }
+
+    ngx_http_cp_session_data *session_data = ngx_cp_async_ctx_get_session_data_safe(ctx);
+    ServiceVerdict verdict = session_data ? session_data->verdict : TRAFFIC_VERDICT_ACCEPT;
+    
+    if (is_verdict_drop_or_custom(verdict)) {
+        write_dbg(DBG_LEVEL_DEBUG, "Request blocked - dropping session %d", session_id);            
+        request->keepalive = 0;
+        SAFE_DESTROY_CTX(ctx);
+        ctx = NULL;
+        ngx_http_cp_finalize_rejected_request(request, 0);
+    } else if (rc == NGX_DECLINED) {
+        ngx_cp_async_cancel_deadline_timer(ctx);
+        ngx_int_t is_waiting = ctx->waiting;
+        if (stage == NGX_CP_ASYNC_STAGE_COMPLETE) {
             SAFE_DESTROY_CTX(ctx);
             ctx = NULL;
-            ngx_http_cp_finalize_rejected_request(request, 0);
-        } else if (rc == NGX_DECLINED) {
-            ngx_cp_async_cancel_deadline_timer(ctx);
-            ngx_int_t is_waiting = ctx->waiting;
-            if (ngx_cp_async_ctx_get_stage_safe(ctx) == NGX_CP_ASYNC_STAGE_COMPLETE) {
-                write_dbg(DBG_LEVEL_DEBUG, "Cleaning up async context for session %d", session_id);
-                SAFE_DESTROY_CTX(ctx);
-                ctx = NULL;
-            }
-            write_dbg(DBG_LEVEL_DEBUG, "Resuming session %d", session_id);
-            if (is_waiting) {
-                if (ctx) {
-                    ctx->waiting = 0;
-                }
-                
-                ngx_http_core_run_phases(request);
-            }
-            return;
         }
-    } else {
-        write_dbg(DBG_LEVEL_DEBUG, "Processing yielded - waiting for next event for session %d", session_id);
+
+        if (is_waiting) {
+            write_dbg(DBG_LEVEL_DEBUG, "Resuming session %d", session_id);
+            if (ctx) {
+                ctx->waiting = 0;
+            }
+
+            ngx_http_core_run_phases(request);
+        }
     }
     
-    write_dbg(DBG_LEVEL_DEBUG, "=== EVENT HANDLER COMPLETE FOR SESSION %d ===", session_id);
+    write_dbg(DBG_LEVEL_DEBUG, "Event handler complete for session %d", session_id);
 }
 
 ///
@@ -941,33 +992,33 @@ ngx_cp_async_deadline_handler(ngx_event_t *ev)
     
     switch (stage) {
         case NGX_CP_ASYNC_STAGE_META_DATA:
-            stage_name = "META_DATA"; 
+            stage_name = "meta-data"; 
             fail_mode_to_use = fail_mode_verdict;
             break;
         case NGX_CP_ASYNC_STAGE_HEADERS:
         case NGX_CP_ASYNC_STAGE_WAIT_HEADER_VERDICT:
-            stage_name = "HEADERS"; 
+            stage_name = "headers"; 
             fail_mode_to_use = (stage == NGX_CP_ASYNC_STAGE_WAIT_HEADER_VERDICT) ? 
                                fail_mode_hold_verdict
                                : fail_mode_verdict;
             break;
         case NGX_CP_ASYNC_STAGE_END_TRANSACTION:
         case NGX_CP_ASYNC_STAGE_WAIT_END_VERDICT:
-            stage_name = "END_TRANSACTION"; 
+            stage_name = "end-transaction"; 
             fail_mode_to_use = (stage == NGX_CP_ASYNC_STAGE_WAIT_END_VERDICT) ? 
                                fail_mode_hold_verdict
                                : fail_mode_verdict;
             break;
         case NGX_CP_ASYNC_STAGE_BODY:
-            stage_name = "BODY";
+            stage_name = "body";
             fail_mode_to_use = fail_mode_verdict;
             break;
         case NGX_CP_ASYNC_STAGE_WAIT_BODY_VERDICT:
-            stage_name = "BODY";
+            stage_name = "body";
             fail_mode_to_use = fail_mode_hold_verdict;
             break;
         default:
-            stage_name = "UNKNOWN"; 
+            stage_name = "unknown"; 
             fail_mode_to_use = fail_mode_verdict;
             break;
     }
@@ -975,10 +1026,10 @@ ngx_cp_async_deadline_handler(ngx_event_t *ev)
     verdict_to_apply = fail_mode_to_use == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
     
     write_dbg(
-        DBG_LEVEL_WARNING,
-        "DEADLINE EXCEEDED: %s stage timeout for session %d - applying fail-safe verdict %d (fail_mode=%s)",
-        stage_name,
+        DBG_LEVEL_DEBUG,
+        "Deadline exceeded for session %d during %s stage - applying fail-safe verdict %d (fail_mode=%s)",
         session_id,
+        stage_name,
         verdict_to_apply,
         (fail_mode_to_use == fail_mode_hold_verdict) ? "hold" : "regular"
     );
@@ -1021,6 +1072,7 @@ ngx_cp_async_start_deadline_timer(ngx_http_cp_async_ctx_t *ctx, ngx_msec_t timeo
         ctx->deadline_event.handler = ngx_cp_async_deadline_handler;
         ctx->deadline_event.data = ctx;
         ctx->deadline_event.log = ctx->request->connection->log;
+        ctx->deadline_event.cancelable = 1;
     }
     
     ngx_add_timer(&ctx->deadline_event, timeout_ms);
@@ -1082,7 +1134,7 @@ ngx_cp_async_context_cleanup_handler(ngx_event_t *ev)
     
     write_dbg(
         DBG_LEVEL_WARNING,
-        "CONTEXT CLEANUP TIMEOUT: Session %d has been active for %d seconds (stage: %d) - forcing cleanup to prevent memory leak",
+        "Context cleanup timeout: session %d has been active for %d seconds (stage: %d) - forcing cleanup to prevent memory leak",
         session_id,
         age_seconds,
         stage
@@ -1109,7 +1161,6 @@ ngx_cp_async_context_cleanup_handler(ngx_event_t *ev)
         session_data ? (int)session_data->verdict : -1
     );
 
-    // Trigger final cleanup through event handler
     ngx_cp_async_event_handler(&ctx->agent_event);
 }
 
@@ -1118,10 +1169,10 @@ ngx_cp_async_verdict_event_handler(ngx_event_t *ev)
 {
     ngx_uint_t verdicts_processed = 0;
     ssize_t socket_bytes_drained;
-    (void) ev;  // Unused parameter
+    (void) ev;
 
     if (!is_async_mode_enabled) {
-        write_dbg(DBG_LEVEL_INFO, "VERDICT_EVENT: Async mode disabled - cleaning up verdict event handler");
+        write_dbg(DBG_LEVEL_INFO, "Async mode disabled - cleaning up verdict event handler");
         if (ipc_verdict_conn) {
             write_dbg(DBG_LEVEL_INFO, "Cleaning up stale verdict event handler (fd: %d)", ipc_verdict_conn->fd);
             if (ipc_verdict_conn->read && ipc_verdict_conn->read->active) {
@@ -1133,30 +1184,28 @@ ngx_cp_async_verdict_event_handler(ngx_event_t *ev)
         return;
     }
 
-    // Fully drain the socket (EPOLLET-correct: must drain until EAGAIN)
     // Socket is just a "doorbell" - actual data is in shared memory
     socket_bytes_drained = drain_comm_socket_fully(comm_socket);
     if (socket_bytes_drained == -1) {
-        write_dbg(DBG_LEVEL_ERROR, "VERDICT_EVENT: Agent disconnected - cleaning up verdict event handler");
+        write_dbg(DBG_LEVEL_ERROR, "Agent disconnected - cleaning up verdict event handler");
         disable_ipc_verdict_event_handler();
-        ngx_cp_async_cleanup();
         return;
     }
     
     write_dbg(
         DBG_LEVEL_DEBUG,
-        "VERDICT_EVENT: Socket notification received, drained %zd bytes - processing IPC queue",
+        "Socket notification received, drained %zd bytes - processing IPC queue",
         socket_bytes_drained
     );
     
     if (drain_ipc_queue(&verdicts_processed) != NGX_OK) {
-        write_dbg(DBG_LEVEL_WARNING, "VERDICT_EVENT: IPC queue drain failed");
+        write_dbg(DBG_LEVEL_WARNING, "IPC queue drain failed");
         return;
     }
     
     write_dbg(
         DBG_LEVEL_DEBUG, 
-        "=== VERDICT EVENT HANDLER COMPLETE: processed %d verdicts, pending chunks: %d ===", 
+        "Verdict event handler complete: processed %d verdicts, pending chunks: %d", 
         verdicts_processed,
         pending_inspection_chunks
     );
@@ -1176,11 +1225,10 @@ drain_ipc_queue(ngx_uint_t *verdicts_drained)
     uint16_t reply_size;
     ngx_int_t res;
     
-    // Tight loop - drain all available IPC data in one go
     while (nano_service_ipc && isDataAvailable(nano_service_ipc)) {
         res = receiveData(nano_service_ipc, &reply_size, &reply_data);
         if (res < 0 || reply_data == NULL) {
-            write_dbg(DBG_LEVEL_WARNING, "ASYNC_BACKPRESSURE: Failed to receive verdict data from IPC");
+            write_dbg(DBG_LEVEL_WARNING, "Async backpressure: failed to receive verdict data from IPC");
             return NGX_ERROR;
         }
         
@@ -1215,13 +1263,13 @@ drain_ipc_queue(ngx_uint_t *verdicts_drained)
         
         res = ngx_cp_async_apply_verdict(ctx, reply_p);
         if (popData(nano_service_ipc) != 0) {
-            write_dbg(DBG_LEVEL_WARNING, "ASYNC_BACKPRESSURE: Failed to pop verdict data from IPC");
+            write_dbg(DBG_LEVEL_WARNING, "Async backpressure: failed to pop verdict data from IPC");
             return NGX_ERROR;
         }
         ngx_cp_async_decrement_pending_chunks(reply_p->session_id, "backpressure_drained");
         
         if (res != NGX_OK) {
-            write_dbg(DBG_LEVEL_DEBUG, "ASYNC_BACKPRESSURE: Failed to apply verdict for session %d", reply_p->session_id);
+            write_dbg(DBG_LEVEL_DEBUG, "Async backpressure: failed to apply verdict for session %d", reply_p->session_id);
         }
     }
     
@@ -1244,15 +1292,13 @@ drain_comm_socket_fully(int sock)
         total_drained += n;
     }
     
-    // Check for disconnect (EOF)
     if (n == 0) {
-        write_dbg(DBG_LEVEL_WARNING, "ASYNC_BACKPRESSURE: Socket disconnected (EOF) - agent connection lost");
-        return -1; // Signal disconnect to caller
+        write_dbg(DBG_LEVEL_WARNING, "Async backpressure: socket disconnected (EOF) - agent connection lost");
+        return -1;
     }
     
-    // n < 0: either EAGAIN (expected) or error
     if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-        write_dbg(DBG_LEVEL_WARNING, "ASYNC_BACKPRESSURE: Socket drain error: %s", strerror(errno));
+        write_dbg(DBG_LEVEL_WARNING, "Async backpressure: socket drain error: %s", strerror(errno));
     }
     
     return total_drained;
@@ -1280,67 +1326,63 @@ ngx_cp_async_backpressure_drain_handler(ngx_event_t *ev)
     const int epoll_timeout_ms = 50;
     const ngx_uint_t max_drain_iterations = 100;
     
-    (void)ev; // Unused parameter
+    (void)ev;
     
     write_dbg(
         DBG_LEVEL_DEBUG,
-        "ASYNC_BACKPRESSURE: Starting drain handler with %d pending chunks", 
+        "Async backpressure: starting drain handler with %d pending chunks", 
         pending_inspection_chunks
     );
     
     if (nano_service_ipc == NULL) {
-        write_dbg(DBG_LEVEL_WARNING, "ASYNC_BACKPRESSURE: IPC not available - aborting drain");
+        write_dbg(DBG_LEVEL_WARNING, "Async backpressure: IPC not available - aborting drain");
         return;
     }
     
     if (comm_socket < 0) {
-        write_dbg(DBG_LEVEL_WARNING, "ASYNC_BACKPRESSURE: comm_socket invalid - aborting drain");
+        write_dbg(DBG_LEVEL_WARNING, "Async backpressure: communication socket invalid - aborting drain");
         return;
     }
     
-    // Use global epoll instance (already created in init)
     if (g_backpressure_epoll_fd < 0) {
-        write_dbg(DBG_LEVEL_WARNING, "ASYNC_BACKPRESSURE: Global epoll fd not initialized - falling back to immediate drain");
+        write_dbg(DBG_LEVEL_WARNING, "Async backpressure: global epoll fd not initialized - falling back to immediate drain");
         goto drain_immediate;
     }
     
-    // Only call epoll_ctl when the socket changes (avoids repeated syscalls)
     if (g_backpressure_registered_socket != comm_socket) {
-        // Remove old socket if any
         if (g_backpressure_registered_socket >= 0) {
             epoll_ctl(g_backpressure_epoll_fd, EPOLL_CTL_DEL, g_backpressure_registered_socket, NULL);
-            write_dbg(DBG_LEVEL_DEBUG, "ASYNC_BACKPRESSURE: Removed old socket %d from epoll", g_backpressure_registered_socket);
+            write_dbg(DBG_LEVEL_DEBUG, "Async backpressure: removed old socket %d from epoll", g_backpressure_registered_socket);
         }
         
-        // Add new socket
         epoll_event.events = EPOLLIN | EPOLLET;
         epoll_event.data.fd = comm_socket;
         if (epoll_ctl(g_backpressure_epoll_fd, EPOLL_CTL_ADD, comm_socket, &epoll_event) < 0) {
-            write_dbg(DBG_LEVEL_WARNING, "ASYNC_BACKPRESSURE: Failed to add comm_socket to epoll: %s", strerror(errno));
+            write_dbg(DBG_LEVEL_WARNING, "Async backpressure: failed to add communication socket to epoll: %s", strerror(errno));
             g_backpressure_registered_socket = -1;
             goto drain_immediate;
         }
         
         g_backpressure_registered_socket = comm_socket;
-        write_dbg(DBG_LEVEL_DEBUG, "ASYNC_BACKPRESSURE: Registered socket %d with epoll fd %d", comm_socket, g_backpressure_epoll_fd);
+        write_dbg(DBG_LEVEL_DEBUG, "Async backpressure: registered socket %d with epoll fd %d", comm_socket, g_backpressure_epoll_fd);
     }
 
     while (pending_inspection_chunks > 0 || iterations < max_drain_iterations) {
         iterations++;
         
         if (drain_ipc_queue(&verdicts_drained) != NGX_OK) {
-            write_dbg(DBG_LEVEL_WARNING, "ASYNC_BACKPRESSURE: IPC drain failed at iteration %d", iterations);
+            write_dbg(DBG_LEVEL_WARNING, "Async backpressure: IPC drain failed at iteration %d", iterations);
             break;
         }
         
         if (pending_inspection_chunks == 0) {
-            write_dbg(DBG_LEVEL_DEBUG, "ASYNC_BACKPRESSURE: All pending chunks processed after %d iterations", iterations);
+            write_dbg(DBG_LEVEL_DEBUG, "Async backpressure: all pending chunks processed after %d iterations", iterations);
             break;
         }
         
         write_dbg(
             DBG_LEVEL_DEBUG,
-            "ASYNC_BACKPRESSURE: Waiting for more verdicts (iteration %d, pending: %d)...",
+            "Async backpressure: waiting for more verdicts (iteration %d, pending: %d)...",
             iterations,
             pending_inspection_chunks
         );
@@ -1348,15 +1390,15 @@ ngx_cp_async_backpressure_drain_handler(ngx_event_t *ev)
         epoll_result = epoll_wait(g_backpressure_epoll_fd, events, 1, epoll_timeout_ms);
         if (epoll_result < 0) {
             if (errno == EINTR) {
-                write_dbg(DBG_LEVEL_DEBUG, "ASYNC_BACKPRESSURE: epoll_wait interrupted, continuing");
+                write_dbg(DBG_LEVEL_DEBUG, "Async backpressure: epoll_wait interrupted, continuing");
                 continue;
             }
-            write_dbg(DBG_LEVEL_WARNING, "ASYNC_BACKPRESSURE: epoll_wait failed: %s", strerror(errno));
+            write_dbg(DBG_LEVEL_WARNING, "Async backpressure: epoll_wait failed: %s", strerror(errno));
             break;
         } else if (epoll_result == 0) {
             write_dbg(
                 DBG_LEVEL_DEBUG,
-                "ASYNC_BACKPRESSURE: epoll_wait timeout after %dms (iteration %d, pending: %d)",
+                "Async backpressure: epoll_wait timeout after %dms (iteration %d, pending: %d)",
                 epoll_timeout_ms,
                 iterations,
                 pending_inspection_chunks
@@ -1371,12 +1413,11 @@ ngx_cp_async_backpressure_drain_handler(ngx_event_t *ev)
                     iterations
                 );
                 disable_ipc_verdict_event_handler();
-                ngx_cp_async_cleanup();
                 return;
             }
             write_dbg(
                 DBG_LEVEL_DEBUG,
-                "ASYNC_BACKPRESSURE: Socket notification received, drained %zd bytes (iteration %d)",
+                "Async backpressure: socket notification received, drained %zd bytes (iteration %d)",
                 drained_bytes,
                 iterations
             );
@@ -1385,7 +1426,7 @@ ngx_cp_async_backpressure_drain_handler(ngx_event_t *ev)
     
     write_dbg(
         DBG_LEVEL_DEBUG,
-        "ASYNC_BACKPRESSURE: Drain complete after %d iterations - processed %d verdicts, pending chunks: %d -> %d",
+        "Async backpressure: drain complete after %d iterations - processed %d verdicts, pending chunks: %d -> %d",
         iterations,
         verdicts_drained,
         initial_pending_chunks,
@@ -1394,12 +1435,12 @@ ngx_cp_async_backpressure_drain_handler(ngx_event_t *ev)
     return;
     
 drain_immediate:
-    write_dbg(DBG_LEVEL_DEBUG, "ASYNC_BACKPRESSURE: Immediate drain mode (no epoll)");
+    write_dbg(DBG_LEVEL_DEBUG, "Async backpressure: immediate drain mode (no epoll)");
     drain_ipc_queue(&verdicts_drained);
     
     write_dbg(
         DBG_LEVEL_WARNING,
-        "ASYNC_BACKPRESSURE: Immediate drain complete - processed %d verdicts, pending chunks: %d -> %d",
+        "Async backpressure: immediate drain complete - processed %d verdicts, pending chunks: %d -> %d",
         verdicts_drained,
         initial_pending_chunks,
         pending_inspection_chunks
@@ -1409,9 +1450,7 @@ drain_immediate:
 ngx_int_t
 ngx_cp_async_start_agent_communication(ngx_http_cp_async_ctx_t *ctx)
 {
-    ngx_int_t rc;
-    
-    write_dbg(DBG_LEVEL_DEBUG, "=== STARTING AGENT COMMUNICATION FOR SESSION %d ===", ctx->session_id);
+    write_dbg(DBG_LEVEL_DEBUG, "Starting agent communication for session %d", ctx->session_id);
 
     // Registration is now done synchronously in the handler, so go directly to meta data stage
     write_dbg(DBG_LEVEL_DEBUG, "Registration completed synchronously - proceeding to meta data stage for session %d", ctx->session_id);
@@ -1424,10 +1463,7 @@ ngx_cp_async_start_agent_communication(ngx_http_cp_async_ctx_t *ctx)
         return fail_mode_verdict == NGX_OK ? NGX_DECLINED : fail_mode_verdict;
     }
     
-    rc = ngx_cp_async_continue_processing(ctx);
-
-    write_dbg(DBG_LEVEL_DEBUG, "=== AGENT COMMUNICATION START COMPLETE - RC: %d ===", rc);
-    return rc;
+    return ngx_cp_async_continue_processing(ctx);
 }
 
 void
@@ -1469,7 +1505,6 @@ chain_add_copy(ngx_http_request_t *request, ngx_http_cp_async_ctx_t *ctx, ngx_ch
     return NGX_OK;
 }
 
-// Event handler for resume processing
 static void
 cp_async_resume_event_handler(ngx_event_t *ev)
 {
@@ -1495,7 +1530,6 @@ cp_async_resume_event_handler(ngx_event_t *ev)
     cp_async_posted_resume(r);
 }
 
-// Called in event loop to resume the filter after agent signals "released"
 static void
 cp_async_posted_resume(ngx_http_request_t *r) 
 {
@@ -1536,6 +1570,7 @@ cp_async_posted_resume(ngx_http_request_t *r)
         return;
     }
 
+    write_dbg(DBG_LEVEL_DEBUG, "Posted resume: posting read event for session %d, read event %d", ctx->session_id, r->connection->read->active);
     ngx_post_event(r->connection->read, &ngx_posted_events);
 }
 
@@ -1546,9 +1581,11 @@ cp_async_post_request(ngx_http_cp_async_ctx_t *ctx)
     ngx_post_event(&ctx->resume_event, &ngx_posted_events);    
 }
 
+///
 /// @brief Checks if the given verdict is a final verdict (accept/drop/custom_response)
 /// @param[in] verdict The verdict to check
 /// @return 1 if verdict is final, 0 otherwise
+///
 static ngx_int_t
 is_verdict_final(ServiceVerdict verdict)
 {
@@ -1621,20 +1658,20 @@ ngx_cp_async_apply_verdict_for_stage(ngx_http_cp_async_ctx_t *ctx)
     
     switch (stage) {
         case NGX_CP_ASYNC_STAGE_META_DATA:
-            write_dbg(DBG_LEVEL_DEBUG, "Meta data verdict processing for session %d", session_id);
+            write_dbg(DBG_LEVEL_DEBUG, "Applying verdict for meta-data stage, session %d", session_id);
             
             if (is_verdict_drop_or_custom(session_data->verdict)) {
-                write_dbg(DBG_LEVEL_DEBUG, "Meta data verdict is DROP/CUSTOM_RESPONSE - proceeding directly to completion for session %d", session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "Meta-data verdict is drop/custom-response - proceeding directly to completion for session %d", session_id);
                 ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_COMPLETE);
                 return NGX_OK;
             } else if (session_data->verdict == TRAFFIC_VERDICT_DELAYED) {
-                write_dbg(DBG_LEVEL_DEBUG, "Meta data verdict is WAIT - transitioning to wait meta verdict stage for session %d", session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "Meta-data verdict is wait - transitioning to wait meta verdict stage for session %d", session_id);
                 ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_WAIT_META_VERDICT);
                 return NGX_OK;
             } else {
                 write_dbg(
                     DBG_LEVEL_DEBUG,
-                    "Meta data verdict %d - continuing to headers for session %d", 
+                    "Meta-data verdict %d - transitioning to headers for session %d", 
                     session_data->verdict,
                     session_id
                 );
@@ -1644,20 +1681,20 @@ ngx_cp_async_apply_verdict_for_stage(ngx_http_cp_async_ctx_t *ctx)
             break;
             
         case NGX_CP_ASYNC_STAGE_HEADERS:
-            write_dbg(DBG_LEVEL_DEBUG, "Headers verdict processing for session %d", ctx->session_id);
+            write_dbg(DBG_LEVEL_DEBUG, "Applying verdict for headers stage, session %d", session_id);
             
             if (is_verdict_drop_or_custom(ctx->session_data->verdict)) {
-                write_dbg(DBG_LEVEL_DEBUG, "Header verdict is DROP/CUSTOM_RESPONSE - proceeding directly to completion for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "Header verdict is drop/custom-response - proceeding directly to completion for session %d", session_id);
                 ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_COMPLETE);
                 return NGX_OK;
             } else if (ctx->session_data->verdict == TRAFFIC_VERDICT_DELAYED) {
-                write_dbg(DBG_LEVEL_DEBUG, "Header verdict is WAIT - transitioning to wait header verdict stage for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "Header verdict is wait - transitioning to wait header verdict stage for session %d", session_id);
                 ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_WAIT_HEADER_VERDICT);
                 return NGX_OK;
             } else {
-                write_dbg(DBG_LEVEL_DEBUG, "Header verdict is INSPECT - checking for body for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "Header verdict is inspect - checking for body for session %d", session_id);
                 if (does_contain_body(&(ctx->request->headers_in))) {
-                    write_dbg(DBG_LEVEL_DEBUG, "Request has body - transitioning to body stage for session %d", ctx->session_id);
+                    write_dbg(DBG_LEVEL_DEBUG, "Request has body - transitioning to body stage for session %d", session_id);
                     ctx->header_declined = 1;
                     ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_BODY);
                     ngx_cp_async_cancel_deadline_timer(ctx);
@@ -1667,7 +1704,7 @@ ngx_cp_async_apply_verdict_for_stage(ngx_http_cp_async_ctx_t *ctx)
                     }
                     return NGX_DECLINED;
                 } else {
-                    write_dbg(DBG_LEVEL_DEBUG, "No body in request - proceeding to end transaction for session %d", ctx->session_id);
+                    write_dbg(DBG_LEVEL_DEBUG, "No body in request - transitioning to end transaction for session %d", session_id);
                     ctx->session_data->async_processing_needed = 0;
                     ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_END_TRANSACTION);
                     return NGX_OK;
@@ -1676,17 +1713,15 @@ ngx_cp_async_apply_verdict_for_stage(ngx_http_cp_async_ctx_t *ctx)
             break;
             
         case NGX_CP_ASYNC_STAGE_END_TRANSACTION:
-            write_dbg(DBG_LEVEL_DEBUG, "End transaction verdict processing for session %d", ctx->session_id);
+            write_dbg(DBG_LEVEL_DEBUG, "End transaction verdict processing for session %d", session_id);
             
             if (is_verdict_drop_or_custom(ctx->session_data->verdict)) {
-                write_dbg(DBG_LEVEL_DEBUG, "End transaction verdict is DROP/CUSTOM_RESPONSE - proceeding directly to completion for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "End transaction verdict is drop/custom-response - proceeding directly to completion for session %d", session_id);
                 ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_COMPLETE);
                 return NGX_OK;
             } else if (ctx->session_data->verdict == TRAFFIC_VERDICT_DELAYED) {
-                write_dbg(DBG_LEVEL_DEBUG, "End transaction verdict is WAIT - transitioning to wait end verdict stage for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "End transaction verdict is wait - transitioning to wait end verdict stage for session %d", session_id);
                 ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_WAIT_END_VERDICT);
-                
-                // Use configurable timeout for waiting on delayed verdicts
                 ngx_add_timer(&ctx->agent_event, async_wait_verdict_timeout_ms);
                 return NGX_AGAIN;
             } else {
@@ -1694,7 +1729,7 @@ ngx_cp_async_apply_verdict_for_stage(ngx_http_cp_async_ctx_t *ctx)
                     DBG_LEVEL_DEBUG, 
                     "End transaction verdict received (%d) - proceeding to completion for session %d", 
                     ctx->session_data->verdict,
-                    ctx->session_id
+                    session_id
                 );
                 ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_COMPLETE);
                 ctx->header_declined = 1;
@@ -1704,19 +1739,19 @@ ngx_cp_async_apply_verdict_for_stage(ngx_http_cp_async_ctx_t *ctx)
             break;
             
         case NGX_CP_ASYNC_STAGE_BODY:
-            write_dbg(DBG_LEVEL_DEBUG, "Body verdict processing for session %d", ctx->session_id);
+            write_dbg(DBG_LEVEL_DEBUG, "Body verdict processing for session %d", session_id);
             
             if (is_verdict_drop_or_custom(ctx->session_data->verdict)) {
-                write_dbg(DBG_LEVEL_DEBUG, "Body verdict is DROP/CUSTOM_RESPONSE - proceeding to completion for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "Body verdict is drop/custom-response - proceeding to completion for session %d", session_id);
                 ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_COMPLETE);
                 return NGX_OK;
             } else if (ctx->session_data->verdict == TRAFFIC_VERDICT_DELAYED) {
-                write_dbg(DBG_LEVEL_DEBUG, "Body verdict is WAIT - transitioning to wait body verdict stage for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "Body verdict is wait - transitioning to wait body verdict stage for session %d", session_id);
                 ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_WAIT_BODY_VERDICT);
                 ngx_add_timer(&ctx->agent_event, async_wait_verdict_timeout_ms);
                 return NGX_AGAIN;
             } else if (ctx->session_data->was_request_fully_inspected) {
-                write_dbg(DBG_LEVEL_DEBUG, "Body verdict is ACCEPT (final) - proceeding directly to completion for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "Body verdict is accept (final) - proceeding directly to completion for session %d", session_id);
                 ctx->req_seq = 0;
                 return NGX_OK;
             } else {
@@ -1807,8 +1842,8 @@ ngx_cp_async_apply_verdict(ngx_http_cp_async_ctx_t *ctx, HttpReplyFromService *r
             write_dbg(DBG_LEVEL_DEBUG, "Applying custom web response for session %d", session_id);
             handle_custom_web_response(reply_p->modify_data->web_response_data);
         } else if (reply_p->verdict == TRAFFIC_VERDICT_CUSTOM_RESPONSE) {
-            write_dbg(DBG_LEVEL_DEBUG, "Applying custom JSON response for session %d", session_id);
-            handle_custom_json_response(reply_p->modify_data->json_response_data);
+            write_dbg(DBG_LEVEL_DEBUG, "Applying custom response for session %d", session_id);
+            handle_custom_response(reply_p->modify_data->custom_response_data);
         }
         
         ngx_cp_async_free_modification_list(ctx);
@@ -1916,42 +1951,41 @@ ngx_cp_async_continue_processing(ngx_http_cp_async_ctx_t *ctx)
     
     write_dbg(
         DBG_LEVEL_DEBUG,
-        "DEBUG: Processing stage %d - remaining_messages_to_reply=%d", 
+        "Processing stage %d - remaining_messages_to_reply=%d", 
         ctx->stage,
         ctx->session_data->remaining_messages_to_reply
     );
 
-    // Set debug context to this session
     set_current_session_id(ctx->session_id);
     
     switch (ctx->stage) {
         case NGX_CP_ASYNC_STAGE_META_DATA:
-            write_dbg(DBG_LEVEL_DEBUG, "*** STAGE: META_DATA for session %d ***", ctx->session_id);
+            write_dbg(DBG_LEVEL_DEBUG, "Entered meta-data stage for session %d", ctx->session_id);
             
             if (!ctx->meta_data_sent) {
                 write_dbg(DBG_LEVEL_DEBUG, "Calling async meta data sender for session %d", ctx->session_id);
                 rc = ngx_cp_async_send_meta_data_nonblocking(ctx, &num_messages_sent);
                 write_dbg(
-                    DBG_LEVEL_DEBUG, "Async meta data sender returned: %d, messages sent: %d for session %d",
+                    DBG_LEVEL_DEBUG, "Async meta-data sender returned: %d, messages sent: %d for session %d",
                     rc,
                     num_messages_sent,
                     ctx->session_id
                 );
 
                 if (rc == INSPECTION_IRRELEVANT) {
-                    write_dbg(DBG_LEVEL_DEBUG, "Request irrelevant for session %d - finishing with IRRELEVANT verdict", ctx->session_id);
+                    write_dbg(DBG_LEVEL_DEBUG, "Request irrelevant for session %d - returning irrelevant verdict", ctx->session_id);
                     ctx->session_data->verdict = TRAFFIC_VERDICT_IRRELEVANT;
                     return NGX_DECLINED;
                 }
                 
                 if (rc != NGX_OK) {
-                    write_dbg(DBG_LEVEL_DEBUG, "Failed to send meta data for session %d - rc: %d", ctx->session_id, rc);
+                    write_dbg(DBG_LEVEL_DEBUG, "Failed to send meta-data for session %d - rc: %d", ctx->session_id, rc);
                     ctx->flow_error = 1;
                     ctx->session_data->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
                     goto process_complete_stage;
                 }
                 
-                write_dbg(DBG_LEVEL_DEBUG, "Meta data sent - expecting verdict for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "Meta-data sent - awaiting verdict for session %d", ctx->session_id);
                 ctx->session_data->remaining_messages_to_reply += num_messages_sent;
                 ctx->meta_data_sent = 1;
                 return NGX_AGAIN;
@@ -1959,15 +1993,15 @@ ngx_cp_async_continue_processing(ngx_http_cp_async_ctx_t *ctx)
             break;
 
         case NGX_CP_ASYNC_STAGE_HEADERS:
-            write_dbg(DBG_LEVEL_DEBUG, "*** STAGE: HEADERS for session %d ***", ctx->session_id);
+            write_dbg(DBG_LEVEL_DEBUG, "Entered headers stage for session %d", ctx->session_id);
             
             if (!ctx->headers_sent) {
                 num_messages_sent = 0;
-                write_dbg(DBG_LEVEL_DEBUG, "Calling async header sender for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "Calling async headers sender for session %d", ctx->session_id);
                 rc = ngx_cp_async_send_headers_nonblocking(ctx, &num_messages_sent);
                 write_dbg(
                     DBG_LEVEL_DEBUG,
-                    "Async header sender returned: %d, messages sent: %d for session %d", 
+                    "Async headers sender returned: %d, messages sent: %d for session %d", 
                     rc,
                     num_messages_sent,
                     ctx->session_id
@@ -1980,17 +2014,16 @@ ngx_cp_async_continue_processing(ngx_http_cp_async_ctx_t *ctx)
                     goto process_complete_stage;
                 }
                 
-                write_dbg(DBG_LEVEL_DEBUG, "Headers sent - expecting verdict for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "Headers sent - awaiting verdict for session %d", ctx->session_id);
                 ctx->session_data->remaining_messages_to_reply += num_messages_sent;
                 ctx->headers_sent = 1;
                 
-                write_dbg(DBG_LEVEL_DEBUG, "Awaiting header verdict - processing will be handled by verdict event handler for session %d", ctx->session_id);
                 return NGX_AGAIN;
             }
             break;
 
         case NGX_CP_ASYNC_STAGE_END_TRANSACTION:
-            write_dbg(DBG_LEVEL_DEBUG, "*** STAGE: END_TRANSACTION for session %d ***", ctx->session_id);
+            write_dbg(DBG_LEVEL_DEBUG, "Entered end transaction stage for session %d", ctx->session_id);
             if (!ctx->end_transaction_sent) {
                 write_dbg(DBG_LEVEL_DEBUG, "Calling async end transaction sender for session %d", ctx->session_id);
                 rc = ngx_cp_async_send_end_transaction_nonblocking(ctx, &num_messages_sent);
@@ -2009,7 +2042,7 @@ ngx_cp_async_continue_processing(ngx_http_cp_async_ctx_t *ctx)
                     goto process_complete_stage;
                 }
                 
-                write_dbg(DBG_LEVEL_DEBUG, "End transaction sent - expecting verdict for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "End transaction sent - awaiting verdict for session %d", ctx->session_id);
                 ctx->session_data->remaining_messages_to_reply += num_messages_sent;
                 ctx->end_transaction_sent = 1;
                 return NGX_AGAIN;
@@ -2017,15 +2050,15 @@ ngx_cp_async_continue_processing(ngx_http_cp_async_ctx_t *ctx)
             break;
 
         case NGX_CP_ASYNC_STAGE_BODY:
-            write_dbg(DBG_LEVEL_DEBUG, "*** STAGE: BODY for session %d ***", ctx->session_id);
+            write_dbg(DBG_LEVEL_DEBUG, "Entered body stage for session %d", ctx->session_id);
             if (is_verdict_drop_or_custom(ctx->session_data->verdict)) {
-                write_dbg(DBG_LEVEL_DEBUG, "Final verdict is DROP - proceeding to complete stage for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "Final verdict is drop - proceeding to complete stage for session %d", ctx->session_id);
                 ASYNC_STAGE_TRANSITION(ctx, NGX_CP_ASYNC_STAGE_COMPLETE);
                 goto process_complete_stage;
             }
 
             if (ctx->req_seq > 0) {
-                write_dbg(DBG_LEVEL_DEBUG, "Body chunks sent - waiting for verdict for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "Body chunks sent - awaiting verdicts for session %d", ctx->session_id);
                 return NGX_AGAIN;
             }
 
@@ -2039,21 +2072,20 @@ ngx_cp_async_continue_processing(ngx_http_cp_async_ctx_t *ctx)
             break;
 
         case NGX_CP_ASYNC_STAGE_WAIT_HEADER_VERDICT:
-            write_dbg(DBG_LEVEL_DEBUG, "*** STAGE: WAIT_HEADER_VERDICT for session %d ***", ctx->session_id);
+            write_dbg(DBG_LEVEL_DEBUG, "Entered wait header verdict stage for session %d", ctx->session_id);
             return ngx_cp_async_handle_wait_verdict(ctx, "header");
             
         case NGX_CP_ASYNC_STAGE_WAIT_END_VERDICT:
-            write_dbg(DBG_LEVEL_DEBUG, "*** STAGE: WAIT_END_VERDICT for session %d ***", ctx->session_id);
+            write_dbg(DBG_LEVEL_DEBUG, "Entered wait end verdict stage for session %d", ctx->session_id);
             return ngx_cp_async_handle_wait_verdict(ctx, "end");
             
         case NGX_CP_ASYNC_STAGE_WAIT_BODY_VERDICT:
-            write_dbg(DBG_LEVEL_DEBUG, "*** STAGE: WAIT_BODY_VERDICT for session %d ***", ctx->session_id);
+            write_dbg(DBG_LEVEL_DEBUG, "Entered wait body verdict stage for session %d", ctx->session_id);
             return ngx_cp_async_handle_wait_verdict(ctx, "body");
             
 process_complete_stage:
         case NGX_CP_ASYNC_STAGE_COMPLETE:
-            write_dbg(DBG_LEVEL_DEBUG, "*** STAGE: COMPLETE for session %d ***", ctx->session_id);
-
+            write_dbg(DBG_LEVEL_DEBUG, "Entered complete stage for session %d", ctx->session_id);
             ngx_cp_async_cancel_deadline_timer(ctx);
 
             write_dbg(DBG_LEVEL_DEBUG, "Calculating processing time for session %d", ctx->session_id);
@@ -2080,7 +2112,7 @@ process_complete_stage:
             ) {
                 write_dbg(
                     DBG_LEVEL_DEBUG,
-                    "Request ALLOWED (verdict: %d) - continuing to proxy pass for session %d",
+                    "Request allowed (verdict: %d) - continuing to proxy pass for session %d",
                     ctx->session_data->verdict,
                     ctx->session_id
                 );
@@ -2089,7 +2121,7 @@ process_complete_stage:
         
             write_dbg(DBG_LEVEL_DEBUG, "Final verdict for session %d: %d", ctx->session_id, ctx->session_data->verdict);
             if (is_verdict_drop_or_custom(ctx->session_data->verdict)) {
-                write_dbg(DBG_LEVEL_DEBUG, "Request BLOCKED - rejecting request for session %d", ctx->session_id);
+                write_dbg(DBG_LEVEL_DEBUG, "Request blocked - rejecting request for session %d", ctx->session_id);
                 return NGX_HTTP_FORBIDDEN;
             } else {
                 write_dbg(
@@ -2098,20 +2130,19 @@ process_complete_stage:
                     ctx->session_data->verdict,
                     ctx->session_id
                 );
-                SAFE_DESTROY_CTX(ctx);
                 ngx_int_t fail_safe_rc = fail_mode_verdict == NGX_OK ? NGX_DECLINED : NGX_HTTP_FORBIDDEN;
                 return fail_safe_rc;
             }
 
-            write_dbg(DBG_LEVEL_DEBUG, "=== ASYNC PROCESSING COMPLETE FOR SESSION %d ===", ctx->session_id);
+            write_dbg(DBG_LEVEL_DEBUG, "Async processing complete for session %d", ctx->session_id);
             break;
             
         case NGX_CP_ASYNC_STAGE_ERROR:
         default:
-            write_dbg(DBG_LEVEL_WARNING, "*** STAGE: ERROR/UNKNOWN (%d) for session %d ***", ctx->stage, ctx->session_id);
+            write_dbg(DBG_LEVEL_WARNING, "Entered error/unknown stage (%d) for session %d", ctx->stage, ctx->session_id);
             return NGX_ERROR;
     }
     
-    write_dbg(DBG_LEVEL_DEBUG, "=== CONTINUE PROCESSING END - RETURNING NGX_AGAIN ===");
+    write_dbg(DBG_LEVEL_DEBUG, "Stage processing finished - expecting further events");
     return NGX_AGAIN;
 }

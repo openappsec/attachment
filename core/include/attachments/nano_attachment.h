@@ -195,7 +195,7 @@ uint16_t GetResponseCode(
 );
 
 ///
-/// @brief Retrieves the redict page data for a response.
+/// @brief Retrieves the redirect page data for a response.
 ///
 /// @param attachment The NanoAttachment object associated with the session.
 /// @param session_data The HttpSessionData object representing the session.
@@ -204,6 +204,21 @@ uint16_t GetResponseCode(
 /// @return
 ///
 RedirectPageData GetRedirectPage(
+    NanoAttachment *attachment,
+    HttpSessionData *session_data,
+    AttachmentVerdictResponse *response
+);
+
+///
+/// @brief Retrieves the custom response with headers data.
+///
+/// @param attachment The NanoAttachment object associated with the session.
+/// @param session_data The HttpSessionData object representing the session.
+/// @param response The AttachmentVerdictResponse object containing the verdict.
+///
+/// @return CustomResponseWithHeaders structure containing response code, headers, and body.
+///
+CustomResponseWithHeaders * GetCustomResponseWithHeaders(
     NanoAttachment *attachment,
     HttpSessionData *session_data,
     AttachmentVerdictResponse *response

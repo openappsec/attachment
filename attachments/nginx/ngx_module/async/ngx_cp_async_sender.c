@@ -33,8 +33,7 @@ ngx_http_cp_signal_to_service_with_timeout(uint32_t cur_session_id, ngx_uint_t t
     struct pollfd poll_fd;
     int poll_result;
 
-    write_dbg(DBG_LEVEL_TRACE, "Sending signal to the service to notify about new session data to inspect (timeout: %dms)", actual_timeout_ms);
-
+    write_dbg(DBG_LEVEL_TRACE, "Signaling service for session %d (timeout: %dms)", cur_session_id, actual_timeout_ms);
     while (bytes_written < sizeof(cur_session_id)) {
         res = write(comm_socket, ((char *)&cur_session_id) + bytes_written, sizeof(cur_session_id) - bytes_written);
         
@@ -77,7 +76,6 @@ ngx_http_cp_signal_to_service_with_timeout(uint32_t cur_session_id, ngx_uint_t t
         }
     }
 
-    write_dbg(DBG_LEVEL_DEBUG, "Successfully signaled nano service for session %d", cur_session_id);
     return NGX_OK;
 }
 
@@ -110,6 +108,7 @@ ngx_cp_async_wait_signal_sender(ngx_http_cp_async_ctx_t *ctx, ngx_uint_t *num_me
     err_code = sendChunkedData(nano_service_ipc, fragments_sizes, (const char **)fragments, wait_fragments_count);
     if (err_code != 0) {
         write_dbg(DBG_LEVEL_WARNING, "Failed to send wait data to shared memory for session %d, error: %d", session_id, err_code);
+        disconnect_communication();
         return NGX_ERROR;
     }
     ngx_cp_async_increment_pending_chunks(session_id, "wait_signal");
@@ -127,7 +126,6 @@ ngx_cp_async_wait_signal_sender(ngx_http_cp_async_ctx_t *ctx, ngx_uint_t *num_me
         return NGX_ERROR;
     }
     
-    write_dbg(DBG_LEVEL_DEBUG, "Successfully sent async wait signal for session %d", session_id);
     *num_messages_sent = 1;
     return NGX_OK;
 }
@@ -158,7 +156,7 @@ ngx_cp_async_send_meta_data_nonblocking(ngx_http_cp_async_ctx_t *ctx, ngx_uint_t
     uint16_t fragments_sizes[META_DATA_COUNT + 2];
     int err_code = 0;
     
-    write_dbg(DBG_LEVEL_DEBUG, "Async sending request start meta data for inspection");
+    write_dbg(DBG_LEVEL_TRACE, "Sending request start meta data for session %d", ctx->session_id);
     
     convert_sock_addr_to_string(((struct sockaddr *)ctx->request->connection->sockaddr), client_ip);
     if(!is_inspection_required_for_source(client_ip)) return INSPECTION_IRRELEVANT;
@@ -264,16 +262,17 @@ ngx_cp_async_send_meta_data_nonblocking(ngx_http_cp_async_ctx_t *ctx, ngx_uint_t
         set_fragment_elem(fragments, fragments_sizes, "", 0, WAF_TAG_DATA + 2);
     }
     
-    write_dbg(DBG_LEVEL_DEBUG, "Async sending meta data chunk to shared memory");
+    write_dbg(DBG_LEVEL_TRACE, "Sending meta data to shared memory");
     
     err_code = sendChunkedData(nano_service_ipc, fragments_sizes, (const char **)fragments, META_DATA_COUNT + 2);
     if (err_code != 0) {
         write_dbg(DBG_LEVEL_WARNING, "Failed to send meta data chunk - error code %d", err_code);
+        disconnect_communication();
         return NGX_ERROR;
     }
     ngx_cp_async_increment_pending_chunks(ctx->session_id, "meta_data");
 
-    write_dbg(DBG_LEVEL_DEBUG, "Async signaling agent for meta data with %dms timeout protection", async_signal_timeout_ms);
+    write_dbg(DBG_LEVEL_TRACE, "Signaling agent for meta data (timeout: %dms)", async_signal_timeout_ms);
     res = ngx_http_cp_signal_to_service_with_timeout(ctx->session_id, async_signal_timeout_ms);
     if (res != NGX_OK && res != NGX_HTTP_REQUEST_TIME_OUT) {
         write_dbg(DBG_LEVEL_WARNING, "Failed to signal agent for single body chunk, session %d", ctx->session_id);
@@ -286,7 +285,6 @@ ngx_cp_async_send_meta_data_nonblocking(ngx_http_cp_async_ctx_t *ctx, ngx_uint_t
     }    
     
     *num_messages_sent = 1;
-    write_dbg(DBG_LEVEL_DEBUG, "Async meta data sent and signaled successfully");
     return NGX_OK;
 }
 
@@ -314,7 +312,7 @@ ngx_cp_async_send_headers_nonblocking(ngx_http_cp_async_ctx_t *ctx, ngx_uint_t *
     int err_code = 0;
     ngx_int_t res;
     
-    write_dbg(DBG_LEVEL_DEBUG, "Async sending request headers for inspection");
+    write_dbg(DBG_LEVEL_TRACE, "Sending request headers for session %d", ctx->session_id);
     
     uint16_t header_type = REQUEST_HEADER;
     set_fragments_identifiers(fragments, fragments_sizes, &header_type, &ctx->session_id);
@@ -325,8 +323,8 @@ ngx_cp_async_send_headers_nonblocking(ngx_http_cp_async_ctx_t *ctx, ngx_uint_t *
             header = headers_to_inspect + header_idx;
             
             write_dbg(
-                DBG_LEVEL_DEBUG,
-                "Async sending header (key: '%.*s', value: '%.*s')",
+                DBG_LEVEL_TRACE,
+                "Header: '%.*s': '%.*s'",
                 header->key.len,
                 header->key.data,
                 header->value.len,
@@ -343,7 +341,7 @@ ngx_cp_async_send_headers_nonblocking(ngx_http_cp_async_ctx_t *ctx, ngx_uint_t *
             set_fragment_elem(fragments, fragments_sizes, &is_last_part, sizeof(is_last_part), 2);
             set_fragment_elem(fragments, fragments_sizes, &bulk_part_idx, sizeof(bulk_part_idx), 3);
             
-            write_dbg(DBG_LEVEL_DEBUG, "Async sending header bulk to shared memory");
+            write_dbg(DBG_LEVEL_TRACE, "Sending header bulk to shared memory");
             err_code = sendChunkedData(
                 nano_service_ipc,
                 fragments_sizes, 
@@ -353,13 +351,13 @@ ngx_cp_async_send_headers_nonblocking(ngx_http_cp_async_ctx_t *ctx, ngx_uint_t *
 
             if (err_code != 0) {
                 write_dbg(DBG_LEVEL_WARNING, "Failed to send header bulk - error code %d", err_code);
+                disconnect_communication();
                 return NGX_ERROR;
             }
             
             ngx_cp_async_increment_pending_chunks(ctx->session_id, "headers");
             
             num_of_bulks_sent++;
-            write_dbg(DBG_LEVEL_DEBUG, "Async header bulk sent successfully (no signal yet)");
             
             if (is_last_part) break;
             
@@ -369,7 +367,7 @@ ngx_cp_async_send_headers_nonblocking(ngx_http_cp_async_ctx_t *ctx, ngx_uint_t *
     }
     
     if (part_count == 0) {
-        write_dbg(DBG_LEVEL_DEBUG, "Async sending empty header list");
+        write_dbg(DBG_LEVEL_TRACE, "Sending empty header list");
         
         uint8_t is_last_part = 1;
         uint8_t bulk_part_idx = 0;
@@ -385,6 +383,7 @@ ngx_cp_async_send_headers_nonblocking(ngx_http_cp_async_ctx_t *ctx, ngx_uint_t *
 
         if (err_code != 0) {
             write_dbg(DBG_LEVEL_WARNING, "Failed to send empty header list - error code %d", err_code);
+            disconnect_communication();
             return NGX_ERROR;
         }
         
@@ -395,7 +394,7 @@ ngx_cp_async_send_headers_nonblocking(ngx_http_cp_async_ctx_t *ctx, ngx_uint_t *
     }
     
     // Signal agent once after all header bulks are sent
-    write_dbg(DBG_LEVEL_DEBUG, "Async signaling agent for all headers with %dms timeout protection", async_signal_timeout_ms);
+    write_dbg(DBG_LEVEL_TRACE, "Signaling agent for headers (timeout: %dms)", async_signal_timeout_ms);
     res = ngx_http_cp_signal_to_service_with_timeout(ctx->session_id, async_signal_timeout_ms);
     if (res != NGX_OK && res != NGX_HTTP_REQUEST_TIME_OUT) {
         write_dbg(DBG_LEVEL_WARNING, "Failed to signal agent for single body chunk, session %d", ctx->session_id);
@@ -408,7 +407,6 @@ ngx_cp_async_send_headers_nonblocking(ngx_http_cp_async_ctx_t *ctx, ngx_uint_t *
     }
     
     *num_messages_sent = num_of_bulks_sent;
-    write_dbg(DBG_LEVEL_DEBUG, "Async headers sent and signaled successfully - %d bulks", num_of_bulks_sent);
     return NGX_OK;
 }
 
@@ -427,20 +425,19 @@ ngx_cp_async_send_end_transaction_nonblocking(ngx_http_cp_async_ctx_t *ctx, ngx_
     int err_code = 0;
     ngx_int_t res;
     
-    write_dbg(DBG_LEVEL_DEBUG, "Async sending end transaction for inspection");
-    
+    write_dbg(DBG_LEVEL_TRACE, "Sending end transaction for session %d", ctx->session_id);
+
     set_fragments_identifiers(fragments, fragments_sizes, &chunck_type, &ctx->session_id);
-    
-    write_dbg(DBG_LEVEL_DEBUG, "Async sending end transaction to shared memory");
     err_code = sendChunkedData(nano_service_ipc, fragments_sizes, (const char **)fragments, 2);
     if (err_code != 0) {
         write_dbg(DBG_LEVEL_WARNING, "Failed to send end transaction - error code %d", err_code);
+        disconnect_communication();
         return NGX_ERROR;
     }
     
     ngx_cp_async_increment_pending_chunks(ctx->session_id, "end_transaction");
 
-    write_dbg(DBG_LEVEL_DEBUG, "Async signaling agent for end transaction with %dms timeout protection", async_signal_timeout_ms);
+    write_dbg(DBG_LEVEL_TRACE, "Signaling agent for end transaction (timeout: %dms)", async_signal_timeout_ms);
     res = ngx_http_cp_signal_to_service_with_timeout(ctx->session_id, async_signal_timeout_ms);
     if (res != NGX_OK && res != NGX_HTTP_REQUEST_TIME_OUT) {
         write_dbg(DBG_LEVEL_WARNING, "Failed to signal agent for end transaction");
@@ -454,7 +451,6 @@ ngx_cp_async_send_end_transaction_nonblocking(ngx_http_cp_async_ctx_t *ctx, ngx_
     
     *num_messages_sent = 1;
     ctx->end_transaction_sent = 1;
-    write_dbg(DBG_LEVEL_DEBUG, "Async end transaction sent and signaled successfully");
     return NGX_OK;
 }
 
@@ -505,12 +501,11 @@ ngx_cp_async_send_single_body_chunk_nonblocking(ngx_http_cp_async_ctx_t *ctx, ng
         res = sendChunkedData(nano_service_ipc, fragments_sizes, (const char **)fragments, num_body_chunk_fragments);
         if (res != 0) {
             write_dbg(DBG_LEVEL_WARNING, "Failed to send single body chunk to agent for session %d: %d", ctx->session_id, res);
+            disconnect_communication();
             return NGX_ERROR;
         }
         ngx_cp_async_increment_pending_chunks(ctx->session_id, "body_chunk");
         
-        write_dbg(DBG_LEVEL_DEBUG, "Successfully sent single body chunk to agent for session %d", ctx->session_id);
-
         res = ngx_http_cp_signal_to_service_with_timeout(ctx->session_id, async_signal_timeout_ms);
         if (res != NGX_OK && res != NGX_HTTP_REQUEST_TIME_OUT) {
             write_dbg(DBG_LEVEL_WARNING, "Failed to signal agent for single body chunk, session %d", ctx->session_id);
@@ -523,7 +518,6 @@ ngx_cp_async_send_single_body_chunk_nonblocking(ngx_http_cp_async_ctx_t *ctx, ng
         }
 
         *num_messages_sent = 1;
-        write_dbg(DBG_LEVEL_DEBUG, "Single chunk sender completed successfully for session %d", ctx->session_id);
         return NGX_OK;
     }
     
@@ -574,10 +568,10 @@ ngx_cp_async_send_to_agent_nonblocking(
     res = sendChunkedData(nano_service_ipc, chunk_sizes, chunks, 1);
     if (res != 0) {
         write_dbg(DBG_LEVEL_WARNING, "Failed to send data to agent for session %d: %d", ctx->session_id, res);
+        disconnect_communication();
         return NGX_ERROR;
     }
     
-    write_dbg(DBG_LEVEL_DEBUG, "Successfully sent data to agent for session %d", ctx->session_id);
     return NGX_OK;
 }
 
@@ -587,7 +581,7 @@ ngx_cp_async_signal_agent_nonblocking(ngx_http_cp_async_ctx_t *ctx)
     ssize_t bytes_written;
     uint32_t session_id = ctx->session_id;
     
-    write_dbg(DBG_LEVEL_DEBUG, "Signaling agent for session %d (non-blocking)", ctx->session_id);
+    write_dbg(DBG_LEVEL_TRACE, "Signaling agent for session %d", ctx->session_id);
     
     if (comm_socket < 0) {
         write_dbg(DBG_LEVEL_ERROR, "Communication socket not ready yet for session %d - skipping signal", ctx->session_id);
@@ -600,6 +594,5 @@ ngx_cp_async_signal_agent_nonblocking(ngx_http_cp_async_ctx_t *ctx)
         return NGX_ERROR;
     }
     
-    write_dbg(DBG_LEVEL_DEBUG, "Successfully signaled agent for session %d", ctx->session_id);
     return NGX_OK;
 }

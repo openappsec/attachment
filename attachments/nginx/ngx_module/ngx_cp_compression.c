@@ -233,7 +233,7 @@ compression_data_filter(
 {
     CompressionResult compression_result;
 
-    write_dbg(DBG_LEVEL_TRACE, "Performing %s on buffer data", should_compress ? "compression" : "decompression");
+    write_dbg(DBG_LEVEL_DEBUG, "Performing %s on buffer data", should_compress ? "compression" : "decompression");
 
     if (should_compress && params == NULL) {
         write_dbg(DBG_LEVEL_ASSERT, "Passed a pointer to null as compression parameters");
@@ -242,7 +242,7 @@ compression_data_filter(
 
     if (should_compress) {
         // Compressing data.
-        write_dbg(DBG_LEVEL_TRACE, "compressing data(%d), is last: %d", input->len, params->is_last_part);
+        write_dbg(DBG_LEVEL_DEBUG, "compressing data(%d), is last: %d", input->len, params->is_last_part);
 
         compression_result = compressData(
             compression_stream,
@@ -278,7 +278,7 @@ compression_data_filter(
         free(compression_result.output);
     }
 
-    write_dbg(DBG_LEVEL_TRACE, "Successfully %s buffer data", should_compress ? "compressed" : "decompressed");
+    write_dbg(DBG_LEVEL_DEBUG, "Successfully %s buffer data", should_compress ? "compressed" : "decompressed");
 
     return NGX_OK;
 }
@@ -312,7 +312,7 @@ compression_buffer_filter(
     ngx_str_t src_data;
     ngx_str_t dest_data;
     ngx_int_t compression_result;
-    write_dbg(DBG_LEVEL_TRACE, "Performing %s on buffer", should_compress ? "compression" : "decompression");
+    write_dbg(DBG_LEVEL_DEBUG, "Performing %s on buffer", should_compress ? "compression" : "decompression");
 
     if (is_valid_compression_buffer(should_compress, src) != NGX_OK) {
         // Invalid buffer provided.
@@ -354,7 +354,7 @@ compression_buffer_filter(
     ngx_memcpy(dest, src, sizeof(ngx_buf_t));
     set_buffer_data(dest, &dest_data);
 
-    write_dbg(DBG_LEVEL_TRACE, "Successfully %s buffer", should_compress ? "compressed" : "decompressed");
+    write_dbg(DBG_LEVEL_DEBUG, "Successfully %s buffer", should_compress ? "compressed" : "decompressed");
 
     return NGX_OK;
 }
@@ -404,7 +404,7 @@ compression_chain_filter(
         return NGX_ERROR;
     }
 
-    write_dbg(DBG_LEVEL_TRACE, "Performing %s on chain", should_compress ? "compression" : "decompression");
+    write_dbg(DBG_LEVEL_DEBUG, "Performing %s on chain", should_compress ? "compression" : "decompression");
 
     for (curr_input_link = *body; curr_input_link != NULL; curr_input_link = curr_input_link->next) {
         // Decompress or compresses buffer
@@ -437,13 +437,35 @@ compression_chain_filter(
             return NGX_ERROR;
         }
 
-        // Save ONLY first buffer of original body if requested (prevents memory spikes)
-        if (curr_original_contents_link != NULL && curr_original_contents_link->buf == NULL) {
-            // Only save the FIRST buffer, don't accumulate subsequent chunks
-            curr_original_contents_link->buf = ngx_calloc_buf(pool);
+        // Save the current buffer of original body if requested.
+        // The chain is extended link-by-link to mirror every buffer in the input chain so the
+        // nano service always receives the full compressed data for the current call — not just
+        // the first or last buffer.  Each link's buf is allocated once and then overwritten on
+        // subsequent calls (allocate-once / update-always pattern).
+        // Callers that do not need this (e.g. ACCEPT path on chunk > 1) pass NULL for
+        // original_body_contents so this block is never reached for them.
+        if (curr_original_contents_link != NULL) {
+            if (curr_original_contents_link->buf == NULL) {
+                curr_original_contents_link->buf = ngx_calloc_buf(pool);
+            }
             ngx_memcpy(curr_original_contents_link->buf, curr_input_link->buf, sizeof(ngx_buf_t));
-            curr_original_contents_link->next = NULL;  // No accumulation
-            write_dbg(DBG_LEVEL_TRACE, "Saved first chunk of original body (no accumulation)");
+
+            if (curr_input_link->next != NULL) {
+                // More input buffers remain — ensure there is a next link for the original chain.
+                if (curr_original_contents_link->next == NULL) {
+                    curr_original_contents_link->next = ngx_alloc_chain_link(pool);
+                    if (curr_original_contents_link->next != NULL) {
+                        curr_original_contents_link->next->buf = NULL;
+                        curr_original_contents_link->next->next = NULL;
+                    }
+                }
+                curr_original_contents_link = curr_original_contents_link->next;
+            } else {
+                // Last input buffer — terminate the original chain here so stale links
+                // from a previous (longer) call are not visited by the body sender.
+                curr_original_contents_link->next = NULL;
+            }
+            write_dbg(DBG_LEVEL_TRACE, "Saved current chunk of original body");
         }
 
         ngx_memcpy(curr_input_link->buf, output_buffer, sizeof(ngx_buf_t));
@@ -454,7 +476,7 @@ compression_chain_filter(
         }
     }
 
-    write_dbg(DBG_LEVEL_TRACE, "Successfully %s chain", should_compress ? "compressed" : "decompressed");
+    write_dbg(DBG_LEVEL_DEBUG, "Successfully %s chain", should_compress ? "compressed" : "decompressed");
 
     return NGX_OK;
 }
@@ -539,7 +561,7 @@ decompress_body(
 {
     char *body_type = chunk_type == REQUEST_BODY ? "request" : "response";
 
-    write_dbg(DBG_LEVEL_TRACE, "Decompressing %s body", body_type);
+    write_dbg(DBG_LEVEL_DEBUG, "Decompressing %s body", body_type);
 
     ngx_int_t decompress_data_res = decompress_chain(
         decompression_stream,
@@ -558,7 +580,7 @@ decompress_body(
         return NGX_ERROR;
     }
 
-    write_dbg(DBG_LEVEL_TRACE, "Successfully decompressed %s body", body_type);
+    write_dbg(DBG_LEVEL_DEBUG, "Successfully decompressed %s body", body_type);
     updateMetricField(
         chunk_type == REQUEST_BODY ? REQ_SUCCESSFUL_DECOMPRESSION_COUNT : RES_SUCCESSFUL_DECOMPRESSION_COUNT,
         1
@@ -608,7 +630,7 @@ compress_body(
     }
 
     write_dbg(
-        DBG_LEVEL_TRACE,
+        DBG_LEVEL_DEBUG,
         "Compressing plain-text %s body in the format \"%s\"",
         body_type,
         format_name
@@ -633,7 +655,7 @@ compress_body(
         return NGX_ERROR;
     }
 
-    write_dbg(DBG_LEVEL_TRACE, "Successfully compressed %s body", body_type);
+    write_dbg(DBG_LEVEL_DEBUG, "Successfully compressed %s body", body_type);
     updateMetricField(
         chunk_type == REQUEST_BODY ? REQ_SUCCESSFUL_COMPRESSION_COUNT : RES_SUCCESSFUL_COMPRESSION_COUNT,
         1

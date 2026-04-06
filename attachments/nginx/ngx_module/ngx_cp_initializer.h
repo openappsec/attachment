@@ -109,4 +109,19 @@ void reset_attachment_registration();
 ///
 ngx_int_t register_to_attachments_manager(ngx_int_t num_of_workers);
 
+/// @brief Remove attachment metadata file if it exists in dual docker environment.
+///
+void remove_attachment_metadata_file();
+
+///
+/// @brief Set shared registration value to the provided state.
+/// @param[in] ngx_cp_attachment_registration_state_e Provided state that needs to be set.
+///
+void set_unregistered();
+
+///
+/// @brief Initialize global logging data if not already initialized
+///
+void init_global_logging_data();
+
 #endif // __NGX_CP_INITIALIZER_H__

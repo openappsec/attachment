@@ -194,6 +194,9 @@ FinalizeSuccessfulResponse(
         case TRAFFIC_VERDICT_DROP:
             response.verdict = ATTACHMENT_VERDICT_DROP;
             break;
+        case TRAFFIC_VERDICT_CUSTOM_RESPONSE:
+            response.verdict = ATTACHMENT_VERDICT_DROP;
+            break;
         case TRAFFIC_VERDICT_INJECT:
             // Not yet supported
             response.verdict = ATTACHMENT_VERDICT_INSPECT;
@@ -317,7 +320,7 @@ HandleDelayedVerdict(
         sleep(attachment->hold_verdict_polling_time);
         write_dbg(attachment, session_id, DBG_LEVEL_DEBUG, "spawn SendDelayedVerdictRequestThread");
         res = NanoRunInThreadTimeout(
-            attachment, 
+            attachment,
             data,
             SendDelayedVerdictRequestThread,
             (void *)ctx,

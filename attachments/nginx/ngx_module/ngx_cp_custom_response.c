@@ -210,7 +210,7 @@ ngx_add_event_id_to_header(ngx_http_request_t *request)
     static u_char uuid_key[] = { 'X', '-', 'E', 'v', 'e', 'n', 't', '-', 'I', 'D' };
 
     write_dbg(
-        DBG_LEVEL_TRACE,
+        DBG_LEVEL_DEBUG,
         "Adding instance ID to header. Incident ID: %s, Incident ID size: %d",
         uuid,
         uuid_size
@@ -230,15 +230,23 @@ ngx_http_cp_finalize_custom_response_request(ngx_http_request_t *request)
     ngx_chain_t out_chain[1];
     ngx_int_t rc;
     uint16_t response_code;
+    CustomResponseHeader *header;
 
-    write_dbg(DBG_LEVEL_TRACE, "Finalizing Custom JSON Response request");
+    write_dbg(DBG_LEVEL_DEBUG, "Finalizing Custom Response request");
 
-    // Get JSON response data
-    response_code = get_response_code_json();
+    response_code = get_custom_response_code();
+
+    if (response_code < 100 || response_code > 599) {
+        write_dbg(
+            DBG_LEVEL_WARNING,
+            "Invalid response code: %d. Response code should be between 100 and 599",
+            response_code
+        );
+    }
     
-    rc = get_response_page_json(request, &out_chain);
+    rc = get_custom_response_page(request, &out_chain);
     if (rc != NGX_OK) {
-        write_dbg(DBG_LEVEL_WARNING, "Failed to get JSON response page");
+        write_dbg(DBG_LEVEL_WARNING, "Failed to get custom response page");
         goto CUSTOM_RESPONSE_OUT;
     }
 
@@ -248,41 +256,69 @@ ngx_http_cp_finalize_custom_response_request(ngx_http_request_t *request)
 
     delete_headers_list(&request->headers_out.headers);
     
-    if (get_response_content_type() == CONTENT_TYPE_TEXT_HTML) {
-        static u_char text_html[] = {'t', 'e', 'x', 't', '/', 'h', 't', 'm', 'l'};
-        request->headers_out.content_type.len = sizeof(text_html);
-        request->headers_out.content_type.data = text_html;
-        request->headers_out.content_type_len = request->headers_out.content_type.len;
-    } else {
-        static u_char json_content_type[] = {'a', 'p', 'p', 'l', 'i', 'c', 'a', 't', 'i', 'o', 'n', '/', 'j', 's', 'o', 'n'};
-        request->headers_out.content_type.len = sizeof(json_content_type);
-        request->headers_out.content_type.data = json_content_type;
-        request->headers_out.content_type_len = request->headers_out.content_type.len;
-
+    // Dynamically inject all custom headers
+    header = get_custom_response_headers();
+    while (header != NULL) {
+        ngx_table_elt_t *h = ngx_list_push(&request->headers_out.headers);
+        if (h == NULL) {
+            write_dbg(
+                DBG_LEVEL_WARNING, 
+                "Failed to allocate header: %.*s", 
+                header->key.len, 
+                header->key.data
+            );
+            goto CUSTOM_RESPONSE_OUT;
+        }
+        
+        h->key.len = header->key.len;
+        h->key.data = header->key.data;
+        h->value.len = header->value.len;
+        h->value.data = header->value.data;
+        h->hash = 1;
+        
+        write_dbg(
+            DBG_LEVEL_DEBUG,
+            "Added custom header: '%.*s' = '%.*s'",
+            h->key.len,
+            h->key.data,
+            h->value.len,
+            h->value.data
+        );
+        
+        header = header->next;
     }
     
-    // Set content length
-    request->headers_out.content_length_n = get_response_page_length_json();
+    off_t content_length = get_custom_response_page_length();
+    if (content_length < 0) {
+        write_dbg(
+            DBG_LEVEL_WARNING,
+            "Invalid content length: %O. Content length cannot be negative",
+            content_length
+        );
+        goto CUSTOM_RESPONSE_OUT;
+    }
+    request->headers_out.content_length_n = content_length;
 
     rc = ngx_http_send_header(request);
     if (rc == NGX_ERROR || rc > NGX_OK) {
         write_dbg(
             DBG_LEVEL_WARNING,
-            "Failed to send Custom JSON Response headers (result: %d)",
+            "Failed to send Custom Response headers (result: %d)",
             rc
         );
         goto CUSTOM_RESPONSE_OUT;
     }
 
-    write_dbg(DBG_LEVEL_TRACE, "Successfully sent Custom JSON Response headers");
+    write_dbg(DBG_LEVEL_DEBUG, "Successfully sent Custom Response headers");
 
-    // Send the JSON response body using the chain data
+    // Send the response body using the chain data
     rc = ngx_http_output_filter(request, out_chain);
     if (rc != NGX_OK && rc != NGX_AGAIN) {
-        write_dbg(DBG_LEVEL_WARNING, "Failed to send Custom JSON Response");
-    } else {
-        write_dbg(DBG_LEVEL_TRACE, "Custom JSON Response sent successfully");
+        write_dbg(DBG_LEVEL_WARNING, "Failed to send Custom Response");
+        goto CUSTOM_RESPONSE_OUT;
     }
+
+    write_dbg(DBG_LEVEL_DEBUG, "Custom Response sent successfully");
 
 CUSTOM_RESPONSE_OUT:
     ngx_http_finalize_request(request, NGX_HTTP_CLOSE);
@@ -299,7 +335,7 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request, int is_respon
     ngx_chain_t out_chain[7]; // http://lxr.nginx.org/source/src/http/ngx_http_special_response.c#0772
     int send_response_custom_body = 1;
 
-    write_dbg(DBG_LEVEL_TRACE, "Finalizing rejecting request");
+    write_dbg(DBG_LEVEL_DEBUG, "Finalizing rejecting request");
 
     request->keepalive = 0;
 
@@ -377,7 +413,7 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request, int is_respon
     request->headers_out.content_type.data = text_html;
     request->headers_out.content_length_n = get_response_page_length_web_page();
 
-    write_dbg(DBG_LEVEL_TRACE, "Sending response headers for rejected request");
+    write_dbg(DBG_LEVEL_DEBUG, "Sending response headers for rejected request");
     rc = ngx_http_send_header(request);
     if (rc == NGX_ERROR || rc > NGX_OK) {
         // Failed to send response headers.
@@ -390,7 +426,7 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request, int is_respon
         goto CUSTOM_RES_OUT;
     }
     write_dbg(
-        DBG_LEVEL_TRACE,
+        DBG_LEVEL_DEBUG,
         "Successfully sent response headers for rejected request."
         " Generating web response page for rejected request."
     );
@@ -406,14 +442,14 @@ ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request, int is_respon
             );
             goto CUSTOM_RES_OUT;
         }
-        write_dbg(DBG_LEVEL_TRACE, "Successfully generated web response page for rejected request");
-        write_dbg(DBG_LEVEL_TRACE, "Sending web response body");
+        write_dbg(DBG_LEVEL_DEBUG, "Successfully generated web response page for rejected request");
+        write_dbg(DBG_LEVEL_DEBUG, "Sending web response body");
         rc = ngx_http_output_filter(request, out_chain);
         if (rc != NGX_OK && rc != NGX_AGAIN) {
             // Failed to send response body.
             write_dbg(DBG_LEVEL_WARNING, "Failed to send web response body");
         } else {
-            write_dbg(DBG_LEVEL_TRACE, "%s web response body sent", rc == NGX_AGAIN ? "Partial" : "Full" );
+            write_dbg(DBG_LEVEL_DEBUG, "%s web response body sent", rc == NGX_AGAIN ? "Partial" : "Full" );
         }
     } else {
         out_chain[0].buf = ngx_calloc_buf(request->pool);
@@ -588,12 +624,25 @@ push_header_to_list(
         return NULL;
     }
 
-    header->hash = 1;
-    header->key.data = key_data;
+    header->key.data = ngx_pnalloc(headers_list->pool, key_data_size + 1);
+    if (header->key.data == NULL) {
+        write_dbg(DBG_LEVEL_WARNING, "Failed to allocate header key data");
+        return NULL;
+    }
+    ngx_memcpy(header->key.data, key_data, key_data_size);
+    header->key.data[key_data_size] = '\0';
     header->key.len = key_data_size;
-    header->value.data = value_data;
+
+    header->value.data = ngx_pnalloc(headers_list->pool, value_data_size + 1);
+    if (header->value.data == NULL) {
+        write_dbg(DBG_LEVEL_WARNING, "Failed to allocate header value data");
+        return NULL;
+    }
+    ngx_memcpy(header->value.data, value_data, value_data_size);
+    header->value.data[value_data_size] = '\0';
     header->value.len = value_data_size;
 
+    header->hash = 1;
     return header;
 }
 

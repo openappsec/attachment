@@ -24,6 +24,19 @@
 #include <assert.h>
 
 #include "nano_attachment_common.h"
+#include "shmem_ipc_2.h"
+
+#ifndef __LOGGING_DATA_DEFINED__
+#define __LOGGING_DATA_DEFINED__
+typedef struct LoggingData {
+    int dbg_level;
+    int worker_id;
+    int fd;
+} LoggingData;
+#endif
+
+extern LoggingData logging_data;
+extern uint32_t cur_session_id;
 
 #ifndef __FILENAME__
 #define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
@@ -31,16 +44,16 @@
 
 #define write_dbg(_dbg_level, fmt, ...)                                                         \
     {                                                                                          \
-        write_dbg_impl(_dbg_level, __func__, __FILENAME__, __LINE__, fmt, ##__VA_ARGS__);      \
+        write_dbg_impl(&logging_data, cur_session_id, _dbg_level, __func__, __FILENAME__, __LINE__, fmt, ##__VA_ARGS__);      \
         if ((_dbg_level) == DBG_LEVEL_ASSERT) assert(0);                                       \
     }
 
 #define write_dbg_if_needed(_dbg_level, fmt, ...)                                                     \
     {                                                                                                 \
 		if ((dbg_is_needed) == 0) {                                                                   \
-			write_dbg_impl(DBG_LEVEL_TRACE, __func__, __FILENAME__, __LINE__, fmt, ##__VA_ARGS__);    \
+			write_dbg_impl(&logging_data, cur_session_id, DBG_LEVEL_TRACE, __func__, __FILENAME__, __LINE__, fmt, ##__VA_ARGS__);    \
 		} else {                                                                                      \
-			write_dbg_impl(_dbg_level, __func__, __FILENAME__, __LINE__, fmt, ##__VA_ARGS__);         \
+			write_dbg_impl(&logging_data, cur_session_id, _dbg_level, __func__, __FILENAME__, __LINE__, fmt, ##__VA_ARGS__);         \
 		}                                                                                             \
         if ((_dbg_level) == DBG_LEVEL_ASSERT) assert(0);                                              \
     }
@@ -246,13 +259,6 @@ ngx_uint_t get_web_response_uuid_size(void);
 void set_custom_response_block_page(const ngx_str_t *title, const ngx_str_t *body, const ngx_str_t *uuid, ngx_uint_t response_code);
 
 ///
-/// @brief Sets a custom JSON response.
-/// @param[in] body Sets the JSON response body.
-/// @param[in] response_code Sets the response code of the custom response.
-///
-void set_custom_response_json(const ngx_str_t *body, ngx_uint_t response_code, AttachmentContentType content_type);
-
-///
 /// @brief Sets a redirect response by modifying redirect triggers, redirect_location and web_response_uuid.
 /// @param[in] location Redirect location to set to.
 /// @param[in] uuid Redirection's response uuid to set.
@@ -318,25 +324,52 @@ ngx_uint_t get_response_code(void);
 /// @param[out] out_chain NGINX chain to fill with JSON response data.
 /// @returns ngx_int_t NGX_OK if successful, NGX_ERROR_ERR if failed.
 ///
-ngx_int_t get_response_page_json(ngx_http_request_t *request, ngx_chain_t (*out_chain)[1]);
+/// @brief Custom response header structure.
+///
+typedef struct CustomResponseHeader {
+    ngx_str_t key;
+    ngx_str_t value;
+    struct CustomResponseHeader *next;
+} CustomResponseHeader;
 
 ///
-/// @brief Get currently set JSON response page length.
-/// @returns ngx_uint_t length of the JSON response body.
+/// @brief Sets a custom response with dynamic headers.
+/// @param[in] body Sets the response body.
+/// @param[in] response_code Sets the response code of the custom response.
+/// @param[in] headers Linked list of headers to set.
 ///
-ngx_uint_t get_response_page_length_json(void);
+void set_custom_response(const ngx_str_t *body, ngx_uint_t response_code, CustomResponseHeader *headers);
 
 ///
-/// @brief Get currently set JSON response code.
-/// @returns ngx_uint_t JSON response code variable.
+/// @brief Free custom response headers.
 ///
-ngx_uint_t get_response_code_json(void);
+void free_custom_response_headers(void);
 
 ///
-/// @brief Get currently set JSON content type.
-/// @returns AttachmentContentType JSON content type variable.
+/// @brief Get custom response page.
+/// @param[in] request NGINX request.
+/// @param[out] out_chain NGINX chain to fill with response data.
+/// @returns ngx_int_t NGX_OK if successful, NGX_ERROR_ERR if failed.
 ///
-AttachmentContentType get_response_content_type(void);
+ngx_int_t get_custom_response_page(ngx_http_request_t *request, ngx_chain_t (*out_chain)[1]);
+
+///
+/// @brief Get currently set custom response page length.
+/// @returns ngx_uint_t length of the custom response body.
+///
+ngx_uint_t get_custom_response_page_length(void);
+
+///
+/// @brief Get currently set custom response code.
+/// @returns ngx_uint_t custom response code variable.
+///
+ngx_uint_t get_custom_response_code(void);
+
+///
+/// @brief Get currently set custom response headers.
+/// @returns CustomResponseHeader * pointer to the headers linked list.
+///
+CustomResponseHeader * get_custom_response_headers(void);
 
 ///
 /// @brief Get JSON response page for web page format.
@@ -404,13 +437,36 @@ ngx_http_cp_sessions_per_minute_limit *get_periodic_sessions_limit_info(void);
 /// @param[in] fmt Debug formatter.
 /// @param[in] ... Extra values to write into the debug using the formatter.
 ///
-void ngx_cdecl write_dbg_impl(int _dbg_level, const char *func, const char *file, int line_num, const char *fmt, ...);
+void ngx_cdecl write_dbg_impl(const LoggingData *logging_data, uint32_t session_id, int _dbg_level, const char *func, const char *file, int line_num, const char *fmt, ...);
 
 ///
 /// @brief Sets a new debug level.
 /// @param[in] _dbg_level New debug level to be set.
 ///
 void set_cp_ngx_attachment_debug_level(int _dbg_level);
+int get_cp_ngx_attachment_debug_level(void);
+
+///
+/// @brief Wrapper function to adapt write_dbg_impl to shmem_ipc_2 debug function signature
+/// @param[in] loggin_data Logging data
+/// @param[in] worker_id Worker ID
+/// @param[in] is_error Whether this is an error message
+/// @param[in] func Function name
+/// @param[in] file File name
+/// @param[in] line_num Line number
+/// @param[in] fmt Format string
+/// @param[in] ... Variable arguments
+///
+void shmem_ipc_2_write_dbg_wrapper(
+    const LoggingData *loggin_data,
+    uint32_t worker_id,
+    int is_error,
+    const char *func,
+    const char *file,
+    int line_num,
+    const char *fmt,
+    ...
+);
 
 ///
 /// @brief Sets a new session ID.

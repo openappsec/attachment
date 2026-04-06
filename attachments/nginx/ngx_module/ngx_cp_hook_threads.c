@@ -23,7 +23,7 @@
 #include <stdbool.h>
 
 #include "nginx_attachment_util.h"
-#include "shmem_ipc.h"
+#include "shmem_ipc_2.h"
 #include "compression_utils.h"
 #include "nano_attachment_common.h"
 #include "ngx_cp_io.h"
@@ -107,6 +107,7 @@ init_thread_ctx(
     ctx->chain_part_number = 0;
     ctx->chain = chain;
     ctx->modifications = NULL;
+    ctx->filter_mode = SYNC_FILTER;
 }
 
 void *
@@ -146,12 +147,13 @@ static ngx_int_t
 end_req_header_handler(
     ngx_http_cp_session_data *session_data_p,
     ngx_http_request_t *request,
-    ngx_http_cp_modification_list **modifications)
+    ngx_http_cp_modification_list **modifications,
+    ngx_uint_t filter_mode)
 {
     ngx_uint_t num_messages_sent = 0;
 
     if (!does_contain_body(&(request->headers_in))) {
-        if (ngx_http_cp_end_transaction_sender(REQUEST_END, session_data_p->session_id, &num_messages_sent) != NGX_OK) {
+        if (ngx_http_cp_end_transaction_sender(REQUEST_END, session_data_p->session_id, &num_messages_sent, filter_mode) != NGX_OK) {
             write_dbg(
                 DBG_LEVEL_WARNING,
                 "Failed to send request end data to the nano service. Session ID: %d",
@@ -171,7 +173,8 @@ end_req_header_handler(
         request,
         modifications,
         REQUEST_END,
-        0
+        0,
+        filter_mode
     );
 }
 
@@ -225,7 +228,8 @@ ngx_http_cp_req_header_handler_thread(void *_ctx)
         &(request->headers_in.headers.part),
         REQUEST_HEADER,
         session_data_p->session_id,
-        &num_messages_sent
+        &num_messages_sent,
+        ctx->filter_mode
     );
     if (send_header_result != NGX_OK) {
         write_dbg(
@@ -239,7 +243,7 @@ ngx_http_cp_req_header_handler_thread(void *_ctx)
     session_data_p->remaining_messages_to_reply += num_messages_sent;
 
     // Notify the nano service that we've reached the end of the request headers.
-    ctx->res = end_req_header_handler(session_data_p, request, &ctx->modifications);
+    ctx->res = end_req_header_handler(session_data_p, request, &ctx->modifications, ctx->filter_mode);
 
     // The caller function will continue and apply the modified ctx->modifications
     return NULL;
@@ -263,7 +267,8 @@ ngx_http_cp_req_body_filter_thread(void *_ctx)
         &part_count,
         &is_last_part,
         &num_messages_sent,
-        &ctx->chain
+        &ctx->chain,
+        ctx->filter_mode
     );
 
     if (send_body_result != NGX_OK) {
@@ -289,7 +294,8 @@ ngx_http_cp_req_body_filter_thread(void *_ctx)
         request,
         &ctx->modifications,
         REQUEST_BODY,
-        session_data_p->processed_req_body_size
+        session_data_p->processed_req_body_size,
+        ctx->filter_mode
     );
 
     if (is_last_part) session_data_p->was_request_fully_inspected = 1;
@@ -305,7 +311,7 @@ ngx_http_cp_req_end_transaction_thread(void *_ctx)
     ngx_http_cp_session_data *session_data_p = ctx->session_data_p;
     ngx_uint_t num_messages_sent = 0;
 
-    if (ngx_http_cp_end_transaction_sender(REQUEST_END, session_data_p->session_id, &num_messages_sent) != NGX_OK) {
+    if (ngx_http_cp_end_transaction_sender(REQUEST_END, session_data_p->session_id, &num_messages_sent, ctx->filter_mode) != NGX_OK) {
         write_dbg(
             DBG_LEVEL_WARNING,
             "Failed to send request end data to the nano service. Session ID: %d",
@@ -332,7 +338,8 @@ ngx_http_cp_req_end_transaction_thread(void *_ctx)
             request,
             &ctx->modifications,
             REQUEST_END,
-            session_data_p->processed_req_body_size
+            session_data_p->processed_req_body_size,
+            ctx->filter_mode
         );
     }
 
@@ -355,7 +362,8 @@ ngx_http_cp_res_header_filter_thread(void *_ctx)
     send_res_code_result = ngx_http_cp_res_code_sender(
         request->headers_out.status,
         session_data_p->session_id,
-        &num_messages_sent
+        &num_messages_sent,
+        ctx->filter_mode
     );
     if (send_res_code_result != NGX_OK) {
         write_dbg(
@@ -373,23 +381,29 @@ ngx_http_cp_res_header_filter_thread(void *_ctx)
     session_data_p->remaining_messages_to_reply += num_messages_sent;
     num_messages_sent = 0;
 
-    // Sends response content length to the nano service.
-    send_content_length_result = ngx_http_cp_content_length_sender(
-        request->headers_out.content_length_n,
-        session_data_p->session_id,
-        &num_messages_sent
-    );
-    if (send_content_length_result != NGX_OK) {
-        write_dbg(
-            DBG_LEVEL_WARNING,
-            "Failed to send headers content length to the nano service. Session ID: %d",
-            session_data_p->session_id
+    if (request->headers_out.content_length_n != -1) {
+        // Send the response content length to the nano service.
+        // In the current implementation, after the content length is sent, the Nano Agent
+        // will inject a response to remove the content length header. Therefore, we only
+        // send it if a content length header is present.
+        send_content_length_result = ngx_http_cp_content_length_sender(
+            request->headers_out.content_length_n,
+            session_data_p->session_id,
+            &num_messages_sent,
+            ctx->filter_mode
         );
-        handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
-        if (fail_mode_verdict == NGX_OK) {
-            THREAD_CTX_RETURN_NEXT_FILTER();
+        if (send_content_length_result != NGX_OK) {
+            write_dbg(
+                DBG_LEVEL_WARNING,
+                "Failed to send headers content length to the nano service. Session ID: %d",
+                session_data_p->session_id
+            );
+            handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
+            if (fail_mode_verdict == NGX_OK) {
+                THREAD_CTX_RETURN_NEXT_FILTER();
+            }
+            THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
         }
-        THREAD_CTX_RETURN(NGX_HTTP_FORBIDDEN);
     }
 
     session_data_p->remaining_messages_to_reply += num_messages_sent;
@@ -420,7 +434,8 @@ ngx_http_cp_res_header_filter_thread(void *_ctx)
             &request->headers_out.headers.part,
             RESPONSE_HEADER,
             session_data_p->session_id,
-            &num_messages_sent
+            &num_messages_sent,
+            ctx->filter_mode
         );
         if (send_header_result != NGX_OK) {
             write_dbg(
@@ -447,7 +462,8 @@ ngx_http_cp_res_header_filter_thread(void *_ctx)
         request,
         &ctx->modifications,
         RESPONSE_HEADER,
-        0
+        0,
+        ctx->filter_mode
     );
 
     return NULL;
@@ -478,7 +494,8 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
         &part_number,
         &is_last_response_part,
         &num_messages_sent,
-        &ctx->chain
+        &ctx->chain,
+        ctx->filter_mode
     );
 
     write_dbg(
@@ -512,7 +529,8 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
         request,
         &ctx->modifications,
         RESPONSE_BODY,
-        session_data_p->processed_res_body_size
+        session_data_p->processed_res_body_size,
+        ctx->filter_mode
     );
 
     write_dbg(
@@ -546,7 +564,7 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
             session_data_p->session_id
         );
 
-        if (ngx_http_cp_end_transaction_sender(RESPONSE_END, session_data_p->session_id, &num_messages_sent) != NGX_OK) {
+        if (ngx_http_cp_end_transaction_sender(RESPONSE_END, session_data_p->session_id, &num_messages_sent, ctx->filter_mode) != NGX_OK) {
             write_dbg(
                 DBG_LEVEL_WARNING,
                 "Failed to send response end data to the nano service. Session ID: %d",
@@ -582,7 +600,8 @@ ngx_http_cp_res_body_filter_thread(void *_ctx)
             request,
             &ctx->modifications,
             RESPONSE_END,
-            session_data_p->processed_res_body_size
+            session_data_p->processed_res_body_size,
+            ctx->filter_mode
         );
         write_dbg(
             DBG_LEVEL_DEBUG,
@@ -617,12 +636,15 @@ ngx_http_cp_hold_verdict_thread(void *_ctx)
 
     ngx_uint_t num_messages_sent = 0;
 
-    if (ngx_http_cp_wait_sender(session_data_p->session_id, &num_messages_sent) != NGX_OK) {
+    if (ngx_http_cp_wait_sender(session_data_p->session_id, &num_messages_sent, ctx->filter_mode) != NGX_OK) {
         write_dbg(
             DBG_LEVEL_WARNING,
             "Failed to send inspect wait request to the nano service. Session ID: %d",
             session_data_p->session_id
         );
+        if (ctx->filter_mode == ASYNC_FILTER) {
+            ctx->res = NGX_ERROR;
+        }
         handle_inspection_failure(inspection_failure_weight, fail_mode_hold_verdict, session_data_p);
         if (fail_mode_hold_verdict == NGX_OK) {
             THREAD_CTX_RETURN_NEXT_FILTER();
@@ -639,7 +661,8 @@ ngx_http_cp_hold_verdict_thread(void *_ctx)
         request,
         &ctx->modifications,
         REQUEST_DELAYED_VERDICT,
-        0
+        0,
+        ctx->filter_mode
     );
 
     write_dbg(

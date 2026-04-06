@@ -46,6 +46,7 @@ struct ngx_http_cp_event_thread_ctx_t
 
     ngx_http_cp_modification_list *modifications; ///< Context's modification.
     ngx_str_t waf_tag; ///< WAF tag value for the location block.
+    ngx_uint_t filter_mode:1; ///< Filter mode: SYNC_FILTER or ASYNC_FILTER.
 };
 
 ///

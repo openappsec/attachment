@@ -56,10 +56,10 @@ ngx_cp_run_in_thread_timeout(CpThreadRoutine thread_func, void *arg, int timeout
     if (inspection_mode == NO_THREAD) return ngx_cp_run_without_thread_timeout(thread_func, arg, func_name);
 
     /// Runs the routine in a dedicated thread.
-    write_dbg(DBG_LEVEL_TRACE, "Executing cb in dedicated thread, fn=%s", func_name);
+    write_dbg(DBG_LEVEL_DEBUG, "Executing cb in dedicated thread, fn=%s", func_name);
     if (pthread_create(&thread, NULL, thread_func, arg) != 0) {
         updateMetricField(THREAD_FAILURE, 1);
-        write_dbg(DBG_LEVEL_TRACE, "pthread_create failed with errno=%d, fn=%s", errno, func_name);
+        write_dbg(DBG_LEVEL_DEBUG, "pthread_create failed with errno=%d, fn=%s", errno, func_name);
         return 0;
     }
 

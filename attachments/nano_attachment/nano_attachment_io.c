@@ -708,6 +708,176 @@ handle_redirect_response(
 }
 
 ///
+/// @brief Handle custom response with dynamic headers
+///
+/// @param[in] attachment Nano attachment.
+/// @param[in] session_id Session ID.
+/// @param[in] ctx_response_data Web response data to be set.
+/// @param[in] custom_response_data Custom response data with headers.
+///
+static void
+handle_custom_response_with_headers(
+    NanoAttachment *attachment,
+    SessionID session_id,
+    WebResponseData **ctx_response_data,
+    HttpCustomResponseData *custom_response_data
+)
+{
+    WebResponseData *new_response_data = NULL;
+    CustomResponseWithHeaders *response_with_headers = NULL;
+    char *data_ptr;
+    uint16_t body_size;
+    uint8_t headers_count;
+    uint8_t i, j;
+
+    if (attachment == NULL || ctx_response_data == NULL || custom_response_data == NULL) {
+        if (attachment != NULL) {
+            write_dbg(
+                attachment,
+                session_id,
+                DBG_LEVEL_WARNING,
+                "Received NULL pointer in handle_custom_response_with_headers"
+            );
+        }
+        return;
+    }
+
+    data_ptr = custom_response_data->data;
+    body_size = custom_response_data->body_size;
+    headers_count = custom_response_data->headers_count;
+
+    write_dbg(
+        attachment,
+        session_id,
+        DBG_LEVEL_TRACE,
+        "Preparing to set custom response with %d headers and body size %d",
+        headers_count,
+        body_size
+    );
+
+    new_response_data = malloc(sizeof(WebResponseData));
+    if (new_response_data == NULL) {
+        write_dbg(attachment, session_id, DBG_LEVEL_WARNING, "Failed to allocate memory for web response data");
+        return;
+    }
+
+    response_with_headers = malloc(sizeof(CustomResponseWithHeaders));
+    if (response_with_headers == NULL) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "Failed to allocate memory for custom response with headers"
+        );
+        free(new_response_data);
+        return;
+    }
+
+    response_with_headers->response_code = custom_response_data->response_code;
+    response_with_headers->headers_count = headers_count;
+
+    if (headers_count > 0) {
+        response_with_headers->headers = malloc(sizeof(CustomResponseHeaderData) * headers_count);
+        if (response_with_headers->headers == NULL) {
+            write_dbg(attachment, session_id, DBG_LEVEL_WARNING, "Failed to allocate memory for headers");
+            free(response_with_headers);
+            free(new_response_data);
+            return;
+        }
+
+        for (i = 0; i < headers_count; i++) {
+            HttpHeaderPackedData *header_data = (HttpHeaderPackedData *)data_ptr;
+            
+            response_with_headers->headers[i].key_size = header_data->key_size;
+            response_with_headers->headers[i].value_size = header_data->value_size;
+
+            response_with_headers->headers[i].key = malloc(header_data->key_size + 1);
+            if (response_with_headers->headers[i].key == NULL) {
+                write_dbg(attachment, session_id, DBG_LEVEL_WARNING, "Failed to allocate memory for header key");
+                for (j = 0; j < i; j++) {
+                    free(response_with_headers->headers[j].key);
+                    free(response_with_headers->headers[j].value);
+                }
+                free(response_with_headers->headers);
+                free(response_with_headers);
+                free(new_response_data);
+                return;
+            }
+
+            data_ptr += sizeof(HttpHeaderPackedData);
+            memcpy(response_with_headers->headers[i].key, data_ptr, header_data->key_size);
+            response_with_headers->headers[i].key[header_data->key_size] = '\0';
+            data_ptr += header_data->key_size;
+
+            response_with_headers->headers[i].value = malloc(header_data->value_size + 1);
+            if (response_with_headers->headers[i].value == NULL) {
+                write_dbg(attachment, session_id, DBG_LEVEL_WARNING, "Failed to allocate memory for header value");
+                free(response_with_headers->headers[i].key);
+                for (j = 0; j < i; j++) {
+                    free(response_with_headers->headers[j].key);
+                    free(response_with_headers->headers[j].value);
+                }
+                free(response_with_headers->headers);
+                free(response_with_headers);
+                free(new_response_data);
+                return;
+            }
+
+            memcpy(response_with_headers->headers[i].value, data_ptr, header_data->value_size);
+            response_with_headers->headers[i].value[header_data->value_size] = '\0';
+            data_ptr += header_data->value_size;
+
+            write_dbg(
+                attachment,
+                session_id,
+                DBG_LEVEL_TRACE,
+                "Parsed header %d: '%s' = '%s'",
+                i,
+                response_with_headers->headers[i].key,
+                response_with_headers->headers[i].value
+            );
+        }
+    } else {
+        response_with_headers->headers = NULL;
+    }
+
+    response_with_headers->body_size = body_size;
+    if (body_size > 0) {
+        response_with_headers->body = malloc(body_size + 1);
+        if (response_with_headers->body == NULL) {
+            write_dbg(attachment, session_id, DBG_LEVEL_WARNING, "Failed to allocate memory for response body");
+            for (i = 0; i < headers_count; i++) {
+                free(response_with_headers->headers[i].key);
+                free(response_with_headers->headers[i].value);
+            }
+            if (response_with_headers->headers) free(response_with_headers->headers);
+            free(response_with_headers);
+            free(new_response_data);
+            return;
+        }
+        memcpy(response_with_headers->body, data_ptr, body_size);
+        response_with_headers->body[body_size] = '\0';
+    } else {
+        response_with_headers->body = NULL;
+    }
+
+    new_response_data->web_response_type = CUSTOM_RESPONSE_WITH_HEADERS;
+    new_response_data->uuid[0] = '\0';
+    new_response_data->data = response_with_headers;
+    *ctx_response_data = new_response_data;
+
+    write_dbg(
+        attachment,
+        session_id,
+        DBG_LEVEL_TRACE,
+        "Successfully set custom response: code=%d, headers=%d, body_size=%d",
+        response_with_headers->response_code,
+        headers_count,
+        body_size
+    );
+}
+
+///
 /// @brief Handles drop response received from a service.
 ///
 /// This function is responsible for processing different types of web responses
@@ -876,6 +1046,33 @@ service_reply_receiver(
                 return NANO_HTTP_FORBIDDEN;
             }
 
+            case TRAFFIC_VERDICT_CUSTOM_RESPONSE: {
+                write_dbg(
+                    attachment,
+                    session_data->session_id,
+                    DBG_LEVEL_TRACE,
+                    "Verdict custom response received from the nano service"
+                );
+
+                updateMetricField(attachment, DROP_VERDICTS_COUNT, 1);
+                handle_custom_response_with_headers(
+                    attachment,
+                    session_data->session_id,
+                    web_response_data,
+                    reply_p->modify_data->custom_response_data
+                );
+
+                session_data->remaining_messages_to_reply = 0;
+                while (*modification_list) {
+                    current_modification = *modification_list;
+                    *modification_list = (*modification_list)->next;
+                    free(current_modification->modification.data);
+                    free(current_modification);
+                }
+                popData(attachment->nano_service_ipc);
+                return NANO_HTTP_FORBIDDEN;
+            }
+
             case TRAFFIC_VERDICT_ACCEPT: {
                 // After an accept verdict no more replies will be sent, so we can leave the loop
                 write_dbg(
@@ -936,6 +1133,17 @@ service_reply_receiver(
                     "Verdict delayed received from the nano service"
                 );
                 updateMetricField(attachment, HOLD_VERDICTS_COUNT, 1);
+                break;
+            }
+            case LIMIT_RESPONSE_HEADERS: {
+                // TODO: Handle this verdict in the future.
+                write_dbg(
+                    attachment,
+                    session_data->session_id,
+                    DBG_LEVEL_WARNING,
+                    "Verdict %d received from the nano service, which is not supported yet",
+                    session_data->verdict
+                );
                 break;
             }
         }
