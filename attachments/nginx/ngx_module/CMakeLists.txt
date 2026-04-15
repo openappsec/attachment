@@ -35,9 +35,9 @@ add_library(
 	ngx_cp_compression.c ngx_cp_http_parser.c ngx_cp_failing_state.c ngx_cp_metric.c
 )
 
-add_dependencies(ngx_module osrc_shmem_ipc osrc_nginx_attachment_util osrc_compression_utils)
+add_dependencies(ngx_module shmem_ipc_2 osrc_nginx_attachment_util osrc_compression_utils)
 
-target_link_libraries(ngx_module osrc_shmem_ipc osrc_nginx_attachment_util osrc_compression_utils)
+target_link_libraries(ngx_module shmem_ipc_2 osrc_nginx_attachment_util osrc_compression_utils)
 
 CREATE_INCLUDE_LIST(NGX_INCLUDES)
 READ_COMPILE_FLAGS(CC_FLAG_LIST)
