@@ -18,6 +18,8 @@ COPY lib/libosrc_nginx_attachment_util.so /usr/lib/libosrc_nginx_attachment_util
 COPY lib/libosrc_nginx_attachment_util.so /usr/lib64/libosrc_nginx_attachment_util.so
 COPY lib/libosrc_shmem_ipc.so /usr/lib/libosrc_shmem_ipc.so
 COPY lib/libosrc_shmem_ipc.so /usr/lib64/libosrc_shmem_ipc.so
+COPY lib/libshmem_ipc_2.so /usr/lib/libshmem_ipc_2.so
+COPY lib/libshmem_ipc_2.so /usr/lib64/libshmem_ipc_2.so
 COPY lib/libngx_module.so /usr/lib/nginx/modules/ngx_cp_attachment_module.so
 COPY lib/libngx_module.so /usr/lib64/nginx/modules/ngx_cp_attachment_module.so
 
