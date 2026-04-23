@@ -18,29 +18,8 @@
 #include "../ngx_cp_metric.h"
 #include "../ngx_cp_thread.h"
 #include "../ngx_cp_static_content.h"
-#include "../ngx_cp_utils.h"
-#include "../ngx_cp_custom_response.h"
 
 extern ngx_int_t is_initialized;
-extern ngx_int_t should_register_to_nano_service;
-
-ngx_int_t
-ngx_http_cp_res_header_filter_async(ngx_http_request_t *request)
-{
-    ngx_http_cp_session_data *session_data_p;
-
-    if (remove_res_server_header) remove_server_header(request);
-
-    session_data_p = recover_cp_session_data(request);
-    if (session_data_p == NULL) {
-        write_dbg(DBG_LEVEL_DEBUG, "No session data - passing through to next filter");
-        return ngx_http_next_response_header_filter(request);
-    }
-
-    set_current_session_id(session_data_p->session_id);
-
-    return ngx_http_cp_res_header_filter_core(request, ASYNC_FILTER);
-}
 
 ngx_int_t
 ngx_http_cp_req_header_handler_async(ngx_http_request_t *request)
@@ -56,7 +35,7 @@ ngx_http_cp_req_header_handler_async(ngx_http_request_t *request)
     static int is_failure_state_initialized = 0;
     static int is_metric_data_initialized = 0;
     
-    write_dbg(DBG_LEVEL_DEBUG, "Async request header handler handling a new request");
+    write_dbg(DBG_LEVEL_DEBUG, "=== ASYNC REQUEST HEADER HANDLER START ===");
 
     clock_gettime(CLOCK_REALTIME, &hook_time_begin);
     if (is_async_mode_enabled && !is_initialized) {
@@ -64,13 +43,13 @@ ngx_http_cp_req_header_handler_async(ngx_http_request_t *request)
     }
 
     if (is_failure_state_initialized == 0) {
-        write_dbg(DBG_LEVEL_DEBUG, "Initializing failure state");
+        write_dbg(DBG_LEVEL_ERROR, "Initializing failure state (first time)");
         reset_transparent_mode();
         is_failure_state_initialized = 1;
     }
     
     if (is_metric_data_initialized == 0) {
-        write_dbg(DBG_LEVEL_DEBUG, "Initializing metric data");
+        write_dbg(DBG_LEVEL_ERROR, "Initializing metric data (first time)");
         reset_metric_data();
         is_metric_data_initialized = 1;
     }
@@ -126,10 +105,9 @@ ngx_http_cp_req_header_handler_async(ngx_http_request_t *request)
         
         init_thread_ctx(&ctx, request, session_data_p, NULL);
         ctx.waf_tag = conf->waf_tag;
-
-        if (should_register_to_nano_service || is_registration_timeout_reached()) {
+        
+        if (is_registration_timeout_reached()) {
             write_dbg(DBG_LEVEL_DEBUG, "spawn ngx_http_cp_registration_thread");
-            set_unregistered();
             reset_registration_timeout();
             res = ngx_cp_run_in_thread_timeout(
                 ngx_http_cp_registration_thread,
@@ -137,7 +115,6 @@ ngx_http_cp_req_header_handler_async(ngx_http_request_t *request)
                 ngx_max(registration_thread_timeout_msec, 200),
                 "ngx_http_cp_registration_thread"
             );
-            should_register_to_nano_service = 0;
         } else {
             res = 0;
             write_dbg(DBG_LEVEL_DEBUG, "Attachment registration has recently started, wait for timeout");
@@ -253,7 +230,7 @@ ngx_http_cp_req_header_handler_async(ngx_http_request_t *request)
     if (final_res == NGX_AGAIN) {
         write_dbg(
             DBG_LEVEL_DEBUG,
-            "Holding request until verdict received for session %d",
+            "Async processing in progress - HOLDING REQUEST until verdict received for session %d",
             session_data_p->session_id
         );
         ngx_cp_async_start_deadline_timer(ctx, ngx_max(req_header_thread_timeout_msec, async_header_timeout_ms));
@@ -281,4 +258,6 @@ ngx_http_cp_req_header_handler_async(ngx_http_request_t *request)
         );
         return final_res;
     }
+    
+    write_dbg(DBG_LEVEL_DEBUG, "=== ASYNC REQUEST HEADER HANDLER END ===");
 }

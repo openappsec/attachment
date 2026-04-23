@@ -23,7 +23,7 @@
 #include <stdbool.h>
 
 #include "nginx_attachment_util.h"
-#include "shmem_ipc_2.h"
+#include "shmem_ipc.h"
 #include "compression_utils.h"
 #include "nano_attachment_common.h"
 #include "ngx_cp_io.h"
@@ -52,8 +52,6 @@ struct timeval metric_timeout = {0,0};
 
 static const uint one_minute = 60;
 
-static const size_t MIN_POOL_SIZE = 4096; // Minimum suggested pool size by NGINX
-
 ///
 /// @brief Initates a session data pointer.
 /// @param[in] request NGINX request.
@@ -66,7 +64,7 @@ init_cp_session_data(ngx_http_request_t *request)
 {
     static uint32_t session_id = 1;
 
-    write_dbg(DBG_LEVEL_DEBUG, "Initializing new session data ctx for session ID %d", session_id);
+    write_dbg(DBG_LEVEL_TRACE, "Initializing new session data ctx for session ID %d", session_id);
 
     // session data is used to save verdict and session ID between the request and the response
     ngx_http_cp_session_data *session_data;
@@ -108,7 +106,7 @@ init_cp_session_data(ngx_http_request_t *request)
 /// @brief Finalize a session data, make sure all the memory is properly released.
 /// @param[in] session_data Pointer to the session structure to be finalized.
 ///
-void
+static void
 fini_cp_session_data(ngx_http_cp_session_data *session_data)
 {
     if (session_data->response_data.compression_stream != NULL) {
@@ -138,7 +136,7 @@ fini_cp_session_data(ngx_http_cp_session_data *session_data)
 /// \param request_pool Pool to use for overflow buffers if needed
 /// \return NGX_OK or NGX_ERROR
 ///
-ngx_int_t
+static ngx_int_t
 copy_compressed_to_original_buffers(
     ngx_chain_t *original_chain,
     ngx_chain_t *compressed_chain,
@@ -200,24 +198,6 @@ copy_compressed_to_original_buffers(
 }
 
 ///
-/// @brief Checks if the body chain is empty.
-/// \param body_chain The body chain to check.
-/// \return 1 if the body chain is empty, 0 otherwise.
-///
-static ngx_int_t
-is_body_chain_empty(ngx_chain_t *body_chain)
-{
-    ngx_chain_t *chain_iter;
-    for (chain_iter = body_chain; chain_iter != NULL; chain_iter = chain_iter->next) {
-        if (chain_iter->buf != NULL && chain_iter->buf->pos != NULL) {
-            return 0;
-        }
-    }
-
-    return 1;
-}
-
-///
 /// @brief Cleanup handler for session data (called when request pool is destroyed)
 /// \param data Pointer to session data
 ///
@@ -238,7 +218,7 @@ ngx_session_data_cleanup(void *data)
 /// \param pool Request pool
 /// \return NGX_OK or NGX_ERROR
 ///
-ngx_int_t
+static ngx_int_t
 init_cp_session_original_body(ngx_http_cp_session_data *session_data, ngx_pool_t *request_pool)
 {
     // Only initialize once (for first chunk only)
@@ -246,7 +226,7 @@ init_cp_session_original_body(ngx_http_cp_session_data *session_data, ngx_pool_t
         return NGX_OK;
     }
 
-    write_dbg(DBG_LEVEL_DEBUG, "Initializing original compressed body storage (first chunk only) for session ID %d", session_data->session_id);
+    write_dbg(DBG_LEVEL_TRACE, "Initializing original compressed body storage (first chunk only) for session ID %d", session_data->session_id);
 
     session_data->response_data.original_compressed_body = ngx_alloc_chain_link(request_pool);
 
@@ -314,21 +294,8 @@ ngx_int_t
 ngx_http_cp_hold_verdict(struct ngx_http_cp_event_thread_ctx_t *ctx)
 {
     ngx_http_cp_session_data *session_data_p = ctx->session_data_p;
-
-    ngx_uint_t retries = hold_verdict_retries;
-    ngx_uint_t polling_time = hold_verdict_polling_time;
-    if (ctx->filter_mode == ASYNC_FILTER) {
-        retries = res_body_thread_timeout_msec / 50;
-        polling_time = 50;
-    }
-
-    for (uint i = 0; i < retries; i++) {
-        if (ctx->filter_mode == ASYNC_FILTER) {
-            usleep(polling_time * 1000);
-        } else {
-            sleep(polling_time);
-        }
-
+    for (uint i = 0; i < hold_verdict_retries; i++) {
+        sleep(hold_verdict_polling_time);
         int res = ngx_cp_run_in_thread_timeout(
             ngx_http_cp_hold_verdict_thread,
             (void *)ctx,
@@ -342,9 +309,6 @@ ngx_http_cp_hold_verdict(struct ngx_http_cp_event_thread_ctx_t *ctx)
                 "ngx_http_cp_hold_verdict_thread failed at attempt number=%d",
                 i
             );
-            if (ctx->filter_mode == ASYNC_FILTER) {
-                break;
-            }
             continue;
         }
 
@@ -357,18 +321,8 @@ ngx_http_cp_hold_verdict(struct ngx_http_cp_event_thread_ctx_t *ctx)
             );
             return 1;
         }
-
-        if (ctx->filter_mode == ASYNC_FILTER && ctx->res == NGX_ERROR) {
-            write_dbg(
-                DBG_LEVEL_DEBUG,
-                "ngx_http_cp_hold_verdict_thread encountered error at attempt number=%d",
-                i
-            );
-            break;
-        }
     }
-
-    write_dbg(DBG_LEVEL_DEBUG, "Handling Failure with fail %s mode", fail_mode_hold_verdict == NGX_OK ? "open" : "close");
+    write_dbg(DBG_LEVEL_TRACE, "Handling Failure with fail %s mode", fail_mode_hold_verdict == NGX_OK ? "open" : "close");
     handle_inspection_failure(inspection_failure_weight, fail_mode_hold_verdict, session_data_p);
     session_data_p->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
     return 0;
@@ -463,7 +417,7 @@ ngx_http_cp_finalize_request_headers_hook(
     }
 
     if (final_res != NGX_OK) {
-        write_dbg(DBG_LEVEL_DEBUG, "Handling Failure with fail %s mode", fail_mode_verdict == NGX_OK ? "open" : "close");
+        write_dbg(DBG_LEVEL_TRACE, "Handling Failure with fail %s mode", fail_mode_verdict == NGX_OK ? "open" : "close");
         handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
         return fail_mode_verdict;
     }
@@ -562,7 +516,7 @@ ngx_http_cp_req_header_handler_sync(ngx_http_request_t *request)
     }
 
     if (is_ngx_cp_attachment_disabled(request)) {
-        write_dbg(DBG_LEVEL_DEBUG, "Ignoring inspection of request on a disabled location");
+        write_dbg(DBG_LEVEL_TRACE, "Ignoring inspection of request on a disabled location");
         return NGX_DECLINED;
     }
 
@@ -620,7 +574,6 @@ ngx_http_cp_req_header_handler_sync(ngx_http_request_t *request)
 
             return fail_mode_verdict == NGX_OK ? NGX_DECLINED : fail_mode_verdict;
         }
-
         write_dbg(
             DBG_LEVEL_DEBUG,
             "finished ngx_http_cp_registration_thread successfully. return=%d res=%d",
@@ -750,7 +703,7 @@ ngx_http_cp_req_body_filter_sync(ngx_http_request_t *request, ngx_chain_t *reque
         return NGX_HTTP_FORBIDDEN;
     }
     set_current_session_id(session_data_p->session_id);
-    write_dbg(DBG_LEVEL_DEBUG, "Request body filter handling session ID: %d", session_data_p->session_id);
+    write_dbg(DBG_LEVEL_TRACE, "Request body filter handling session ID: %d", session_data_p->session_id);
 
     if (is_in_transparent_mode()) {
         session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
@@ -761,12 +714,12 @@ ngx_http_cp_req_body_filter_sync(ngx_http_request_t *request, ngx_chain_t *reque
     }
 
     if (session_data_p->verdict == TRAFFIC_VERDICT_DROP) {
-        write_dbg(DBG_LEVEL_DEBUG, "Dropping already inspected request body");
+        write_dbg(DBG_LEVEL_TRACE, "Dropping already inspected request body");
         return NGX_HTTP_FORBIDDEN;
     }
 
     if (session_data_p->verdict != TRAFFIC_VERDICT_INSPECT) {
-        write_dbg(DBG_LEVEL_DEBUG, "skipping already inspected request body");
+        write_dbg(DBG_LEVEL_TRACE, "skipping already inspected request body");
         return ngx_http_next_request_body_filter(request, request_body_chain);
     }
 
@@ -924,7 +877,7 @@ ngx_http_cp_req_body_filter_sync(ngx_http_request_t *request, ngx_chain_t *reque
     }
 
     if (final_res != NGX_OK) {
-        write_dbg(DBG_LEVEL_DEBUG, "Handling Failure with fail %s mode", fail_mode_verdict == NGX_OK ? "open" : "close");
+        write_dbg(DBG_LEVEL_TRACE, "Handling Failure with fail %s mode", fail_mode_verdict == NGX_OK ? "open" : "close");
         handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
         if (fail_mode_verdict == NGX_OK) {
             return ngx_http_next_request_body_filter(request, request_body_chain);
@@ -933,7 +886,7 @@ ngx_http_cp_req_body_filter_sync(ngx_http_request_t *request, ngx_chain_t *reque
     }
 
     if (ctx.modifications != NULL) {
-        write_dbg(DBG_LEVEL_DEBUG, "Handling request headers modification");
+        write_dbg(DBG_LEVEL_TRACE, "Handling request headers modification");
         if (ngx_http_cp_header_modifier(
             &(request->headers_in.headers),
             ctx.modifications,
@@ -948,7 +901,7 @@ ngx_http_cp_req_body_filter_sync(ngx_http_request_t *request, ngx_chain_t *reque
             return NGX_ERROR;
         }
 
-        write_dbg(DBG_LEVEL_DEBUG, "Handling request body modification");
+        write_dbg(DBG_LEVEL_TRACE, "Handling request body modification");
         if (ngx_http_cp_body_modifier(request_body_chain, ctx.modifications, request->pool) != NGX_OK) {
             write_dbg(DBG_LEVEL_WARNING, "Failed to modify request body");
             handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
@@ -975,7 +928,7 @@ ngx_http_cp_req_body_filter_sync(ngx_http_request_t *request, ngx_chain_t *reque
 /// @return `NGX_OK` if the header was successfully removed or was already removed,
 ///         `NGX_ERROR` if there was an error allocating memory for the new header entry.
 ///
-ngx_int_t
+static ngx_int_t
 remove_server_header(ngx_http_request_t *r)
 {
     ngx_table_elt_t *header, **server_header_slot;
@@ -1001,7 +954,7 @@ remove_server_header(ngx_http_request_t *r)
 }
 
 ngx_int_t
-ngx_http_cp_res_header_filter_core(ngx_http_request_t *request, int filter_mode)
+ngx_http_cp_res_header_filter_sync(ngx_http_request_t *request)
 {
     struct ngx_http_cp_event_thread_ctx_t ctx;
     ngx_http_cp_session_data *session_data_p;
@@ -1018,18 +971,11 @@ ngx_http_cp_res_header_filter_core(ngx_http_request_t *request, int filter_mode)
 
     set_current_session_id(session_data_p->session_id);
 
-    write_dbg(DBG_LEVEL_DEBUG, "Response header filter [%s] handling session ID: %d", filter_mode == ASYNC_FILTER ? "ASYNC" : "SYNC", session_data_p->session_id);
+    write_dbg(DBG_LEVEL_DEBUG, "Response header filter [SYNC] handling session ID: %d", session_data_p->session_id);
 
-    if (filter_mode == ASYNC_FILTER) {
-        if (!session_data_p->initial_async_mode || (session_data_p->initial_async_mode && !is_async_mode_enabled)) {
-            write_dbg(DBG_LEVEL_WARNING, "Async mode detected in sync filter - passing through");
-            return ngx_http_next_response_header_filter(request);
-        }
-    } else {
-        if (session_data_p->initial_async_mode || (!session_data_p->initial_async_mode && is_ngx_cp_async_mode_enabled_for_request(request))) {
-            write_dbg(DBG_LEVEL_WARNING, "Async mode detected in sync filter - passing through");
-            return ngx_http_next_response_header_filter(request);
-        }
+    if (session_data_p->initial_async_mode || (!session_data_p->initial_async_mode && is_ngx_cp_async_mode_enabled_for_request(request))) {
+        write_dbg(DBG_LEVEL_WARNING, "Async mode detected in sync filter - passing through");
+        return ngx_http_next_response_header_filter(request);
     }
 
     if (!isIpcReady()) {
@@ -1045,11 +991,6 @@ ngx_http_cp_res_header_filter_core(ngx_http_request_t *request, int filter_mode)
         return NGX_ERROR;
     }
 
-    if (filter_mode == ASYNC_FILTER && session_data_p->async_processing_needed == 0) {
-        write_dbg(DBG_LEVEL_DEBUG, "Async processing not needed - passing through");
-        return ngx_http_next_response_header_filter(request);
-    }
-
     if (is_in_transparent_mode()) {
         session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
         if (fail_mode_verdict == NGX_OK) {
@@ -1059,7 +1000,7 @@ ngx_http_cp_res_header_filter_core(ngx_http_request_t *request, int filter_mode)
     }
 
     if (session_data_p->verdict != TRAFFIC_VERDICT_INSPECT) {
-        write_dbg(DBG_LEVEL_DEBUG, "Skipping already inspected response header");
+        write_dbg(DBG_LEVEL_TRACE, "Skipping already inspected response header");
         return ngx_http_next_response_header_filter(request);
     }
 
@@ -1071,7 +1012,7 @@ ngx_http_cp_res_header_filter_core(ngx_http_request_t *request, int filter_mode)
         return ngx_http_next_response_header_filter(request);
     }
 
-    if (filter_mode == SYNC_FILTER && !session_data_p->was_request_fully_inspected) {
+    if (!session_data_p->was_request_fully_inspected) {
         write_dbg(DBG_LEVEL_DEBUG, "Skipping response header of request that was not fully inspected");
 
         handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
@@ -1081,7 +1022,6 @@ ngx_http_cp_res_header_filter_core(ngx_http_request_t *request, int filter_mode)
     }
 
     init_thread_ctx(&ctx, request, session_data_p, NULL);
-    ctx.filter_mode = (filter_mode == ASYNC_FILTER) ? ASYNC_FILTER : SYNC_FILTER;
 
     write_dbg(DBG_LEVEL_DEBUG, "spawn ngx_http_cp_res_header_filter");
     if (!ngx_cp_run_in_thread_timeout(
@@ -1090,6 +1030,7 @@ ngx_http_cp_res_header_filter_core(ngx_http_request_t *request, int filter_mode)
         res_header_thread_timeout_msec,
         "ngx_http_cp_res_header_filter_thread")
     ) {
+        // failed to execute thread task, or it timed out
         session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
         write_dbg(
             DBG_LEVEL_DEBUG,
@@ -1134,7 +1075,7 @@ ngx_http_cp_res_header_filter_core(ngx_http_request_t *request, int filter_mode)
     }
 
     if (ctx.modifications != NULL) {
-        write_dbg(DBG_LEVEL_DEBUG, "Handling response headers modification");
+        write_dbg(DBG_LEVEL_TRACE, "Handling response headers modification");
         if (ngx_http_cp_header_modifier(&(request->headers_out.headers), ctx.modifications, request, 1) != NGX_OK) {
             write_dbg(DBG_LEVEL_WARNING, "Failed to modify request headers");
             handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
@@ -1150,13 +1091,7 @@ ngx_http_cp_res_header_filter_core(ngx_http_request_t *request, int filter_mode)
 }
 
 ngx_int_t
-ngx_http_cp_res_header_filter_sync(ngx_http_request_t *request)
-{
-    return ngx_http_cp_res_header_filter_core(request, SYNC_FILTER);
-}
-
-ngx_int_t
-ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_chain, int filter_mode)
+ngx_http_cp_res_body_filter_sync(ngx_http_request_t *request, ngx_chain_t *body_chain)
 {
     struct ngx_http_cp_event_thread_ctx_t ctx;
     ngx_http_cp_session_data *session_data_p;
@@ -1172,20 +1107,13 @@ ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_
     if (session_data_p == NULL) return ngx_http_next_response_body_filter(request, body_chain);
 
     set_current_session_id(session_data_p->session_id);
-    write_dbg(DBG_LEVEL_DEBUG, "Response body filter [%s] handling response ID: %d", filter_mode == ASYNC_FILTER ? "ASYNC" : "SYNC", session_data_p->session_id);
+    write_dbg(DBG_LEVEL_DEBUG, "Response body filter [SYNC] handling response ID: %d", session_data_p->session_id);
     
     print_buffer_chain(body_chain, "incoming", 32, DBG_LEVEL_TRACE);
 
-    if (filter_mode == ASYNC_FILTER) {
-        if (!session_data_p->initial_async_mode || (session_data_p->initial_async_mode && !is_async_mode_enabled)) {
-            write_dbg(DBG_LEVEL_WARNING, "Async mode detected in sync filter - passing through");
-            return ngx_http_next_response_body_filter(request, body_chain);
-        }
-    } else {
-        if (session_data_p->initial_async_mode || (!session_data_p->initial_async_mode && is_ngx_cp_async_mode_enabled_for_request(request))) {
-            write_dbg(DBG_LEVEL_WARNING, "Async mode detected in sync filter - passing through");
-            return ngx_http_next_response_body_filter(request, body_chain);
-        }
+    if (session_data_p->initial_async_mode || (!session_data_p->initial_async_mode && is_ngx_cp_async_mode_enabled_for_request(request))) {
+        write_dbg(DBG_LEVEL_WARNING, "Async mode detected in sync filter - passing through");
+        return ngx_http_next_response_body_filter(request, body_chain);
     }
 
     if (!isIpcReady()) {
@@ -1202,10 +1130,6 @@ ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_
         return NGX_ERROR;
     }
 
-    if (filter_mode == ASYNC_FILTER && session_data_p->async_processing_needed == 0) {
-        write_dbg(DBG_LEVEL_DEBUG, "Async processing not needed - passing through");
-        return ngx_http_next_response_body_filter(request, body_chain);
-    }
 
     if (session_data_p->response_data.response_data_status != NGX_OK) {
         write_dbg(DBG_LEVEL_WARNING, "skipping session with corrupted compression");
@@ -1231,11 +1155,11 @@ ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_
         (
             session_data_p->verdict != TRAFFIC_VERDICT_ACCEPT ||
             session_data_p->response_data.new_compression_type == NO_COMPRESSION ||
-            (!is_brotli_inspection_enabled && session_data_p->response_data.new_compression_type == BROTLI) ||
+            (is_brotli_inspection_enabled && session_data_p->response_data.new_compression_type == BROTLI) ||
             session_data_p->response_data.num_body_chunk == 0
         )
     ) {
-        write_dbg(DBG_LEVEL_DEBUG, "skipping already inspected session");
+        write_dbg(DBG_LEVEL_TRACE, "skipping already inspected session");
         if (session_data_p->verdict == TRAFFIC_VERDICT_DROP) {
             request->keepalive = 0;
         }
@@ -1266,7 +1190,6 @@ ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_
     // Save original chain before any processing (we'll copy compressed data back to these buffers)
     ngx_chain_t *original_nginx_chain = body_chain;
     if (
-        body_chain->buf != NULL &&
         body_chain->buf->pos != NULL &&
         session_data_p->response_data.new_compression_type != NO_COMPRESSION &&
         (
@@ -1305,21 +1228,7 @@ ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_
 
         // Get or create decompression pool for temporary decompressed data
         if (session_data_p->response_data.decompression_pool == NULL) {
-            if (request->pool == NULL || request->pool->log == NULL) {
-                handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
-                fini_cp_session_data(session_data_p);
-                session_data_p->response_data.response_data_status = NGX_ERROR;
-                return fail_mode_verdict == NGX_OK ?
-                    ngx_http_next_response_body_filter(request, body_chain) :
-                    ngx_http_filter_finalize_request(request, &ngx_http_cp_attachment_module, NGX_HTTP_FORBIDDEN);
-            }
-            
-            // Enforce minimum pool size to avoid issues with ngx_create_pool
-            size_t actual_decomp_pool_size = decompression_pool_size < MIN_POOL_SIZE
-                ? MIN_POOL_SIZE
-                : decompression_pool_size;
-
-            session_data_p->response_data.decompression_pool = ngx_create_pool(actual_decomp_pool_size, request->pool->log);
+            session_data_p->response_data.decompression_pool = ngx_create_pool(decompression_pool_size, request->pool->log);
             if (session_data_p->response_data.decompression_pool == NULL) {
                 write_dbg(DBG_LEVEL_WARNING, "Failed to create decompression pool for session ID %d", session_data_p->session_id);
                 handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
@@ -1332,24 +1241,14 @@ ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_
             write_dbg(DBG_LEVEL_TRACE, "Created decompression pool for session ID %d", session_data_p->session_id);
         }
 
-        // For ACCEPT on chunk > 1, pass NULL so compression_chain_filter does not touch
-        // original_compressed_body — the nano service already gave its verdict and does not
-        // need to re-inspect, so there is no point updating the saved compressed pointer.
-        // For all other verdicts (INSPECT/INJECT), pass the pointer so it is refreshed with
-        // the current chunk's compressed data on every call.
-        ngx_chain_t **ocb_param =
-            (session_data_p->verdict == TRAFFIC_VERDICT_ACCEPT &&
-             session_data_p->response_data.num_body_chunk > 1)
-                ? NULL
-                : &session_data_p->response_data.original_compressed_body;
-
+        // Use decompression pool for decompressed data (will be destroyed after re-compression)
         compression_result = decompress_body(
                 session_data_p->response_data.decompression_stream,
                 RESPONSE_BODY,
                 &is_last_decompressed_part,
                 &body_chain,
-                ocb_param,
-                session_data_p->response_data.decompression_pool
+                &session_data_p->response_data.original_compressed_body,
+                session_data_p->response_data.decompression_pool  // Destroyed after re-compression
         );
 
         if (compression_result != NGX_OK) {
@@ -1361,16 +1260,6 @@ ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_
                 ngx_http_next_response_body_filter(request, body_chain) :
                 ngx_http_filter_finalize_request(request, &ngx_http_cp_attachment_module, NGX_HTTP_FORBIDDEN);
         }
-    } else if (
-        original_nginx_chain->buf != NULL &&
-        original_nginx_chain->buf->last_buf &&
-        session_data_p->response_data.original_compressed_body != NULL
-    ) {
-        // The decompression block above was skipped (empty last_buf=1 terminator buffer).
-        // Reset original_compressed_body->buf so the next chain's first buffer is captured
-        // fresh — without this, the stale pointer from the previous chunk would be sent
-        // to the nano service for the next chain.
-        session_data_p->response_data.original_compressed_body->buf = NULL;
     }
 
     if (session_data_p->verdict == TRAFFIC_VERDICT_ACCEPT) {
@@ -1384,21 +1273,7 @@ ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_
                       session_data_p->session_id, session_data_p->response_data.num_body_chunk);
             ngx_reset_pool(session_data_p->response_data.recompression_pool);
         } else {
-            if (request->pool == NULL || request->pool->log == NULL) {
-                handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
-                fini_cp_session_data(session_data_p);
-                session_data_p->response_data.response_data_status = NGX_ERROR;
-                return fail_mode_verdict == NGX_OK ?
-                    ngx_http_next_response_body_filter(request, body_chain) :
-                    ngx_http_filter_finalize_request(request, &ngx_http_cp_attachment_module, NGX_HTTP_FORBIDDEN);
-            }
-            
-            // Enforce minimum pool size to avoid issues with ngx_create_pool
-            size_t actual_pool_size = recompression_pool_size < MIN_POOL_SIZE
-                ? MIN_POOL_SIZE
-                : recompression_pool_size;
-            
-            session_data_p->response_data.recompression_pool = ngx_create_pool(actual_pool_size, request->pool->log);
+            session_data_p->response_data.recompression_pool = ngx_create_pool(recompression_pool_size, request->pool->log);
             if (session_data_p->response_data.recompression_pool == NULL) {
                 write_dbg(DBG_LEVEL_WARNING, "Failed to create recompression pool for session ID %d", session_data_p->session_id);
                 handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
@@ -1474,7 +1349,7 @@ ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_
         return ngx_http_filter_finalize_request(request, &ngx_http_cp_attachment_module, NGX_HTTP_FORBIDDEN);
     }
 
-    if (filter_mode == SYNC_FILTER && !session_data_p->was_request_fully_inspected) {
+    if (!session_data_p->was_request_fully_inspected) {
         write_dbg(DBG_LEVEL_DEBUG, "Skipping response body of request that was not fully inspected");
 
         handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
@@ -1488,12 +1363,10 @@ ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_
         &ctx,
         request,
         session_data_p,
-        (session_data_p->response_data.original_compressed_body == NULL ||
-         session_data_p->response_data.original_compressed_body->buf == NULL)
+        session_data_p->response_data.original_compressed_body == NULL
             ? body_chain
             : session_data_p->response_data.original_compressed_body
     );
-    ctx.filter_mode = (filter_mode == ASYNC_FILTER) ? ASYNC_FILTER : SYNC_FILTER;
 
     write_dbg(DBG_LEVEL_DEBUG, "spawn ngx_http_cp_res_body_filter_thread");
     // Open threads while unprocessed chain elements still exist, up to num of elements in the chain iterations
@@ -1513,10 +1386,6 @@ ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_
         ) {
             // failed to execute thread task, or it timed out
             session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
-            if (filter_mode == ASYNC_FILTER) {
-                request->keepalive = 0;
-                fini_cp_session_data(session_data_p);
-            }
             write_dbg(
                 DBG_LEVEL_DEBUG,
                 "res_body_filter thread failed, returning default fail mode verdict. Session id: %d, verdict: %s",
@@ -1602,7 +1471,7 @@ ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_
             (session_data_p->response_data.new_compression_type == BROTLI && is_brotli_inspection_enabled)
         )
     ) {
-        write_dbg(DBG_LEVEL_DEBUG, "Handling response body modification");
+        write_dbg(DBG_LEVEL_TRACE, "Handling response body modification");
         if (ngx_http_cp_body_modifier(body_chain, ctx.modifications, request->pool) != NGX_OK) {
             write_dbg(DBG_LEVEL_WARNING, "Failed to modify response body");
 
@@ -1641,27 +1510,22 @@ ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_
             session_data_p->response_data.compression_stream = initCompressionStream();
         }
 
-        if (is_body_chain_empty(body_chain)) {
-            write_dbg(DBG_LEVEL_DEBUG, "Decompressed response body is empty (size 0)");
-            copy_chain_buffers(body_chain, session_data_p->response_data.original_compressed_body);
-        } else {
-            compression_result = compress_body(
-                session_data_p->response_data.compression_stream,
-                session_data_p->response_data.new_compression_type,
-                RESPONSE_BODY,
-                is_last_decompressed_part,
-                &body_chain,
-                NULL,
-                request->pool
-            );
-            if (compression_result != NGX_OK) {
-                handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
-                session_data_p->response_data.response_data_status = NGX_ERROR;
-                fini_cp_session_data(session_data_p);
-                return fail_mode_verdict == NGX_OK ?
-                    ngx_http_next_response_body_filter(request, body_chain) :
-                    ngx_http_filter_finalize_request(request, &ngx_http_cp_attachment_module, NGX_HTTP_FORBIDDEN);
-            }
+        compression_result = compress_body(
+            session_data_p->response_data.compression_stream,
+            session_data_p->response_data.new_compression_type,
+            RESPONSE_BODY,
+            is_last_decompressed_part,
+            &body_chain,
+            NULL,
+            request->pool
+        );
+        if (compression_result != NGX_OK) {
+            handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
+            session_data_p->response_data.response_data_status = NGX_ERROR;
+            fini_cp_session_data(session_data_p);
+            return fail_mode_verdict == NGX_OK ?
+                ngx_http_next_response_body_filter(request, body_chain) :
+                ngx_http_filter_finalize_request(request, &ngx_http_cp_attachment_module, NGX_HTTP_FORBIDDEN);
         }
     }
 
@@ -1688,12 +1552,6 @@ ngx_http_cp_res_body_filter_core(ngx_http_request_t *request, ngx_chain_t *body_
     return ngx_http_next_response_body_filter(request, body_chain);
 }
 
-ngx_int_t
-ngx_http_cp_res_body_filter_sync(ngx_http_request_t *request, ngx_chain_t *body_chain)
-{
-    return ngx_http_cp_res_body_filter_core(request, body_chain, SYNC_FILTER);
-}
-
 ///
 /// @brief Dynamic wrapper for response header filter that chooses sync or async based on configuration.
 /// @details Branches internally to call either the synchronous or asynchronous implementation
@@ -1709,7 +1567,7 @@ ngx_http_cp_res_header_filter(ngx_http_request_t *request)
 {
 #ifdef NGINX_ASYNC_SUPPORTED
     if (is_ngx_cp_async_mode_enabled_for_request(request)) {
-        return ngx_http_cp_res_header_filter_async(request);
+        return ngx_http_next_response_header_filter(request);
     } else {
         return ngx_http_cp_res_header_filter_sync(request);
     }
@@ -1736,7 +1594,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
     ngx_int_t res;
 #ifdef NGINX_ASYNC_SUPPORTED
     if (is_ngx_cp_async_mode_enabled_for_request(request)) {
-        res = ngx_http_cp_res_body_filter_async(request, body_chain);
+        res = ngx_http_next_response_body_filter(request, body_chain);
     } else {
         res = ngx_http_cp_res_body_filter_sync(request, body_chain);
     }

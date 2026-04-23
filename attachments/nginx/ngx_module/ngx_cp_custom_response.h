@@ -84,7 +84,7 @@ ngx_http_cp_file_response_sender(
 ngx_int_t ngx_http_cp_finalize_rejected_request(ngx_http_request_t *request, int is_response_phase);
 
 ///
-/// @brief Finalizing a Custom Response request with dynamic headers.
+/// @brief Finalizing a Custom Response request with JSON success response.
 /// @param[in, out] request NGINX request.
 /// @return ngx_int_t
 ///      - #NGX_HTTP_CLOSE

@@ -95,7 +95,6 @@ InitNanoAttachment(uint8_t attachment_type, int worker_id, int num_of_workers, i
     attachment->inspection_mode = NON_BLOCKING_THREAD;
     attachment->num_of_nano_ipc_elements = 200;
     attachment->keep_alive_interval_msec = DEFAULT_KEEP_ALIVE_INTERVAL_MSEC;
-    attachment->paired_affinity_enabled = 0;
 
     if (nano_attachment_init_process(attachment) != NANO_OK) {
         write_dbg(attachment, 0, DBG_LEVEL_WARNING, "Could not initialize nano attachment");
@@ -549,46 +548,6 @@ GetRedirectPage(NanoAttachment *attachment, HttpSessionData *session_data, Attac
     };
 }
 
-CustomResponseWithHeaders *
-GetCustomResponseWithHeaders(
-    NanoAttachment *attachment,
-    HttpSessionData *session_data,
-    AttachmentVerdictResponse *response
-)
-{
-    WebResponseData *web_response_data = response->web_response_data;
-
-    if (web_response_data == NULL) {
-        write_dbg(
-            attachment,
-            session_data->session_id,
-            DBG_LEVEL_WARNING,
-            "Trying to get custom response with headers but no response object"
-        );
-        return NULL;
-    }
-
-    if (web_response_data->web_response_type != CUSTOM_RESPONSE_WITH_HEADERS) {
-        write_dbg(
-            attachment,
-            session_data->session_id,
-            DBG_LEVEL_WARNING,
-            "Trying to get custom response with headers but response type is %d",
-            web_response_data->web_response_type
-        );
-        return NULL;
-    }
-
-    write_dbg(
-        attachment,
-        session_data->session_id,
-        DBG_LEVEL_TRACE,
-        "Getting custom response with headers"
-    );
-
-    return (CustomResponseWithHeaders *) web_response_data->data;
-}
-
 void
 FreeAttachmentResponseContent(
     NanoAttachment *attachment,
@@ -623,31 +582,7 @@ FreeAttachmentResponseContent(
             "Freeing custom web response data"
         );
 
-        // Free custom response with headers if applicable
-        if (response->web_response_data->web_response_type == CUSTOM_RESPONSE_WITH_HEADERS) {
-            CustomResponseWithHeaders *custom_resp =
-                (CustomResponseWithHeaders *)response->web_response_data->data;
-            if (custom_resp != NULL) {
-                uint8_t i;
-                if (custom_resp->headers != NULL) {
-                    for (i = 0; i < custom_resp->headers_count; i++) {
-                        if (custom_resp->headers[i].key != NULL) {
-                            free(custom_resp->headers[i].key);
-                        }
-                        if (custom_resp->headers[i].value != NULL) {
-                            free(custom_resp->headers[i].value);
-                        }
-                    }
-                    free(custom_resp->headers);
-                }
-                if (custom_resp->body != NULL) {
-                    free(custom_resp->body);
-                }
-                free(custom_resp);
-            }
-        } else {
-            free(response->web_response_data->data);
-        }
+        free(response->web_response_data->data);
         free(response->web_response_data);
         response->web_response_data = NULL;
     }
@@ -689,3 +624,22 @@ freeCompressedBody(NanoAttachment *attachment, HttpSessionData *session_data, Na
 {
     nano_free_compressed_body(attachment, bodies, session_data);
 }
+
+uint32_t
+GetRequestProcessingTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 3000;
+    }
+    return attachment->req_max_proccessing_ms_time;
+}
+
+uint32_t
+GetResponseProcessingTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 3000;
+    }
+    return attachment->res_max_proccessing_ms_time;
+}
+

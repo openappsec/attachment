@@ -187,45 +187,8 @@ func (f *filter) handleCustomResponse(verdict_response *C.AttachmentVerdictRespo
 	return f.sendLocalReplyInternal(307, "", headers)
 }
 
-func (f *filter) handleCustomResponseWithHeaders(verdict_response *C.AttachmentVerdictResponse) api.StatusType {
-	custom_response := C.GetCustomResponseWithHeaders(
-		(*C.NanoAttachment)(f.cp_attachment),
-		(*C.HttpSessionData)(f.session_data),
-		(*C.AttachmentVerdictResponse)(verdict_response))
-
-	if custom_response == nil {
-		api.LogErrorf("Failed to get custom response with headers")
-		return f.sendLocalReplyInternal(500, "Internal Server Error", nil)
-	}
-
-	headers := make(map[string][]string)
-	if custom_response.headers_count > 0 && custom_response.headers != nil {
-		headers_array := (*[1 << 30]C.CustomResponseHeaderData)(unsafe.Pointer(custom_response.headers))[:custom_response.headers_count:custom_response.headers_count]
-		for i := 0; i < int(custom_response.headers_count); i++ {
-			header := headers_array[i]
-			key_slice := C.GoStringN(header.key, C.int(header.key_size))
-			value_slice := C.GoStringN(header.value, C.int(header.value_size))
-			headers[key_slice] = []string{value_slice}
-			api.LogInfof("Adding custom header: %s = %s", key_slice, value_slice)
-		}
-	}
-
-	body := ""
-	if custom_response.body_size > 0 && custom_response.body != nil {
-		body = C.GoStringN(custom_response.body, C.int(custom_response.body_size))
-	}
-
-	return f.sendLocalReplyInternal(int(custom_response.response_code), body, headers)
-}
-
 func (f *filter) finalizeRequest(verdict_response *C.AttachmentVerdictResponse) api.StatusType {
 	if C.AttachmentVerdict(verdict_response.verdict) == C.ATTACHMENT_VERDICT_DROP {
-		if verdict_response.web_response_data != nil {
-			response_type := verdict_response.web_response_data.web_response_type
-			if response_type == C.CUSTOM_RESPONSE_WITH_HEADERS {
-				return f.handleCustomResponseWithHeaders(verdict_response)
-			}
-		}
 		return f.handleCustomResponse(verdict_response)
 	}
 

@@ -47,8 +47,6 @@ run_installation()
     cp_exec "cp lib/libosrc_nginx_attachment_util.so /usr/lib64/libosrc_nginx_attachment_util.so"
     cp_exec "cp lib/libosrc_shmem_ipc.so /usr/lib/libosrc_shmem_ipc.so"
     cp_exec "cp lib/libosrc_shmem_ipc.so /usr/lib64/libosrc_shmem_ipc.so"
-    cp_exec "cp lib/libshmem_ipc_2.so /usr/lib/libshmem_ipc_2.so"
-    cp_exec "cp lib/libshmem_ipc_2.so /usr/lib64/libshmem_ipc_2.so"
     cp_exec "mkdir -p /usr/lib/nginx/modules"
     cp_exec "mkdir -p /usr/lib64/nginx/modules"
     cp_exec "cp lib/libngx_module.so /usr/lib/nginx/modules/ngx_cp_attachment_module.so"

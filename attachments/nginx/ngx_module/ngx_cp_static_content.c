@@ -80,7 +80,7 @@ get_static_resources(ngx_list_t *static_resources, ngx_pool_t *memory_pool)
             );
             return -1;
         }
-        write_dbg(DBG_LEVEL_DEBUG, "Found static resource: %s", current_entry->d_name);
+        write_dbg(DBG_LEVEL_TRACE, "Found static resource: %s", current_entry->d_name);
 
         // Load the read data from the file onto the current resource element.
         current_resource->len = strlen(current_entry->d_name);
@@ -139,7 +139,7 @@ init_static_web_resources_hash_table(
     }
 
     is_static_resources_table_initialized_var = 1;
-    write_dbg(DBG_LEVEL_DEBUG, "Successfully initialized the static resources table");
+    write_dbg(DBG_LEVEL_TRACE, "Successfully initialized the static resources table");
 
     return NGX_OK;
 }
@@ -242,7 +242,7 @@ is_static_resource_request(ngx_str_t *static_resource_name)
     key = ngx_hash_key(static_resource_name->data, static_resource_name->len);
     data = ngx_hash_find(&static_resources_hash_table, key, static_resource_name->data, static_resource_name->len);
     if (data == NULL) {
-        write_dbg(DBG_LEVEL_DEBUG, "Requested resource %s is not a static resource", static_resource_name->data);
+        write_dbg(DBG_LEVEL_TRACE, "Requested resource %s is not a static resource", static_resource_name->data);
         return 0;
     }
 

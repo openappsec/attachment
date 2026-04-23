@@ -29,9 +29,7 @@
 #include "nginx_attachment_util.h"
 #include "ngx_cp_initializer.h"
 #include "nano_attachment_common.h"
-#include "shmem_ipc_2.h"
 #include "ngx_cp_metric.h"
-#include "ngx_cp_io.h"
 #ifdef NGINX_ASYNC_SUPPORTED
 #include "async/ngx_cp_async_core.h"
 #endif
@@ -75,9 +73,8 @@ static const char web_response_page_format[] =
 
 
 static int is_ctx_match = 1;
-uint32_t cur_session_id = 0; ///< Current session ID.
-
-extern LoggingData logging_data;
+static int dbg_level = DBG_LEVEL_INFO; ///< Default debug level.
+static uint32_t cur_session_id = 0; ///< Current session ID.
 
 static uint pid = 0;
 
@@ -109,8 +106,7 @@ ngx_uint_t res_header_thread_timeout_msec = 100; ///< Response header processing
 ngx_uint_t res_body_thread_timeout_msec = 150; ///< Response body processing timeout in milliseconds.
 ngx_uint_t waiting_for_verdict_thread_timeout_msec = 150; ///< Wait thread processing timeout in milliseconds.
 NanoHttpInspectionMode inspection_mode = NON_BLOCKING_THREAD; ///< Default inspection mode.
-// The maximum is 2048, but we limit it to 2000 to avoid Alpine memory page layout issues (SIGBUS)
-ngx_uint_t num_of_nginx_ipc_elements = 2000; ///< Number of NGINX IPC elements
+ngx_uint_t num_of_nginx_ipc_elements = 2048; ///< Number of NGINX IPC elements.
 ngx_msec_t keep_alive_interval_msec = DEFAULT_KEEP_ALIVE_INTERVAL_MSEC;
 ngx_uint_t min_retries_for_verdict = 3; ///< Minimum number of retries for verdict.
 ngx_uint_t max_retries_for_verdict = 15; ///< Maximum number of retries for verdict.
@@ -124,10 +120,10 @@ ngx_uint_t recompression_pool_size = 16384; ///< Recompression pool size in byte
 ngx_uint_t is_async_mode_enabled = 0; ///< Async mode enabled flag.
 ngx_uint_t is_brotli_inspection_enabled = 0; ///< Brotli inspection enabled flag.
 
-// Custom response support with dynamic headers
-static CustomResponseHeader *custom_response_headers = NULL;
-static ngx_str_t custom_response_body = {0, NULL};
-static ngx_uint_t custom_response_code = NGX_HTTP_FORBIDDEN;
+// JSON response support
+static ngx_str_t json_response_body = {0, NULL};
+static ngx_uint_t json_response_code = NGX_HTTP_FORBIDDEN;
+static AttachmentContentType json_response_content_type = CONTENT_TYPE_APPLICATION_JSON;
 
 static struct timeval
 getCurrTimeFast()
@@ -576,7 +572,7 @@ set_custom_response_block_page(const ngx_str_t *title, const ngx_str_t *body, co
 void
 set_redirect_response(const ngx_str_t *location, const ngx_str_t *uuid, uint add_event_id_to_header)
 {
-    write_dbg(DBG_LEVEL_DEBUG, "Setting Redirect response");
+    write_dbg(DBG_LEVEL_TRACE, "Setting Redirect response");
 
     web_triggers_response_code = NGX_HTTP_TEMPORARY_REDIRECT;
 
@@ -699,74 +695,50 @@ get_response_code(void)
 }
 
 void
-free_custom_response_headers(void)
-{
-    CustomResponseHeader *current = custom_response_headers;
-    CustomResponseHeader *next;
-    
-    while (current != NULL) {
-        next = current->next;
-        if (current->key.data && memory_pool) {
-            ngx_pfree(memory_pool, current->key.data);
-        }
-        if (current->value.data && memory_pool) {
-            ngx_pfree(memory_pool, current->value.data);
-        }
-        if (memory_pool) {
-            ngx_pfree(memory_pool, current);
-        }
-        current = next;
-    }
-    custom_response_headers = NULL;
-}
-
-void
-set_custom_response(const ngx_str_t *body, ngx_uint_t response_code, CustomResponseHeader *headers)
+set_custom_response_json(const ngx_str_t *body, ngx_uint_t response_code, AttachmentContentType content_type)
 {
     write_dbg(
-        DBG_LEVEL_DEBUG,
-        "Setting custom response: response_code = %d, body size = %d",
+        DBG_LEVEL_INFO,
+        "Setting JSON response: response_code = %d, body size = %d, uuid size = %d",
         response_code,
         body->len
     );
     
-    custom_response_code = response_code;
+    json_response_code = response_code;
+    json_response_content_type = content_type;
     
-    free_custom_response_headers();
-    custom_response_headers = headers;
-    
-    if (custom_response_body.data && memory_pool) {
-        ngx_pfree(memory_pool, custom_response_body.data);
-        custom_response_body.data = NULL;
-        custom_response_body.len = 0;
+    if (json_response_body.data && memory_pool) {
+        ngx_pfree(memory_pool, json_response_body.data);
+        json_response_body.data = NULL;
+        json_response_body.len = 0;
     }
     
     if (memory_pool && body->len > 0) {
-        custom_response_body.len = body->len;
-        custom_response_body.data = ngx_pcalloc(memory_pool, body->len + 1);
-        if (custom_response_body.data) {
-            ngx_memcpy(custom_response_body.data, body->data, body->len);
-            custom_response_body.data[body->len] = 0;
+        json_response_body.len = body->len;
+        json_response_body.data = ngx_pcalloc(memory_pool, body->len + 1);
+        if (json_response_body.data) {
+            ngx_memcpy(json_response_body.data, body->data, body->len);
+            json_response_body.data[body->len] = 0;
         }
     }
 }
 
 ngx_int_t
-get_custom_response_page(ngx_http_request_t *request, ngx_chain_t (*out_chain)[1])
+get_response_page_json(ngx_http_request_t *request, ngx_chain_t (*out_chain)[1])
 {
     ngx_buf_t *buf = ngx_calloc_buf(request->pool);
     if (buf == NULL) {
-        write_dbg(DBG_LEVEL_WARNING, "Failed to allocate new buffer element for custom response");
+        write_dbg(DBG_LEVEL_WARNING, "Failed to allocate new buffer element for JSON response");
         return NGX_ERROR_ERR;
     }
     
-    if (custom_response_body.data == NULL || custom_response_body.len == 0) {
-        write_dbg(DBG_LEVEL_INFO, "Custom response body is empty or not set");
+    if (json_response_body.data == NULL || json_response_body.len == 0) {
+        write_dbg(DBG_LEVEL_INFO, "JSON response body is empty or not set");
         return NGX_ERROR_ERR;
     }
     
-    buf->pos = custom_response_body.data;
-    buf->last = buf->pos + custom_response_body.len;
+    buf->pos = json_response_body.data;
+    buf->last = buf->pos + json_response_body.len;
     buf->memory = 1;
     buf->last_buf = 1;
     buf->last_in_chain = 1;
@@ -778,21 +750,21 @@ get_custom_response_page(ngx_http_request_t *request, ngx_chain_t (*out_chain)[1
 }
 
 ngx_uint_t
-get_custom_response_page_length(void)
+get_response_page_length_json(void)
 {
-    return custom_response_body.len;
+    return json_response_body.len;
 }
 
 ngx_uint_t
-get_custom_response_code(void)
+get_response_code_json(void)
 {
-    return custom_response_code;
+    return json_response_code;
 }
 
-CustomResponseHeader *
-get_custom_response_headers(void)
+AttachmentContentType
+get_response_content_type(void)
 {
-    return custom_response_headers;
+    return json_response_content_type;
 }
 
 const char *
@@ -864,13 +836,7 @@ get_periodic_sessions_limit_info()
 void
 set_cp_ngx_attachment_debug_level(int _dbg_level)
 {
-    logging_data.dbg_level = _dbg_level;
-}
-
-int
-get_cp_ngx_attachment_debug_level(void)
-{
-    return logging_data.dbg_level;
+    dbg_level = _dbg_level;
 }
 
 void
@@ -880,11 +846,9 @@ set_current_session_id(uint32_t _cur_session_id)
 }
 
 void ngx_cdecl
-write_dbg_impl(const LoggingData *logging_data, uint32_t session_id, int _dbg_level, const char *func, const char *file, int line_num, const char *fmt, ...)
+write_dbg_impl(int _dbg_level, const char *func, const char *file, int line_num, const char *fmt, ...)
 {
-    if (logging_data == NULL) return;
-
-    if (_dbg_level < logging_data->dbg_level || !is_ctx_match) return;
+    if (_dbg_level < dbg_level || !is_ctx_match) return;
 
     char debug_str[NGX_MAX_ERROR_STR] = {0};
     char session_id_str[32] = {0};
@@ -907,8 +871,8 @@ write_dbg_impl(const LoggingData *logging_data, uint32_t session_id, int _dbg_le
 
     if (!pid) pid = getpid();
 
-    if (session_id > 0) {
-        snprintf(session_id_str, sizeof(session_id_str) - 1, "<session id %u> ", session_id);
+    if (cur_session_id > 0) {
+        snprintf(session_id_str, sizeof(session_id_str) - 1, "<session id %u> ", cur_session_id);
     }
     // Prints the debug given all the data and a formatter.
     snprintf(
@@ -929,47 +893,7 @@ write_dbg_impl(const LoggingData *logging_data, uint32_t session_id, int _dbg_le
     vsnprintf(debug_str, sizeof(debug_str) - 1, fmt, args);
 
     va_end(args);
-    dprintf(logging_data->fd, "%s%s\n", str_uid, debug_str);
-}
-
-///
-/// @brief Wrapper function to adapt write_dbg_impl to shmem_ipc_2 debug function signature
-/// @param[in] loggin_data Logging data (unused, we use global logging_data)
-/// @param[in] worker_id Worker ID (unused, we use ngx_worker)
-/// @param[in] is_error Whether this is an error message
-/// @param[in] func Function name
-/// @param[in] file File name
-/// @param[in] line_num Line number
-/// @param[in] fmt Format string
-/// @param[in] ... Variable arguments
-///
-void
-shmem_ipc_2_write_dbg_wrapper(
-    const LoggingData *loggin_data,
-    uint32_t worker_id,
-    int is_error,
-    const char *func,
-    const char *file,
-    int line_num,
-    const char *fmt,
-    ...
-)
-{
-    // Mark unused parameters to suppress compiler warnings
-    (void)loggin_data;
-    (void)worker_id;
-    
-    // Convert is_error to dbg_level (0 = trace, 1 = warning/error)
-    int dbg_level = is_error ? DBG_LEVEL_WARNING : DBG_LEVEL_TRACE;
-    
-    // Format the message first
-    va_list args;
-    va_start(args, fmt);
-    char formatted_msg[2048];
-    vsnprintf(formatted_msg, sizeof(formatted_msg), fmt, args);
-    va_end(args);
-
-    write_dbg_impl(loggin_data, worker_id, dbg_level, func, file, line_num, "%s", formatted_msg);
+    dprintf(ngx_stderr, "%s%s\n", str_uid, debug_str);
 }
 
 ///
@@ -1072,7 +996,7 @@ set_dbg_by_ctx(
     );
     curr_match_result = isDebugContext(client_ip, listening_ip, listening_port, method, hostname, uri_prefix);
 
-    write_dbg(DBG_LEVEL_DEBUG, "Current debug context match result: %s", curr_match_result ? "match" : "no match");
+    write_dbg(DBG_LEVEL_TRACE, "Current debug context match result: %s", curr_match_result ? "match" : "no match");
     is_ctx_match = curr_match_result;
 }
 
@@ -1395,7 +1319,7 @@ set_metric_memory_usage(void)
 void
 print_buffer(ngx_buf_t *buf, int num_bytes, int _dbg_level)
 {
-    if (_dbg_level < logging_data.dbg_level || !is_ctx_match) return;
+    if (_dbg_level < dbg_level || !is_ctx_match) return;
 
     char fmt[64];
     unsigned char *pos = buf->pos;
@@ -1439,7 +1363,7 @@ print_buffer(ngx_buf_t *buf, int num_bytes, int _dbg_level)
 void
 print_buffer_chain(ngx_chain_t *chain, char *msg, int num_bytes, int _dbg_level)
 {
-    if (_dbg_level < logging_data.dbg_level || !is_ctx_match) return;
+    if (_dbg_level < dbg_level || !is_ctx_match) return;
 
     for (ngx_chain_t *chain_elem = chain; chain_elem != NULL; chain_elem = chain_elem->next) {
         write_dbg(

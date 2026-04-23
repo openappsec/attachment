@@ -63,17 +63,17 @@ set_response_content_encoding(CompressionType *content_encoding, const ngx_table
 {
     ngx_int_t parse_content_encoding_result;
 
-    write_dbg(DBG_LEVEL_DEBUG, "Determining response body's content encoding");
+    write_dbg(DBG_LEVEL_TRACE, "Determining response body's content encoding");
 
     if (content_encoding_header == NULL) {
         *content_encoding = NO_COMPRESSION;
-        write_dbg(DBG_LEVEL_DEBUG, "Response body is not encoded");
+        write_dbg(DBG_LEVEL_TRACE, "Response body is not encoded");
 
         return NGX_OK;
     }
 
     write_dbg(
-        DBG_LEVEL_DEBUG,
+        DBG_LEVEL_TRACE,
         "Detected Content-Encoding header: key: %.*s, value: %.*s",
         content_encoding_header->key.len,
         content_encoding_header->key.data,
@@ -85,7 +85,7 @@ set_response_content_encoding(CompressionType *content_encoding, const ngx_table
     if (parse_content_encoding_result != NGX_OK) return NGX_ERROR;
 
     write_dbg(
-        DBG_LEVEL_DEBUG,
+        DBG_LEVEL_TRACE,
         "Parsed content encoding: %.*s",
         content_encoding_header->value.len,
         content_encoding_header->value.data
