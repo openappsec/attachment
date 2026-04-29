@@ -163,8 +163,8 @@ isLargerDataSegmentSupported()
     }
 
     if (stat(ATTACHMENT_METADATA_FILE_PATH, &st) != 0) {
-        writeDebug(TraceLevel, "No attachment metadata file, assuming larger data segment is supported");
-        return 1;
+        writeDebug(TraceLevel, "No attachment metadata file, assuming BC data segment size");
+        return 0;
     }
     
     file = fopen(ATTACHMENT_METADATA_FILE_PATH, "r");
