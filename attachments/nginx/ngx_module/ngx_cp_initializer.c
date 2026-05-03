@@ -43,7 +43,6 @@
 #define ATTACHMENT_METADATA_FILE_PATH_SRC "/etc/attachment-metadata"
 #define ATTACHMENT_METADATA_FILE_PATH_DEST "/dev/shm/attachment-metadata"
 #define DUAL_DOCKER_NGINX_FILE "/etc/dual_docker_nginx"
-#define ATTACHMENT_DEFAULT_SEGMENT_SIZE_STR "4096"
 
 ///
 /// @brief Copy attachment metadata file if source exists
@@ -53,21 +52,21 @@ static int
 copy_attachment_metadata_file()
 {
     struct stat st;
+    static int is_dual_docker_nginx_env = -1;
     char temp_file_path[256];
+    
+    if (is_dual_docker_nginx_env == -1) {
+        is_dual_docker_nginx_env = (access(DUAL_DOCKER_NGINX_FILE, F_OK) == 0) ? 1 : 0;
+    }
+
+    if (!is_dual_docker_nginx_env) {
+        write_dbg(DBG_LEVEL_DEBUG, "Not a dual docker nginx environment, skipping attachment metadata file copy");
+        return NGX_OK;
+    }
 
     if (stat(ATTACHMENT_METADATA_FILE_PATH_SRC, &st) != 0) {
-        write_dbg(DBG_LEVEL_DEBUG, "No source metadata file, writing default to %s", ATTACHMENT_METADATA_FILE_PATH_DEST);
-        snprintf(temp_file_path, sizeof(temp_file_path), "/dev/shm/attachment-metadata-%lu.tmp", (unsigned long)(ngx_worker + 1));
-        int dfd = open(temp_file_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
-        if (dfd == -1) return NGX_ERROR;
-        const char *default_entry = "EFFECTIVE_SHM_SEGMENT_SIZE=" ATTACHMENT_DEFAULT_SEGMENT_SIZE_STR "\n";
-        write(dfd, default_entry, strlen(default_entry));
-        close(dfd);
-        if (rename(temp_file_path, ATTACHMENT_METADATA_FILE_PATH_DEST) != 0) {
-            unlink(temp_file_path);
-            return NGX_ERROR;
-        }
-        return NGX_OK;
+        write_dbg(DBG_LEVEL_DEBUG, "Source attachment metadata file does not exist: %s", ATTACHMENT_METADATA_FILE_PATH_SRC);
+        return NGX_ERROR;
     }
     
     snprintf(temp_file_path, sizeof(temp_file_path), "/dev/shm/attachment-metadata-%lu.tmp", (unsigned long)(ngx_worker + 1));
@@ -127,6 +126,17 @@ copy_attachment_metadata_file()
 void
 remove_attachment_metadata_file()
 {
+    static int is_dual_docker_nginx_env = -1;
+    
+    if (is_dual_docker_nginx_env == -1) {
+        is_dual_docker_nginx_env = (access(DUAL_DOCKER_NGINX_FILE, F_OK) == 0) ? 1 : 0;
+    }
+
+    if (!is_dual_docker_nginx_env) {
+        write_dbg(DBG_LEVEL_DEBUG, "Not a dual docker nginx environment, skipping attachment metadata file removal");
+        return;
+    }
+
     if (access(ATTACHMENT_METADATA_FILE_PATH_DEST, F_OK) != 0) {
         write_dbg(DBG_LEVEL_DEBUG, "Attachment metadata file does not exist: %s", ATTACHMENT_METADATA_FILE_PATH_DEST);
         return;
