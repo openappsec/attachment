@@ -235,7 +235,7 @@ def get_init_container(containers=None):
         "imagePullPolicy": "Always",
         "command": [
             "sh", "-c",
-            f"mkdir -p /envoy/attachment/shared && cp -r /envoy/attachment/lib* /envoy/attachment/shared && cp /envoy/attachment/versions/{envoy_version}/lib* /envoy/attachment/shared"
+            f"mkdir -p /envoy/attachment/shared && cp -r /envoy/attachment/lib* /envoy/attachment/shared && cp /envoy/attachment/versions/{envoy_version}/lib* /envoy/attachment/shared && apk add --no-cache brotli-libs && cp /usr/lib/libbrotli*.so* /envoy/attachment/shared/"
         ],
         "volumeMounts": [
             {
