@@ -42,34 +42,45 @@
 
 #define ATTACHMENT_METADATA_FILE_PATH_SRC "/etc/attachment-metadata"
 #define ATTACHMENT_METADATA_FILE_PATH_DEST "/dev/shm/attachment-metadata"
-#define DUAL_DOCKER_NGINX_FILE "/etc/dual_docker_nginx"
 
 ///
-/// @brief Copy attachment metadata file if source exists
+/// @brief Copy attachment metadata file, or write compiled segment size if source absent.
 /// @returns int NGX_OK on success, NGX_ERROR on failure
 ///
 static int
 copy_attachment_metadata_file()
 {
     struct stat st;
-    static int is_dual_docker_nginx_env = -1;
     char temp_file_path[256];
-    
-    if (is_dual_docker_nginx_env == -1) {
-        is_dual_docker_nginx_env = (access(DUAL_DOCKER_NGINX_FILE, F_OK) == 0) ? 1 : 0;
-    }
 
-    if (!is_dual_docker_nginx_env) {
-        write_dbg(DBG_LEVEL_DEBUG, "Not a dual docker nginx environment, skipping attachment metadata file copy");
-        return NGX_OK;
-    }
+    snprintf(temp_file_path, sizeof(temp_file_path), "/dev/shm/attachment-metadata-%lu.tmp", (unsigned long)(ngx_worker + 1));
 
     if (stat(ATTACHMENT_METADATA_FILE_PATH_SRC, &st) != 0) {
-        write_dbg(DBG_LEVEL_DEBUG, "Source attachment metadata file does not exist: %s", ATTACHMENT_METADATA_FILE_PATH_SRC);
-        return NGX_ERROR;
+        // No packaged source file — write the compiled segment size directly so the
+        // agent can negotiate the correct shmem entry size regardless of deployment mode.
+        // The value 4096 must match SHARED_MEMORY_SEGMENT_ENTRY_SIZE in shared_ring_queue.h.
+        int dest_fd = open(temp_file_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+        if (dest_fd == -1) {
+            write_dbg(DBG_LEVEL_WARNING, "Failed to create attachment metadata file %s: %s", temp_file_path, strerror(errno));
+            return NGX_ERROR;
+        }
+        const char content[] = "EFFECTIVE_SHM_SEGMENT_SIZE=4096\n";
+        ssize_t content_len = (ssize_t)(sizeof(content) - 1);
+        if (write(dest_fd, content, content_len) != content_len) {
+            write_dbg(DBG_LEVEL_WARNING, "Failed to write attachment metadata file %s: %s", temp_file_path, strerror(errno));
+            close(dest_fd);
+            unlink(temp_file_path);
+            return NGX_ERROR;
+        }
+        close(dest_fd);
+        if (rename(temp_file_path, ATTACHMENT_METADATA_FILE_PATH_DEST) != 0) {
+            write_dbg(DBG_LEVEL_WARNING, "Failed to rename %s to %s: %s", temp_file_path, ATTACHMENT_METADATA_FILE_PATH_DEST, strerror(errno));
+            unlink(temp_file_path);
+            return NGX_ERROR;
+        }
+        write_dbg(DBG_LEVEL_DEBUG, "Wrote compiled segment size to attachment metadata file: %s", ATTACHMENT_METADATA_FILE_PATH_DEST);
+        return NGX_OK;
     }
-    
-    snprintf(temp_file_path, sizeof(temp_file_path), "/dev/shm/attachment-metadata-%lu.tmp", (unsigned long)(ngx_worker + 1));
     
     int src_fd = open(ATTACHMENT_METADATA_FILE_PATH_SRC, O_RDONLY);
     if (src_fd == -1) {
@@ -121,22 +132,11 @@ copy_attachment_metadata_file()
 }
 
 ///
-/// @brief Remove attachment metadata file if it exists in dual docker environment
+/// @brief Remove attachment metadata file if it exists
 ///
 void
 remove_attachment_metadata_file()
 {
-    static int is_dual_docker_nginx_env = -1;
-    
-    if (is_dual_docker_nginx_env == -1) {
-        is_dual_docker_nginx_env = (access(DUAL_DOCKER_NGINX_FILE, F_OK) == 0) ? 1 : 0;
-    }
-
-    if (!is_dual_docker_nginx_env) {
-        write_dbg(DBG_LEVEL_DEBUG, "Not a dual docker nginx environment, skipping attachment metadata file removal");
-        return;
-    }
-
     if (access(ATTACHMENT_METADATA_FILE_PATH_DEST, F_OK) != 0) {
         write_dbg(DBG_LEVEL_DEBUG, "Attachment metadata file does not exist: %s", ATTACHMENT_METADATA_FILE_PATH_DEST);
         return;
