@@ -3,7 +3,7 @@ version = "1.0.0-1"
 
 source = {
   url = "git://github.com/openappsec/attachment.git",
-  tag = "main"
+  tag = "Apr_06_2026-Dev"
 }
 
 description = {
