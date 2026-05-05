@@ -689,3 +689,21 @@ freeCompressedBody(NanoAttachment *attachment, HttpSessionData *session_data, Na
 {
     nano_free_compressed_body(attachment, bodies, session_data);
 }
+
+uint32_t
+GetRequestProcessingTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 3000;
+    }
+    return attachment->req_max_proccessing_ms_time;
+}
+
+uint32_t
+GetResponseProcessingTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 3000;
+    }
+    return attachment->res_max_proccessing_ms_time;
+}
