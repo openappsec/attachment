@@ -37,6 +37,121 @@
 #include "nano_attachment_sender_thread.h"
 #include "nano_attachment_thread.h"
 
+#define ATTACHMENT_METADATA_FILE_PATH_SRC  "/etc/attachment-metadata"
+#define ATTACHMENT_METADATA_FILE_PATH_DEST "/dev/shm/attachment-metadata"
+
+static void
+copy_attachment_metadata_file(NanoAttachment *attachment)
+{
+    struct stat st;
+    char temp_file_path[256];
+
+    snprintf(temp_file_path, sizeof(temp_file_path), "/dev/shm/attachment-metadata-%d.tmp", (int)getpid());
+
+    if (stat(ATTACHMENT_METADATA_FILE_PATH_SRC, &st) != 0) {
+        // No packaged source file — write the compiled segment size directly so the
+        // agent can negotiate the correct shmem entry size regardless of deployment mode.
+        // The value 4096 must match SHARED_MEMORY_SEGMENT_ENTRY_SIZE in shared_ring_queue.h.
+        int dest_fd = open(temp_file_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+        if (dest_fd == -1) {
+            write_dbg(attachment, 0, DBG_LEVEL_WARNING,
+                "Failed to create attachment metadata file %s: %s", temp_file_path, strerror(errno));
+            return;
+        }
+        const char content[] = "EFFECTIVE_SHM_SEGMENT_SIZE=4096\n";
+        ssize_t content_len = (ssize_t)(sizeof(content) - 1);
+        if (write(dest_fd, content, content_len) != content_len) {
+            write_dbg(attachment, 0, DBG_LEVEL_WARNING,
+                "Failed to write attachment metadata file %s: %s", temp_file_path, strerror(errno));
+            close(dest_fd);
+            unlink(temp_file_path);
+            return;
+        }
+        close(dest_fd);
+        if (rename(temp_file_path, ATTACHMENT_METADATA_FILE_PATH_DEST) != 0) {
+            write_dbg(attachment, 0, DBG_LEVEL_WARNING,
+                "Failed to rename %s to %s: %s", temp_file_path, ATTACHMENT_METADATA_FILE_PATH_DEST, strerror(errno));
+            unlink(temp_file_path);
+            return;
+        }
+        write_dbg(attachment, 0, DBG_LEVEL_DEBUG,
+            "Wrote compiled segment size to attachment metadata file: %s", ATTACHMENT_METADATA_FILE_PATH_DEST);
+        return;
+    }
+
+    int src_fd = open(ATTACHMENT_METADATA_FILE_PATH_SRC, O_RDONLY);
+    if (src_fd == -1) {
+        write_dbg(attachment, 0, DBG_LEVEL_WARNING,
+            "Failed to open source file %s: %s", ATTACHMENT_METADATA_FILE_PATH_SRC, strerror(errno));
+        return;
+    }
+
+    int dest_fd = open(temp_file_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (dest_fd == -1) {
+        write_dbg(attachment, 0, DBG_LEVEL_WARNING,
+            "Failed to create temporary file %s: %s", temp_file_path, strerror(errno));
+        close(src_fd);
+        return;
+    }
+
+    char buffer[4096];
+    ssize_t bytes_read, bytes_written;
+
+    while ((bytes_read = read(src_fd, buffer, sizeof(buffer))) > 0) {
+        bytes_written = write(dest_fd, buffer, bytes_read);
+        if (bytes_written != bytes_read) {
+            write_dbg(attachment, 0, DBG_LEVEL_WARNING,
+                "Failed to write to temporary file %s: %s", temp_file_path, strerror(errno));
+            close(src_fd);
+            close(dest_fd);
+            unlink(temp_file_path);
+            return;
+        }
+    }
+
+    if (bytes_read == -1) {
+        write_dbg(attachment, 0, DBG_LEVEL_WARNING,
+            "Failed to read from source file %s: %s", ATTACHMENT_METADATA_FILE_PATH_SRC, strerror(errno));
+        close(src_fd);
+        close(dest_fd);
+        unlink(temp_file_path);
+        return;
+    }
+
+    close(src_fd);
+    close(dest_fd);
+
+    if (rename(temp_file_path, ATTACHMENT_METADATA_FILE_PATH_DEST) != 0) {
+        write_dbg(attachment, 0, DBG_LEVEL_WARNING,
+            "Failed to rename %s to %s: %s", temp_file_path, ATTACHMENT_METADATA_FILE_PATH_DEST, strerror(errno));
+        unlink(temp_file_path);
+        return;
+    }
+
+    write_dbg(attachment, 0, DBG_LEVEL_DEBUG,
+        "Successfully copied attachment metadata file from %s to %s",
+        ATTACHMENT_METADATA_FILE_PATH_SRC, ATTACHMENT_METADATA_FILE_PATH_DEST);
+}
+
+static void
+remove_attachment_metadata_file(NanoAttachment *attachment)
+{
+    if (access(ATTACHMENT_METADATA_FILE_PATH_DEST, F_OK) != 0) {
+        write_dbg(attachment, 0, DBG_LEVEL_DEBUG,
+            "Attachment metadata file does not exist: %s", ATTACHMENT_METADATA_FILE_PATH_DEST);
+        return;
+    }
+
+    if (unlink(ATTACHMENT_METADATA_FILE_PATH_DEST) != 0) {
+        write_dbg(attachment, 0, DBG_LEVEL_WARNING,
+            "Failed to remove attachment metadata file %s: %s", ATTACHMENT_METADATA_FILE_PATH_DEST, strerror(errno));
+        return;
+    }
+
+    write_dbg(attachment, 0, DBG_LEVEL_DEBUG,
+        "Successfully removed attachment metadata file: %s", ATTACHMENT_METADATA_FILE_PATH_DEST);
+}
+
 NanoCommunicationResult
 write_to_service(
     NanoAttachment *attachment,
@@ -747,6 +862,7 @@ nano_attachment_init_process(NanoAttachment *attachment)
 
     // Initalize the the communication channel with the service.
     if (attachment->nano_service_ipc == NULL) {
+        copy_attachment_metadata_file(attachment);
         write_dbg(attachment, 0, DBG_LEVEL_INFO, "Initializing IPC channel");
         attachment->nano_service_ipc = initIpc(
             attachment->unique_id,
@@ -798,6 +914,7 @@ restart_communication(NanoAttachment *attachment)
             return NANO_ERROR;
         }
     }
+    copy_attachment_metadata_file(attachment);
     attachment->nano_service_ipc = initIpc(
         attachment->unique_id,
         attachment->nano_user_id,
@@ -827,6 +944,7 @@ disconnect_communication(NanoAttachment *attachment)
         destroyIpc(attachment->nano_service_ipc, 0);
         attachment->nano_service_ipc = NULL;
     }
+    remove_attachment_metadata_file(attachment);
 }
 
 NanoCommunicationResult
