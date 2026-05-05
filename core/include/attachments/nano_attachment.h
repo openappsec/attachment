@@ -281,4 +281,6 @@ freeCompressedBody(
     NanoHttpBody *bodies
 );
 
+uint32_t GetRequestProcessingTimeout(NanoAttachment *attachment);
+
 #endif // __NANO_ATTACHMENT_H__
