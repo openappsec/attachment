@@ -366,7 +366,7 @@ sendChunkedData(
     const uint8_t num_of_data_elem
 )
 {
-    if (!ipc || !ipc->tx_queue) {
+    if (!ipc || !ipc->tx_queue || !ipc->global_data) {
         return -1;
     }
     

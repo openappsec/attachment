@@ -1207,7 +1207,7 @@ nano_metadata_sender(
         CLIENT_PORT + 2
     );
 
-    if (metadata->parsed_host.len > 0) {
+    if (metadata->parsed_host.len > 0 && metadata->parsed_host.data != NULL) {
         // Add parsed host data.
         set_fragment_elem(
             fragments,
@@ -1226,7 +1226,7 @@ nano_metadata_sender(
         meta_data_count += 2;
     }
 
-    if (metadata->parsed_uri.len > 0) {
+    if (metadata->parsed_uri.len > 0 && metadata->parsed_uri.data != NULL) {
         // Add parsed URI data.
         set_fragment_elem(
             fragments,

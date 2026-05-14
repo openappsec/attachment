@@ -513,7 +513,9 @@ pushBuffersToQueue(
             input_buffers_sizes[idx],
             current_copy_pos
         );
-        memcpy(current_copy_pos, input_buffers[idx], input_buffers_sizes[idx]);
+        if (input_buffers[idx] != NULL) {
+            memcpy(current_copy_pos, input_buffers[idx], input_buffers_sizes[idx]);
+        }
         current_copy_pos += input_buffers_sizes[idx];
     }
     write_pos++;
