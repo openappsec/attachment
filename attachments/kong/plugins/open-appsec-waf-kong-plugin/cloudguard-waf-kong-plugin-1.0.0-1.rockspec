@@ -1,9 +1,9 @@
-package = "cloudguard-waf-kong-plugin"
+package = "open-appsec-waf-kong-plugin"
 version = "1.0.0-1"
  
 source = {
   url = "git://github.com/openappsec/attachment.git",
-  tag = "feature/async_kong_nano_attachment"
+  tag = "main"
 }
  
 description = {
@@ -23,12 +23,12 @@ build = {
   type = "builtin",
  
   modules = {
-    ["kong.plugins.cloudguard-waf-kong-plugin.handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/handler.lua",
-    ["kong.plugins.cloudguard-waf-kong-plugin.nano_ffi"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/nano_ffi.lua",
-    ["kong.plugins.cloudguard-waf-kong-plugin.schema"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/schema.lua",
-    ["kong.plugins.cloudguard-waf-kong-plugin.lib.verdict_poller"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/verdict_poller.lua",
-    ["kong.plugins.cloudguard-waf-kong-plugin.lib.verdict_handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/verdict_handler.lua",
-    ["kong.plugins.cloudguard-waf-kong-plugin.lib.utils"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/utils.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/handler.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.nano_ffi"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/nano_ffi.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.schema"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/schema.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.lib.verdict_poller"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/verdict_poller.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.lib.verdict_handler"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/verdict_handler.lua",
+    ["kong.plugins.open-appsec-waf-kong-plugin.lib.utils"] = "attachments/kong/plugins/open-appsec-waf-kong-plugin/lib/utils.lua",
     ["lua_attachment_wrapper"] = {
       sources = {
         "attachments/kong/plugins/open-appsec-waf-kong-plugin/lua_attachment_wrapper.c",
