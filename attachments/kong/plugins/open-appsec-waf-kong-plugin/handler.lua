@@ -59,6 +59,15 @@ local function handle_access_async(ctx, session_id, session_data, meta_data, req
         goto cleanup
     end
 
+    ctx.session_data = session_data
+    ctx.session_id = session_id
+    ctx.session_finalized = false
+    if nano.is_session_finalized(ctx.session_data) then
+        kong.log.debug("Session has already been inspected, no need for further inspection")
+        ctx.session_finalized = true
+        return
+    end
+
     if verdict == nano.AttachmentVerdict.DROP then
         kong.log.debug("Request blocked: headers (session=", session_id, ")")
         ctx.is_final_verdict = true
@@ -424,8 +433,15 @@ function NanoHandler.header_filter(conf)
     if ctx.blocked or ctx.fail_open_mode or ctx.is_final_verdict then
         return
     end
-    
+
+    if ctx.session_finalized then
+        kong.log.debug("Session has already been finalized, no need for further inspection")
+        return
+    end
+
     if nano.is_session_finalized(ctx.session_data) then
+        kong.log.debug("Session has already been inspected, no need for further inspection")
+        ctx.session_finalized = true
         return
     end
 
@@ -486,8 +502,15 @@ function NanoHandler.body_filter(conf)
     
     local session_id = ctx.session_id
     local session_data = ctx.session_data
+
+    if ctx.session_finalized then
+        kong.log.debug("Session has already been finalized, no need for further inspection")
+        return
+    end
     
     if nano.is_session_finalized(session_data) then
+        kong.log.debug("Session has already been inspected, no need for further inspection")
+        ctx.session_finalized = true
         return
     end
     
