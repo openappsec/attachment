@@ -138,7 +138,7 @@ init_attachment_config(NanoAttachment *attachment, const char *conf_path)
         getStaticResourcesPath(),
         attachment->num_of_nano_ipc_elements,
         attachment->keep_alive_interval_msec,
-        attachment->paired_affinity_enabled
+        attachment->paired_affinity_enabled,
         attachment->is_async_mode_enabled
     );
 

@@ -70,7 +70,7 @@ write_dbg_impl(
     int millisec;
     struct timeval tv;
     char time_stamp[64];
-    char str_uid[140];
+    char str_uid[256];
     int pid = 0;
 
     time(&ttime);

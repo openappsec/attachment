@@ -1226,18 +1226,6 @@ service_reply_receiver(
                 session_data->verdict = TRAFFIC_VERDICT_INSPECT;
                 break;
             }
-
-            case TRAFFIC_VERDICT_CUSTOM_RESPONSE: {
-                write_dbg(
-                    attachment,
-                    session_data->session_id,
-                    DBG_LEVEL_DEBUG,
-                    "Verdict custom response received from the nano service, returning Inspect"
-                );
-                session_data->verdict = TRAFFIC_VERDICT_INSPECT;
-                break;
-            }
-
         }
         popData(get_nano_service_ipc(attachment, usage_mode));
     }
