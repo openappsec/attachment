@@ -78,6 +78,7 @@ RegistrationCommSocketThread(void *_ctx)
     NanoAttachment *attachment = ctx->attachment;
 
     ctx->res = connect_to_comm_socket(attachment);
+    ctx->res = connect_to_comm_socket_sync(attachment);
 
     return NULL;
 }
@@ -111,7 +112,8 @@ SendRequestFilterThread(void *_ctx)
         ctx,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        is_verdict_requested
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     nano_header_sender(
@@ -121,7 +123,8 @@ SendRequestFilterThread(void *_ctx)
         REQUEST_HEADER,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        is_verdict_requested
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     if (!contains_body) {
@@ -130,7 +133,9 @@ SendRequestFilterThread(void *_ctx)
             REQUEST_END,
             ctx,
             session_data_p->session_id,
-            &session_data_p->remaining_messages_to_reply
+            &session_data_p->remaining_messages_to_reply,
+            true,
+            SIGNAL_USAGE_SYNC
         );
     }
 
@@ -152,7 +157,8 @@ SendMetadataThread(void *_ctx)
         ctx,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        is_verdict_requested
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;
@@ -174,7 +180,8 @@ SendRequestHeadersThread(void *_ctx)
         REQUEST_HEADER,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        is_verdict_requested
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;
@@ -195,7 +202,8 @@ SendResponseHeadersThread(void *_ctx)
         headers->response_code,
         ctx,
         session_data_p->session_id,
-        &session_data_p->remaining_messages_to_reply
+        &session_data_p->remaining_messages_to_reply,
+        SIGNAL_USAGE_SYNC
     );
 
     nano_send_response_content_length(
@@ -203,7 +211,8 @@ SendResponseHeadersThread(void *_ctx)
         headers->content_length,
         ctx,
         session_data_p->session_id,
-        &session_data_p->remaining_messages_to_reply
+        &session_data_p->remaining_messages_to_reply,
+        SIGNAL_USAGE_SYNC
     );
 
     set_response_content_encoding(
@@ -219,7 +228,8 @@ SendResponseHeadersThread(void *_ctx)
         RESPONSE_HEADER,
         session_data_p->session_id,
         &session_data_p->remaining_messages_to_reply,
-        is_verdict_requested
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;
@@ -232,6 +242,7 @@ SendRequestBodyThread(void *_ctx)
     NanoHttpBody *bodies = (NanoHttpBody*)ctx->data->data;
     NanoAttachment *attachment = ctx->attachment;
     HttpSessionData *session_data_p = ctx->session_data_p;
+    bool is_verdict_requested = true;
 
     nano_body_sender(
         attachment,
@@ -239,7 +250,9 @@ SendRequestBodyThread(void *_ctx)
         ctx,
         REQUEST_BODY,
         session_data_p->session_id,
-        &session_data_p->remaining_messages_to_reply
+        &session_data_p->remaining_messages_to_reply,
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;
@@ -252,6 +265,7 @@ SendResponseBodyThread(void *_ctx)
     NanoHttpBody *bodies = (NanoHttpBody*)ctx->data->data;
     NanoAttachment *attachment = ctx->attachment;
     HttpSessionData *session_data_p = ctx->session_data_p;
+    bool is_verdict_requested = true;
 
     nano_body_sender(
         attachment,
@@ -259,7 +273,9 @@ SendResponseBodyThread(void *_ctx)
         ctx,
         RESPONSE_BODY,
         session_data_p->session_id,
-        &session_data_p->remaining_messages_to_reply
+        &session_data_p->remaining_messages_to_reply,
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;
@@ -271,13 +287,16 @@ SendRequestEndThread(void *_ctx)
     HttpEventThreadCtx *ctx = (HttpEventThreadCtx *)_ctx;
     NanoAttachment *attachment = ctx->attachment;
     HttpSessionData *session_data_p = ctx->session_data_p;
+    bool is_verdict_requested = true;
 
     nano_end_transaction_sender(
         attachment,
         REQUEST_END,
         ctx,
         session_data_p->session_id,
-        &session_data_p->remaining_messages_to_reply
+        &session_data_p->remaining_messages_to_reply,
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;
@@ -289,13 +308,16 @@ SendResponseEndThread(void *_ctx)
     HttpEventThreadCtx *ctx = (HttpEventThreadCtx *)_ctx;
     NanoAttachment *attachment = ctx->attachment;
     HttpSessionData *session_data_p = ctx->session_data_p;
+    bool is_verdict_requested = true;
 
     nano_end_transaction_sender(
         attachment,
         RESPONSE_END,
         ctx,
         session_data_p->session_id,
-        &session_data_p->remaining_messages_to_reply
+        &session_data_p->remaining_messages_to_reply,
+        is_verdict_requested,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;
@@ -312,7 +334,9 @@ SendDelayedVerdictRequestThread(void *_ctx)
         attachment,
         ctx,
         session_data_p->session_id,
-        &session_data_p->remaining_messages_to_reply
+        &session_data_p->remaining_messages_to_reply,
+        true,
+        SIGNAL_USAGE_SYNC
     );
 
     return NULL;

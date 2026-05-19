@@ -61,7 +61,9 @@ unsigned int getHoldVerdictPollingTime();
 
 int isIPAddress(c_str ip_str);
 int isSkipSource(c_str ip_str);
+
 unsigned int isPairedAffinityEnabled();
+unsigned int isAsyncModeEnabled();
 
 #ifdef __cplusplus
 }

@@ -78,6 +78,7 @@ init_attachment_config(NanoAttachment *attachment, const char *conf_path)
     attachment->num_of_nano_ipc_elements = getNumOfNginxIpcElements();
     attachment->keep_alive_interval_msec = getKeepAliveIntervalMsec();
     attachment->paired_affinity_enabled = isPairedAffinityEnabled();
+    attachment->is_async_mode_enabled = isAsyncModeEnabled();
 
     // set_static_resources_path(getStaticResourcesPath());
     attachment->is_configuration_updated = NANO_OK;
@@ -114,6 +115,7 @@ init_attachment_config(NanoAttachment *attachment, const char *conf_path)
         "num of nginx ipc elements: %u, "
         "keep alive interval msec: %u msec, "
         "paired affinity enabled: %u",
+        "async mode: %u",
         attachment->inspection_mode,
         attachment->dbg_level,
         (attachment->fail_mode_verdict == NANO_OK ? "fail-open" : "fail-close"),
@@ -137,6 +139,7 @@ init_attachment_config(NanoAttachment *attachment, const char *conf_path)
         attachment->num_of_nano_ipc_elements,
         attachment->keep_alive_interval_msec,
         attachment->paired_affinity_enabled
+        attachment->is_async_mode_enabled
     );
 
     return NANO_OK;

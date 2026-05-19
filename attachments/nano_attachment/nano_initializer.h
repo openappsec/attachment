@@ -22,10 +22,22 @@
 
 #include "nano_attachment_common.h"
 #include "shmem_ipc_2.h"
+#include "nano_attachment_bucket.h"
 
 #define LOGGING_DIRECTORY_PATH "/var/log/nano_attachment" ///< Default logging directory path.
 #define LOGGING_FILE_NAME "nano_attachment" ///< Default logging file name.
 #define LOGGING_FILE_PATH LOGGING_DIRECTORY_PATH "/" LOGGING_FILE_NAME
+#define CP_ASYNC_CTX_BUCKETS_INIT 2048 ///< Hash table buckets for better distribution
+#define SESSION_ID_QUEUE_SIZE 1024 ///< Maximum size of the session ID queue
+
+typedef struct SessionIDQueue {
+    SessionID queue[SESSION_ID_QUEUE_SIZE]; ///< Circular buffer for session IDs
+    uint32_t head; ///< Index of the head (where elements are dequeued)
+    uint32_t tail; ///< Index of the tail (where elements are enqueued)
+    uint32_t count; ///< Current number of elements in the queue
+} SessionIDQueue; ///< Queue structure for holding session IDs
+
+typedef struct NanoAttachment NanoAttachment;
 
 typedef enum nano_attachment_registration_state {
     NOT_REGISTERED,
@@ -46,8 +58,9 @@ typedef struct NanoAttachment {
 
     uint8_t attachment_type; // Holds the type of the attachment.
     SharedMemoryIPC *nano_service_ipc; // Holds the shared memory IPC of the nano service.
+    SharedMemoryIPC *nano_service_sync_ipc; // Holds the shared memory IPC of the nano service for sync responses.
     int comm_socket; // Holds the communication socket of the attachment.
-
+    int comm_socket_sync; // Holds the communication socket of the attachment for sync responses.
     int is_default_fd; // Holds a value indicating if the logging file descriptor is the default one.
     int logging_fd; // Holds the file descriptor for logging.
     LoggingData *logging_data; // Holds the logging data of the attachment.
@@ -79,6 +92,7 @@ typedef struct NanoAttachment {
     unsigned int num_of_nano_ipc_elements; ///< Number of NANO IPC elements.
     uint64_t keep_alive_interval_msec; ///< Keep alive interval in milliseconds.
     uint64_t paired_affinity_enabled; ///< Paired affinity enabled flag.
+    unsigned int is_async_mode_enabled; ///< Async mode enabled flag.
 
 #ifdef __cplusplus
     uint64_t metric_data[static_cast<int>(AttachmentMetricType::METRIC_TYPES_COUNT)];
@@ -87,6 +101,9 @@ typedef struct NanoAttachment {
     uint64_t metric_data[METRIC_TYPES_COUNT];
     uint64_t metric_average_data_divisor[METRIC_TYPES_COUNT];
 #endif
+
+    AttachmentVerdictResponse async_buckets[CP_ASYNC_CTX_BUCKETS_INIT]; ///< Buckets for storing verdict responses.
+    SessionIDQueue async_failed_bucket; ///< Bucket to track failed session IDs.
 } NanoAttachment;
 
 ///

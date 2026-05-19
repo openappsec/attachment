@@ -125,6 +125,69 @@ AttachmentVerdictResponse SendRequestEnd(NanoAttachment *attachment, AttachmentD
 AttachmentVerdictResponse SendResponseEnd(NanoAttachment *attachment, AttachmentData *data);
 
 ///
+/// @brief Sends request filter data to the nano service asynchronously.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+/// @param data A pointer to AttachmentData structure containing the data to send and the session data.
+///
+/// @return A NanoCommunicationResult indicating the outcome of the operation.
+///
+NanoCommunicationResult SendRequestFilterAsync(NanoAttachment *attachment, AttachmentData *data);
+
+///
+/// @brief Sends start request data to the nano service asynchronously.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+/// @param data A pointer to AttachmentData structure containing the data to send and the session data.
+///
+/// @return A NanoCommunicationResult indicating the outcome of the operation.
+///
+NanoCommunicationResult SendMetadataAsync(NanoAttachment *attachment, AttachmentData *data);
+
+///
+/// @brief Sends request headers to the nano service asynchronously.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+/// @param data A pointer to AttachmentData structure containing the headers to send and the session data.
+///
+/// @return A NanoCommunicationResult indicating the outcome of the operation.
+///
+NanoCommunicationResult SendRequestHeadersAsync(NanoAttachment *attachment, AttachmentData *data);
+
+///
+/// @brief Sends request body to the nano service asynchronously.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+/// @param data A pointer to AttachmentData structure containing the body to send and the session data.
+///
+/// @return A NanoCommunicationResult indicating the outcome of the operation.
+///
+NanoCommunicationResult SendRequestBodyAsync(NanoAttachment *attachment, AttachmentData *data);
+
+///
+/// @brief Sends end request signal to the nano service asynchronously.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+/// @param data A pointer to AttachmentData structure containing the necessery data to send and the session data.
+///
+/// @return A NanoCommunicationResult indicating the outcome of the operation.
+///
+NanoCommunicationResult SendRequestEndAsync(NanoAttachment *attachment, AttachmentData *data);
+
+///
+/// @brief Sends a delayed verdict signal to the agent asynchronously.
+///
+/// This function sends a delayed verdict signal to the agent service, requesting an updated
+/// verdict for a session that is currently in a delayed state.
+///
+/// @param attachment A pointer to the NanoAttachment structure.
+/// @param data A pointer to AttachmentData structure containing the session data.
+///
+/// @return A NanoCommunicationResult indicating the outcome of the operation.
+///
+NanoCommunicationResult SendDelayedVerdictRequestAsync(NanoAttachment *attachment, AttachmentData *data);
+
+///
 /// @brief Sends metric data to the nano service and resets it on the attachment.
 ///
 /// @param attachment A pointer to the NanoAttachment structure that contains metrics data.

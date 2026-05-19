@@ -4,9 +4,11 @@
 #include <stdlib.h>
 
 #include "nano_attachment_sender_thread.h"
+#include "nano_attachment_sender_async.h"
 #include "nano_attachment_thread.h"
 #include "nano_utils.h"
 #include "nano_attachment_metric.h"
+#include "nano_attachment_bucket.h"
 
 static unsigned char default_uuid[] = "20118dba-81f7-4999-8e94-003cf242f5dd\0";
 static const size_t default_uuid_size = 37;
@@ -784,6 +786,272 @@ SendResponseEnd(NanoAttachment *attachment, AttachmentData *data)
     }
 
     return FinalizeSuccessfulResponse(attachment, session_id, &ctx);
+}
+
+NanoCommunicationResult
+SendRequestFilterAsync(NanoAttachment *attachment, AttachmentData *data)
+{
+    if (attachment == NULL || data == NULL) {
+        return NANO_ERROR;
+    }
+
+    HttpSessionData *session_data_p = data->session_data;
+    if (session_data_p == NULL) {
+        return NANO_ERROR;
+    }
+
+    SessionID session_id = session_data_p->session_id;
+    HttpRequestFilterData *start_data = (HttpRequestFilterData*)data->data;
+    if (start_data == NULL) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "NULL start_data in SendRequestFilterAsync for session ID: %d",
+            session_id
+        );
+        return NANO_ERROR;
+    }
+
+    write_dbg(
+        attachment,
+        session_id,
+        DBG_LEVEL_DEBUG,
+        "Request filter handling session ID: %d",
+        session_id
+    );
+
+    if (handle_shmem_corruption(attachment) == NANO_ERROR) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "Failed to handle shmem corruption in session ID: %d",
+            session_id
+        );
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_id);
+        return NANO_ERROR;
+    }
+
+    return SendRequestFilterAsyncImpl(attachment, session_data_p, start_data);
+}
+
+NanoCommunicationResult
+SendMetadataAsync(NanoAttachment *attachment, AttachmentData *data)
+{
+    if (attachment == NULL || data == NULL) {
+        return NANO_ERROR;
+    }
+
+    HttpSessionData *session_data_p = data->session_data;
+    if (session_data_p == NULL) {
+        return NANO_ERROR;
+    }
+
+    SessionID session_id = session_data_p->session_id;
+    HttpMetaData *metadata = (HttpMetaData*)data->data;
+    if (metadata == NULL) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "NULL metadata in SendMetadataAsync for session ID: %d",
+            session_id
+        );
+        return NANO_ERROR;
+    }
+
+    write_dbg(
+        attachment,
+        session_id,
+        DBG_LEVEL_DEBUG,
+        "Metadata handling session ID: %d",
+        session_id
+    );
+
+    if (handle_shmem_corruption(attachment) == NANO_ERROR) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "Failed to handle shmem corruption in session ID: %d",
+            session_id
+        );
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_id);
+        return NANO_ERROR;
+    }
+
+    return SendMetadataAsyncImpl(attachment, session_data_p, metadata);
+}
+
+NanoCommunicationResult
+SendRequestHeadersAsync(NanoAttachment *attachment, AttachmentData *data)
+{
+    if (attachment == NULL || data == NULL) {
+        return NANO_ERROR;
+    }
+
+    HttpSessionData *session_data_p = data->session_data;
+    if (session_data_p == NULL) {
+        return NANO_ERROR;
+    }
+
+    SessionID session_id = session_data_p->session_id;
+    HttpHeaders *headers = (HttpHeaders*)data->data;
+    if (headers == NULL) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "NULL headers in SendRequestHeadersAsync for session ID: %d",
+            session_id
+        );
+        return NANO_ERROR;
+    }
+
+    write_dbg(
+        attachment,
+        session_id,
+        DBG_LEVEL_DEBUG,
+        "Request headers handling session ID: %d",
+        session_id
+    );
+
+    if (handle_shmem_corruption(attachment) == NANO_ERROR) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "Failed to handle shmem corruption in session ID: %d",
+            session_id
+        );
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_id);
+        return NANO_ERROR;
+    }
+
+    return SendRequestHeadersAsyncImpl(attachment, session_data_p, headers);
+}
+
+NanoCommunicationResult
+SendRequestBodyAsync(NanoAttachment *attachment, AttachmentData *data)
+{
+    if (attachment == NULL || data == NULL) {
+        return NANO_ERROR;
+    }
+
+    HttpSessionData *session_data_p = data->session_data;
+    if (session_data_p == NULL) {
+        return NANO_ERROR;
+    }
+
+    SessionID session_id = session_data_p->session_id;
+    NanoHttpBody *bodies = (NanoHttpBody*)data->data;
+    if (bodies == NULL) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "NULL bodies in SendRequestBodyAsync for session ID: %d",
+            session_id
+        );
+        return NANO_ERROR;
+    }
+
+    write_dbg(
+        attachment,
+        session_id,
+        DBG_LEVEL_DEBUG,
+        "Request body handling session ID: %d",
+        session_id
+    );
+
+    if (handle_shmem_corruption(attachment) == NANO_ERROR) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "Failed to handle shmem corruption in session ID: %d",
+            session_id
+        );
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_id);
+        return NANO_ERROR;
+    }
+
+    return SendRequestBodyAsyncImpl(attachment, session_data_p, bodies);
+}
+
+NanoCommunicationResult
+SendRequestEndAsync(NanoAttachment *attachment, AttachmentData *data)
+{
+    if (attachment == NULL || data == NULL) {
+        return NANO_ERROR;
+    }
+
+    HttpSessionData *session_data_p = data->session_data;
+    if (session_data_p == NULL) {
+        return NANO_ERROR;
+    }
+
+    SessionID session_id = session_data_p->session_id;
+
+    write_dbg(
+        attachment,
+        session_id,
+        DBG_LEVEL_DEBUG,
+        "Request end handling session ID: %d",
+        session_id
+    );
+
+    if (handle_shmem_corruption(attachment) == NANO_ERROR) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "Failed to handle shmem corruption in session ID: %d",
+            session_id
+        );
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_id);
+        return NANO_ERROR;
+    }
+
+    return SendRequestEndAsyncImpl(attachment, session_data_p);
+}
+
+NanoCommunicationResult
+SendDelayedVerdictRequestAsync(NanoAttachment *attachment, AttachmentData *data)
+{
+    if (attachment == NULL || data == NULL) {
+        return NANO_ERROR;
+    }
+
+    HttpSessionData *session_data_p = data->session_data;
+    if (session_data_p == NULL) {
+        return NANO_ERROR;
+    }
+
+    SessionID session_id = session_data_p->session_id;
+
+    write_dbg(
+        attachment,
+        session_id,
+        DBG_LEVEL_DEBUG,
+        "Hold data handling session ID: %d",
+        session_id
+    );
+
+    if (handle_shmem_corruption(attachment) == NANO_ERROR) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "Failed to handle shmem corruption in session ID: %d",
+            session_id
+        );
+        NanoAsyncFailedSessionIDQueueAdd(attachment, session_id);
+        return NANO_ERROR;
+    }
+
+    return SendDelayedVerdictRequestAsyncImpl(attachment, session_data_p);
 }
 
 NanoCommunicationResult

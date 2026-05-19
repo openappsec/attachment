@@ -7,9 +7,12 @@
 #include <errno.h>
 #include <sys/un.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include "nano_attachment_sender.h"
 #include "nano_attachment_metric.h"
+#include "nano_attachment_bucket.h"
 #include "nano_initializer.h"
 #include "nano_configuration.h"
 #include "nano_utils.h"
@@ -17,6 +20,105 @@
 #include "nano_blockpage.h"
 #include "compression_utils.h"
 #include "nano_compression.h"
+#include "nano_attachment_io.h"
+
+#define ATTACHMENT_METADATA_FILE_PATH_SRC "/etc/attachment-metadata"
+#define ATTACHMENT_METADATA_FILE_PATH_DEST "/dev/shm/attachment-metadata"
+#define DUAL_DOCKER_FILE "/etc/dual_docker"
+
+///
+/// @brief Copy attachment metadata file if source exists
+/// @returns int NGX_OK on success, NGX_ERROR on failure
+///
+static int
+copy_attachment_metadata_file(NanoAttachment *attachment)
+{
+    struct stat st;
+    static int is_dual_docker_env = -1;
+    char temp_file_path[256];
+
+    if (is_dual_docker_env == -1) {
+        is_dual_docker_env = (access(DUAL_DOCKER_FILE, F_OK) == 0) ? 1 : 0;
+    }
+
+    if (!is_dual_docker_env) {
+        return 1;
+    }
+
+    if (stat(ATTACHMENT_METADATA_FILE_PATH_SRC, &st) != 0) {
+        return 0;
+    }
+
+    snprintf(
+        temp_file_path,
+        sizeof(temp_file_path),
+        "/dev/shm/attachment-metadata-%lu.tmp",
+        (unsigned long)(attachment->worker_id + 1)
+    );
+
+    int src_fd = open(ATTACHMENT_METADATA_FILE_PATH_SRC, O_RDONLY);
+    if (src_fd == -1) {
+        return 0;
+    }
+
+    int dest_fd = open(temp_file_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (dest_fd == -1) {
+        close(src_fd);
+        return 0;
+    }
+
+    char buffer[4096];
+    ssize_t bytes_read, bytes_written;
+
+    while ((bytes_read = read(src_fd, buffer, sizeof(buffer))) > 0) {
+        bytes_written = write(dest_fd, buffer, bytes_read);
+        if (bytes_written != bytes_read) {
+            write_dbg(
+                attachment,
+                0,
+                DBG_LEVEL_WARNING,
+                "Failed to write attachment metadata file, Error: %s",
+                strerror(errno)
+            );
+            close(src_fd);
+            close(dest_fd);
+            unlink(temp_file_path);
+            return 0;
+        }
+    }
+
+    if (bytes_read == -1) {
+        write_dbg(
+            attachment,
+            0,
+            DBG_LEVEL_WARNING,
+            "Failed to read attachment metadata file, Error: %s",
+            strerror(errno)
+        );
+        close(src_fd);
+        close(dest_fd);
+        unlink(temp_file_path);
+        return 0;
+    }
+
+    close(src_fd);
+    close(dest_fd);
+
+    // Atomic rename operation
+    if (rename(temp_file_path, ATTACHMENT_METADATA_FILE_PATH_DEST) != 0) {
+        write_dbg(
+            attachment,
+            0,
+            DBG_LEVEL_WARNING,
+            "Failed to rename attachment metadata file, Error: %s",
+            strerror(errno)
+        );
+        unlink(temp_file_path);
+        return 0;
+    }
+
+    return 1;
+}
 
 NanoAttachment *
 InitNanoAttachment(uint8_t attachment_type, int worker_id, int num_of_workers, int logging_fd)
@@ -37,7 +139,9 @@ InitNanoAttachment(uint8_t attachment_type, int worker_id, int num_of_workers, i
     attachment->registration_state = NOT_REGISTERED;
     attachment->attachment_type = attachment_type;
     attachment->nano_service_ipc = NULL;
+    attachment->nano_service_sync_ipc = NULL;
     attachment->comm_socket = -1;
+    attachment->comm_socket_sync = -1;
     attachment->logging_data = NULL;
 
     if (set_docker_id(attachment) == NANO_ERROR) {
@@ -96,6 +200,22 @@ InitNanoAttachment(uint8_t attachment_type, int worker_id, int num_of_workers, i
     attachment->num_of_nano_ipc_elements = 200;
     attachment->keep_alive_interval_msec = DEFAULT_KEEP_ALIVE_INTERVAL_MSEC;
     attachment->paired_affinity_enabled = 0;
+    attachment->is_async_mode_enabled = 0;
+    memset(attachment->async_buckets, 0, sizeof(attachment->async_buckets));
+
+    memset(&attachment->async_failed_bucket, 0, sizeof(attachment->async_failed_bucket));
+    attachment->async_failed_bucket.head = 0;
+    attachment->async_failed_bucket.tail = 0;
+    attachment->async_failed_bucket.count = 0;
+
+    if (access(ATTACHMENT_METADATA_FILE_PATH_DEST, F_OK) != 0) {
+        if (!copy_attachment_metadata_file(attachment)) {
+            write_dbg(attachment, 0, DBG_LEVEL_WARNING, "Failed to copy attachment metadata file");
+            close_logging_fd(attachment);
+            free(attachment);
+            return NULL;
+        }
+    }
 
     if (nano_attachment_init_process(attachment) != NANO_OK) {
         write_dbg(attachment, 0, DBG_LEVEL_WARNING, "Could not initialize nano attachment");
@@ -120,6 +240,15 @@ RestartAttachmentConfiguration(NanoAttachment *attachment)
 {
     return reset_attachment_config(attachment);
 };
+
+int
+GetCommSocket(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return -1;
+    }
+    return attachment->comm_socket;
+}
 
 HttpSessionData *
 InitSessionData(NanoAttachment *attachment, SessionID session_id)
@@ -225,6 +354,89 @@ SendDataNanoAttachment(NanoAttachment *attachment, AttachmentData *data)
     };
     return response;
 }
+
+NanoCommunicationResult
+SendDataNanoAttachmentAsync(NanoAttachment *attachment, AttachmentData *data)
+{
+    if (data == NULL) {
+        write_dbg(attachment, 0, DBG_LEVEL_WARNING, "NULL data in SendDataNanoAttachmentAsync");
+        return NANO_ERROR;
+    }
+
+    switch (data->chunk_type) {
+        case HTTP_REQUEST_FILTER: {
+            return SendRequestFilterAsync(attachment, data);
+        }
+        case HTTP_REQUEST_METADATA: {
+            return SendMetadataAsync(attachment, data);
+        }
+        case HTTP_REQUEST_HEADER: {
+            return SendRequestHeadersAsync(attachment, data);
+        }
+        case HTTP_REQUEST_BODY: {
+            return SendRequestBodyAsync(attachment, data);
+        }
+        case HTTP_REQUEST_END: {
+            return SendRequestEndAsync(attachment, data);
+        }
+        case HOLD_DATA: {
+            return SendDelayedVerdictRequestAsync(attachment, data);
+        }
+        default:
+            break;
+    }
+
+    return NANO_OK;
+}
+
+bool
+isNanoQueueEmpty(NanoAttachment *attachment)
+{
+    if (attachment == NULL || attachment->nano_service_ipc == NULL) {
+        return true;
+    }
+    return !isDataAvailable(attachment->nano_service_ipc);
+}
+
+SessionID
+PopFromNanoQueue(NanoAttachment *attachment)
+{
+    AttachmentVerdictResponse response;
+    SessionID session_id;
+    NanoCommunicationResult res;
+
+    response = PopResponseVerdictFromQueue(attachment);
+    if (response.session_id == 0) {
+        return 0;
+    }
+
+    session_id = response.session_id;
+    res = NanoAsyncAddResponse(attachment, session_id, &response);
+    if (res != NANO_OK) {
+        write_dbg(
+            attachment,
+            session_id,
+            DBG_LEVEL_WARNING,
+            "Failed to add async response for session ID: %d",
+            session_id
+        );
+        return 0;
+    }
+
+    return session_id;
+}
+
+AttachmentVerdictResponse
+getAttachmentVerdictResponse(NanoAttachment *attachment, SessionID session_id)
+{
+    AttachmentVerdictResponse response = NanoAsyncFindResponse(attachment, session_id);
+    NanoAsyncRemoveResponse(attachment, session_id);
+
+    if (response.session_id == 0) return GenerateFailedVerdict(attachment, session_id);
+
+    return response;
+}
+
 
 ///
 /// @brief Connects to the keep-alive socket.
@@ -599,6 +811,16 @@ FreeAttachmentResponseContent(
     NanoHttpModificationList *current_modification;
     NanoHttpModificationList *modification_list;
 
+    if (session_data == NULL) {
+        write_dbg(
+            attachment,
+            0,
+            DBG_LEVEL_WARNING,
+            "Attempting to free NULL response"
+        );
+        return;
+    }
+
     if (response == NULL) {
         write_dbg(
             attachment,
@@ -690,6 +912,18 @@ freeCompressedBody(NanoAttachment *attachment, HttpSessionData *session_data, Na
     nano_free_compressed_body(attachment, bodies, session_data);
 }
 
+bool
+IsFailedSessionIDQueueEmpty(NanoAttachment *attachment)
+{
+    return NanoAsyncFailedSessionIDQueueIsEmpty(attachment);
+}
+
+SessionID
+PopFailedSessionID(NanoAttachment *attachment)
+{
+    return NanoAsyncFailedSessionIDQueuePop(attachment);
+}
+
 uint32_t
 GetRequestProcessingTimeout(NanoAttachment *attachment)
 {
@@ -706,4 +940,211 @@ GetResponseProcessingTimeout(NanoAttachment *attachment)
         return 3000;
     }
     return attachment->res_max_proccessing_ms_time;
+}
+
+const char *
+GetSharedVerdictSignalPath(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return NULL;
+    }
+    return attachment->shared_verdict_signal_path;
+}
+
+uint8_t
+GetWorkerId(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 0;
+    }
+    return attachment->worker_id;
+}
+
+uint8_t
+GetAttachmentType(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 0;
+    }
+    return attachment->attachment_type;
+}
+
+int
+GetFailModeVerdict(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return NANO_OK;
+    }
+    return attachment->fail_mode_verdict;
+}
+
+int
+GetFailModeDelayedVerdict(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return NANO_OK;
+    }
+    return attachment->fail_mode_delayed_verdict;
+}
+
+int
+GetNumOfConnectionAttempts(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 0;
+    }
+    return attachment->num_of_connection_attempts;
+}
+
+unsigned int
+GetFailOpenTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 50;
+    }
+    return attachment->fail_open_timeout;
+}
+
+unsigned int
+GetFailOpenDelayedTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 150;
+    }
+    return attachment->fail_open_delayed_timeout;
+}
+
+AttachmentVerdict
+GetSessionsPerMinuteLimitVerdict(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return ATTACHMENT_VERDICT_ACCEPT;
+    }
+    return attachment->sessions_per_minute_limit_verdict;
+}
+
+unsigned int
+GetMaxSessionsPerMinute(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 0;
+    }
+    return attachment->max_sessions_per_minute;
+}
+
+unsigned int
+GetRegistrationThreadTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 100;
+    }
+    return attachment->registration_thread_timeout_msec;
+}
+
+unsigned int
+GetReqStartThreadTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 100;
+    }
+    return attachment->req_start_thread_timeout_msec;
+}
+
+unsigned int
+GetReqHeaderThreadTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 100;
+    }
+    return attachment->req_header_thread_timeout_msec;
+}
+
+unsigned int
+GetReqBodyThreadTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 150;
+    }
+    return attachment->req_body_thread_timeout_msec;
+}
+
+unsigned int
+GetResHeaderThreadTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 100;
+    }
+    return attachment->res_header_thread_timeout_msec;
+}
+
+unsigned int
+GetResBodyThreadTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 150;
+    }
+    return attachment->res_body_thread_timeout_msec;
+}
+
+unsigned int
+GetWaitingForVerdictThreadTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 150;
+    }
+    return attachment->waiting_for_verdict_thread_timeout_msec;
+}
+
+unsigned int
+GetHoldVerdictRetries(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 10;
+    }
+    return attachment->hold_verdict_retries;
+}
+
+unsigned int
+GetHoldVerdictPollingTime(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 1;
+    }
+    return attachment->hold_verdict_polling_time;
+}
+
+unsigned int
+GetMetricTimeout(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 100;
+    }
+    return attachment->metric_timeout_timeout;
+}
+
+unsigned int
+GetNumOfNanoIpcElements(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 200;
+    }
+    return attachment->num_of_nano_ipc_elements;
+}
+
+uint64_t
+GetKeepAliveInterval(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 0;
+    }
+    return attachment->keep_alive_interval_msec;
+}
+
+unsigned int
+GetIsAsyncModeEnabled(NanoAttachment *attachment)
+{
+    if (attachment == NULL) {
+        return 0;
+    }
+    return attachment->is_async_mode_enabled;
 }
