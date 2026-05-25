@@ -897,8 +897,8 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
         }
     }
 
-    // Initialize secondary sync IPC channel
-    if (nano_service_secondary_sync_ipc == NULL) {
+    // Initialize secondary sync IPC channel (only needed in async mode)
+    if (is_async_mode_enabled && nano_service_secondary_sync_ipc == NULL) {
         char secondary_unique_id[MAX_NGINX_UID_LEN + 10]; // Extra space for suffix
         snprintf(secondary_unique_id, sizeof(secondary_unique_id), "%s_sync", unique_id);
         
@@ -995,21 +995,23 @@ restart_communication(ngx_http_request_t *request)
     nano_service_ipc = initIpc(unique_id, nginx_user_id, nginx_group_id, 0, num_of_nginx_ipc_elements, &logging_data, shmem_ipc_2_write_dbg_wrapper);
     if (nano_service_ipc == NULL) return -2;
     
-    // Reinitialize secondary sync IPC
-    char secondary_unique_id[MAX_NGINX_UID_LEN + 10]; // Extra space for suffix
-    snprintf(secondary_unique_id, sizeof(secondary_unique_id), "%s_sync", unique_id);
+    // Reinitialize secondary sync IPC (only needed in async mode)
+    if (is_async_mode_enabled) {
+        char secondary_unique_id[MAX_NGINX_UID_LEN + 10]; // Extra space for suffix
+        snprintf(secondary_unique_id, sizeof(secondary_unique_id), "%s_sync", unique_id);
 
-    nano_service_secondary_sync_ipc = initIpc(
-        secondary_unique_id,
-        nginx_user_id,
-        nginx_group_id,
-        0,
-        200,
-        &logging_data,
-        shmem_ipc_2_write_dbg_wrapper
-    );
+        nano_service_secondary_sync_ipc = initIpc(
+            secondary_unique_id,
+            nginx_user_id,
+            nginx_group_id,
+            0,
+            200,
+            &logging_data,
+            shmem_ipc_2_write_dbg_wrapper
+        );
 
-    if (nano_service_secondary_sync_ipc == NULL) return -3;
+        if (nano_service_secondary_sync_ipc == NULL) return -3;
+    }
     
     return 0;
 }
@@ -1058,7 +1060,10 @@ handle_shmem_corruption()
 ngx_int_t
 isIpcReady()
 {
-    return nano_service_ipc != NULL && nano_service_secondary_sync_ipc != NULL && comm_socket > 0 && secondary_comm_socket > 0;
+    return nano_service_ipc != NULL &&
+        (!is_async_mode_enabled || nano_service_secondary_sync_ipc != NULL) &&
+        comm_socket > 0 &&
+        secondary_comm_socket > 0;
 }
 
 void

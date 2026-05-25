@@ -880,8 +880,8 @@ nano_attachment_init_process(NanoAttachment *attachment)
         }
     }
 
-    // Initialize secondary sync IPC channel for async responses
-    if (attachment->nano_service_sync_ipc == NULL) {
+    // Initialize secondary sync IPC channel (only needed in async mode)
+    if (attachment->is_async_mode_enabled && attachment->nano_service_sync_ipc == NULL) {
         char secondary_unique_id[MAX_NGINX_UID_LEN + 10]; // Extra space for suffix
         snprintf(secondary_unique_id, sizeof(secondary_unique_id), "%s_sync", attachment->unique_id);
         write_dbg(attachment, 0, DBG_LEVEL_INFO, "Initializing secondary sync IPC channel");
@@ -955,18 +955,20 @@ restart_communication(NanoAttachment *attachment)
         return NANO_ERROR;
     }
 
-    attachment->nano_service_sync_ipc = initIpc(
-        attachment->unique_id,
-        attachment->nano_user_id,
-        attachment->nano_group_id,
-        0,
-        attachment->num_of_nano_ipc_elements,
-        attachment->logging_data,
-        write_dbg_impl
-    );
-    if (attachment->nano_service_sync_ipc == NULL) {
-        write_dbg(attachment, 0, DBG_LEVEL_DEBUG, "Failed to init secondary sync IPC");
-        return NANO_ERROR;
+    if (attachment->is_async_mode_enabled) {
+        attachment->nano_service_sync_ipc = initIpc(
+            attachment->unique_id,
+            attachment->nano_user_id,
+            attachment->nano_group_id,
+            0,
+            attachment->num_of_nano_ipc_elements,
+            attachment->logging_data,
+            write_dbg_impl
+        );
+        if (attachment->nano_service_sync_ipc == NULL) {
+            write_dbg(attachment, 0, DBG_LEVEL_DEBUG, "Failed to init secondary sync IPC");
+            return NANO_ERROR;
+        }
     }
 
     return NANO_OK;
