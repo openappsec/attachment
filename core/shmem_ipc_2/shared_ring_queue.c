@@ -26,24 +26,106 @@
 
 #include "shared_ipc_debug.h"
 
+#define AGENT_METADATA_FILE_PATH "/dev/shm/agent-metadata"
+
 static const uint16_t empty_buff_mgmt_magic = 0xfffe;
 static const uint16_t skip_buff_mgmt_magic = 0xfffd;
 static const uint32_t max_write_size = 0xfffc;
 const uint16_t max_num_of_data_segments = sizeof(DataSegment)/sizeof(uint16_t);
+
+static uint16_t g_effective_segment_size = 0;
+static int g_effective_size_initialized = 0;
+
+static int
+isLargerDataSegmentSupported()
+{
+    struct stat st;
+    FILE *file;
+    char *line = NULL;
+    size_t len = 0;
+    ssize_t read_len;
+    char *effective_size_str;
+
+    effective_size_str = getenv("EFFECTIVE_SHM_SEGMENT_SIZE");
+    if (effective_size_str != NULL) {
+        return (atoi(effective_size_str) > SHARED_MEMORY_SEGMENT_ENTRY_SIZE_BC) ? 1 : 0;
+    }
+
+    if (stat(AGENT_METADATA_FILE_PATH, &st) != 0) {
+        return 0;
+    }
+
+    file = fopen(AGENT_METADATA_FILE_PATH, "r");
+    if (file == NULL) {
+        return 0;
+    }
+
+    while ((read_len = getline(&line, &len, file)) != -1) {
+        if (read_len > 0 && line[read_len - 1] == '\n') {
+            line[read_len - 1] = '\0';
+        }
+        char *eq_pos = strchr(line, '=');
+        if (eq_pos != NULL) {
+            *eq_pos = '\0';
+            char *key = line;
+            char *value = eq_pos + 1;
+            if (strlen(key) > 0 && strlen(value) > 0) {
+                setenv(key, value, 1);
+            }
+        }
+    }
+    free(line);
+    fclose(file);
+
+    effective_size_str = getenv("EFFECTIVE_SHM_SEGMENT_SIZE");
+    if (effective_size_str != NULL) {
+        return (atoi(effective_size_str) > SHARED_MEMORY_SEGMENT_ENTRY_SIZE_BC) ? 1 : 0;
+    }
+
+    return 0;
+}
+
+static uint16_t
+getEffectiveSegmentSize()
+{
+    if (!g_effective_size_initialized) {
+        g_effective_size_initialized = 1;
+        g_effective_segment_size = isLargerDataSegmentSupported() ? sizeof(DataSegment) : sizeof(DataSegmentBC);
+    }
+    return g_effective_segment_size;
+}
+
+static uint32_t
+getEffectiveSharedRingQueueSize()
+{
+    return (sizeof(SharedRingQueue) - sizeof(DataSegment)) + getEffectiveSegmentSize();
+}
+
+static char *
+getDataSegmentAddress(SharedRingQueue *queue, uint16_t segment_idx)
+{
+    uint16_t effective_segment_size = getEffectiveSegmentSize();
+    if (effective_segment_size == SHARED_MEMORY_SEGMENT_ENTRY_SIZE) {
+        return queue->data_segment[segment_idx].data;
+    }
+    char *queue_data_start = (char*)queue + sizeof(SharedRingQueue) - sizeof(DataSegment) + effective_segment_size;
+    return queue_data_start + (segment_idx * effective_segment_size);
+}
 
 // LCOV_EXCL_START Reason: Handing it to Envoy prototype development
 
 static int
 getNumOfDataSegmentsNeeded(LoggingData *logging_data, uint16_t data_size)
 {
-    int res = (data_size + SHARED_MEMORY_SEGMENT_ENTRY_SIZE - 1) / SHARED_MEMORY_SEGMENT_ENTRY_SIZE;
+    uint16_t effective_entry_size = getEffectiveSegmentSize();
+    int res = (data_size + effective_entry_size - 1) / effective_entry_size;
     writeDebug(
         logging_data,
         TraceLevel,
         "Checking amount of segments needed. Res: %d, data size: %u, shmem entry size: %u",
         res,
         data_size,
-        SHARED_MEMORY_SEGMENT_ENTRY_SIZE
+        effective_entry_size
     );
     return res;
 }
@@ -167,6 +249,9 @@ createSharedRingQueue(
 
     writeDebug(logging_data, TraceLevel, "Creating a new shared ring queue");
 
+    g_effective_size_initialized = 0;
+    g_effective_segment_size = 0;
+
     if (num_of_data_segments > max_num_of_data_segments) {
         writeDebug(
             logging_data,
@@ -192,7 +277,9 @@ createSharedRingQueue(
         return NULL;
     }
 
-    size_of_memory = sizeof(SharedRingQueue) + (num_of_data_segments * sizeof(DataSegment));
+    uint16_t effective_seg_size = getEffectiveSegmentSize();
+    uint32_t effective_queue_size = getEffectiveSharedRingQueueSize();
+    size_of_memory = effective_queue_size + (num_of_data_segments * effective_seg_size);
     if (is_owner && ftruncate(fd, size_of_memory + 1) != 0) {
         writeDebug(
             logging_data,
@@ -335,8 +422,8 @@ dumpRingQueueShmem(LoggingData *logging_data, SharedRingQueue *queue)
             segment_idx,
             buffer_mgmt[segment_idx]
         );
-        for (data_idx = 0; data_idx < SHARED_MEMORY_SEGMENT_ENTRY_SIZE; data_idx++) {
-            data_byte = queue->data_segment[segment_idx].data[data_idx];
+        for (data_idx = 0; data_idx < getEffectiveSegmentSize(); data_idx++) {
+            data_byte = getDataSegmentAddress(queue, segment_idx)[data_idx];
             writeDebug(logging_data, WarningLevel, isprint(data_byte) ? "%c" : "%02X", data_byte);
         }
     }
@@ -396,7 +483,7 @@ peekToQueue(
     if (read_pos == global_data->g_num_of_data_segments) read_pos = 0;
 
     *output_buffer_size = buffer_mgmt[read_pos];
-    *output_buffer = queue->data_segment[read_pos].data;
+    *output_buffer = getDataSegmentAddress(queue, read_pos);
 
     queue->read_pos = read_pos;
 
@@ -503,7 +590,7 @@ pushBuffersToQueue(
     );
 
     buffer_mgmt[write_pos] = total_elem_size;
-    current_copy_pos = queue->data_segment[write_pos].data;
+    current_copy_pos = getDataSegmentAddress(queue, write_pos);
     for (idx = 0; idx < num_of_input_buffers; idx++) {
         writeDebug(
             logging_data,
