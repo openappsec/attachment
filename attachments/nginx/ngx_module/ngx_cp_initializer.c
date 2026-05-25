@@ -475,6 +475,10 @@ init_signaling_socket()
 
     write_dbg(DBG_LEVEL_WARNING, "Successfully connected on client socket %d", comm_socket);
 
+    if (!is_async_mode_enabled) {
+        return NGX_OK;
+    }
+
     if (secondary_comm_socket > 0) {
         close(secondary_comm_socket);
         secondary_comm_socket = -1;
@@ -856,7 +860,7 @@ ngx_cp_attachment_init_process(ngx_http_request_t *request)
         set_need_registration(REGISTERED);
     }
 
-    if (comm_socket < 0 || secondary_comm_socket < 0 || is_async_toggled_in_last_reconfig()) {
+    if (comm_socket < 0 || (is_async_mode_enabled && secondary_comm_socket < 0) || is_async_toggled_in_last_reconfig()) {
         write_dbg(DBG_LEVEL_DEBUG, "Registering to nano service");
         if (init_signaling_socket() == NGX_ERROR) {
             write_dbg(DBG_LEVEL_DEBUG, "Failed to register to the Nano Service");
@@ -1061,9 +1065,8 @@ ngx_int_t
 isIpcReady()
 {
     return nano_service_ipc != NULL &&
-        (!is_async_mode_enabled || nano_service_secondary_sync_ipc != NULL) &&
         comm_socket > 0 &&
-        secondary_comm_socket > 0;
+        (!is_async_mode_enabled || (nano_service_secondary_sync_ipc != NULL && secondary_comm_socket > 0));
 }
 
 void
