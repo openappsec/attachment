@@ -29,6 +29,7 @@
 
 // Attachment metadata file path
 #define ATTACHMENT_METADATA_FILE_PATH "/dev/shm/attachment-metadata"
+#define AGENT_METADATA_FILE_PATH "/dev/shm/agent-metadata"
 #define DUAL_DOCKER_NGINX_FILE "/etc/dual_docker_nginx"
 
 static const uint16_t empty_buff_mgmt_magic = 0xfffe;
@@ -167,15 +168,15 @@ isLargerDataSegmentSupported()
         return (effective_size > SHARED_MEMORY_SEGMENT_ENTRY_SIZE_BC) ? 1 : 0;
     }
     
-    if (stat(ATTACHMENT_METADATA_FILE_PATH, &st) != 0) {
-        writeDebug(WarningLevel, "Attachment metadata file does not exist: %s", ATTACHMENT_METADATA_FILE_PATH);
+    if (stat(AGENT_METADATA_FILE_PATH, &st) != 0) {
+        writeDebug(WarningLevel, "Agent metadata file not found, assuming old agent (1k segment): %s", AGENT_METADATA_FILE_PATH);
         return 0;
     }
-    
-    file = fopen(ATTACHMENT_METADATA_FILE_PATH, "r");
+
+    file = fopen(AGENT_METADATA_FILE_PATH, "r");
     if (file == NULL) {
-        writeDebug(WarningLevel, "Failed to open attachment metadata file: %s", ATTACHMENT_METADATA_FILE_PATH);
-        return 1;
+        writeDebug(WarningLevel, "Failed to open agent metadata file: %s", AGENT_METADATA_FILE_PATH);
+        return 0;
     }
     
     while ((read_len = getline(&line, &len, file)) != -1) {
@@ -202,11 +203,12 @@ isLargerDataSegmentSupported()
     effective_size_str = getenv("EFFECTIVE_SHM_SEGMENT_SIZE");
     if (effective_size_str != NULL) {
         int effective_size = atoi(effective_size_str);
-        writeDebug(TraceLevel, "Found EFFECTIVE_SHM_SEGMENT_SIZE from metadata: %d", effective_size);
+        writeDebug(TraceLevel, "Found EFFECTIVE_SHM_SEGMENT_SIZE from agent metadata: %d", effective_size);
         return (effective_size > SHARED_MEMORY_SEGMENT_ENTRY_SIZE_BC) ? 1 : 0;
     }
-    
-    return 1;
+
+    writeDebug(WarningLevel, "Agent metadata file present but EFFECTIVE_SHM_SEGMENT_SIZE not found, defaulting to 1k");
+    return 0;
 }
 
 static uint16_t
