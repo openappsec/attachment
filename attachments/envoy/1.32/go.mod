@@ -10,7 +10,7 @@ require (
 	google.golang.org/protobuf v1.35.1
 )
 
-require github.com/go-chi/chi/v5 v5.1.0
+require github.com/go-chi/chi/v5 v5.2.2
 
 require (
 	github.com/envoyproxy/protoc-gen-validate v1.0.2 // indirect

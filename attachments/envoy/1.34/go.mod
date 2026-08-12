@@ -6,11 +6,11 @@ go 1.24
 // NOTICE: these lines could be generated automatically by "go mod tidy"
 require (
 	github.com/cncf/xds/go v0.0.0-20231128003011-0fa0005c9caa
-	github.com/envoyproxy/envoy v1.34.5
+	github.com/envoyproxy/envoy v1.34.13
 	google.golang.org/protobuf v1.36.6
 )
 
-require github.com/go-chi/chi/v5 v5.1.0
+require github.com/go-chi/chi/v5 v5.2.2
 
 require (
 	github.com/envoyproxy/protoc-gen-validate v1.0.2 // indirect
