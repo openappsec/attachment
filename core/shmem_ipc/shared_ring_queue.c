@@ -258,6 +258,52 @@ getEffectiveEntrySize()
     return g_effective_entry_size;
 }
 
+// Fixed header prefix shared by every released SharedRingQueue layout (fields before mgmt_segment).
+#define SHARED_RING_QUEUE_HEADER_PREFIX_SIZE (offsetof(SharedRingQueue, mgmt_segment))
+
+static uint16_t
+deriveSegmentSizeFromExistingQueue(int fd, const char *shared_location_name)
+{
+    struct stat st;
+    SharedRingQueue header;
+    uint32_t payload_size;
+    uint32_t divisor;
+    uint32_t derived_size;
+
+    if (fstat(fd, &st) != 0) return 0;
+    if ((size_t)st.st_size < SHARED_RING_QUEUE_HEADER_PREFIX_SIZE) return 0;
+
+    if (pread(fd, &header, SHARED_RING_QUEUE_HEADER_PREFIX_SIZE, 0) !=
+        (ssize_t)SHARED_RING_QUEUE_HEADER_PREFIX_SIZE)
+    {
+        return 0;
+    }
+
+    if (header.num_of_data_segments == 0 || header.num_of_data_segments > max_num_of_data_segments) return 0;
+    if (header.size_of_memory <= (int32_t)SHARED_RING_QUEUE_HEADER_PREFIX_SIZE) return 0;
+
+    // The owner stamped: size_of_memory = header prefix + (num_of_data_segments + 1) * segment size
+    // (the extra segment is the management segment). Accept the derived size only if it reconstructs
+    // the stamped memory size exactly and is one of the two sizes ever released.
+    payload_size = header.size_of_memory - SHARED_RING_QUEUE_HEADER_PREFIX_SIZE;
+    divisor = (uint32_t)header.num_of_data_segments + 1;
+    derived_size = payload_size / divisor;
+    if (derived_size * divisor != payload_size) return 0;
+    if (derived_size != SHARED_MEMORY_SEGMENT_ENTRY_SIZE && derived_size != SHARED_MEMORY_SEGMENT_ENTRY_SIZE_BC) {
+        return 0;
+    }
+
+    writeDebug(
+        DebugLevel,
+        "Derived segment size %u from existing shared memory queue '%s' (memory size: %d, data segments: %u)",
+        derived_size,
+        shared_location_name,
+        header.size_of_memory,
+        header.num_of_data_segments
+    );
+    return (uint16_t)derived_size;
+}
+
 static uint32_t
 getEffectiveSharedRingQueueSize()
 {
@@ -399,9 +445,6 @@ createSharedRingQueue(const char *shared_location_name, uint16_t num_of_data_seg
         return NULL;
     }
 
-    uint16_t effective_size = getEffectiveSegmentSize();
-    uint32_t effective_queue_size = getEffectiveSharedRingQueueSize();
-
     fd = shm_open(shared_location_name, shmem_fd_flags, S_IRWXU | S_IRWXG | S_IRWXO);
     if (fd == -1) {
         writeDebug(
@@ -413,6 +456,28 @@ createSharedRingQueue(const char *shared_location_name, uint16_t num_of_data_seg
         return NULL;
     }
 
+    // Backward compatibility with mixed agent/attachment versions: when attaching to a queue
+    // the owner already created, the geometry stamped in its header is authoritative - metadata
+    // files and environment variables only describe intent and can disagree with what the owner
+    // actually built (which ends in an isCorruptedQueue fail-open loop).
+    if (!is_owner) {
+        uint16_t adopted_size = deriveSegmentSizeFromExistingQueue(fd, shared_location_name);
+        if (adopted_size != 0 && adopted_size != getEffectiveSegmentSize()) {
+            writeDebug(
+                WarningLevel,
+                "Adopting segment size %u from existing shared memory queue '%s' (negotiated size was %u)",
+                adopted_size,
+                shared_location_name,
+                g_effective_segment_size
+            );
+            g_effective_segment_size = adopted_size;
+            g_effective_entry_size = adopted_size;
+            g_effective_size_initialized = 1;
+        }
+    }
+
+    uint16_t effective_size = getEffectiveSegmentSize();
+    uint32_t effective_queue_size = getEffectiveSharedRingQueueSize();
     size_of_memory = effective_queue_size + (num_of_data_segments * effective_size);
     if (is_owner && ftruncate(fd, size_of_memory + 1) != 0) {
         writeDebug(
