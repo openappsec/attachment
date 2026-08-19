@@ -218,7 +218,8 @@ get_need_registration()
 }
 
 void *
-register_workers() {
+register_workers(void *arg) {
+    (void)arg;
     int num_of_workers = get_saved_num_of_workers();
 
     if (num_of_workers == 0) {
