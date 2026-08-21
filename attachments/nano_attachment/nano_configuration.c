@@ -114,7 +114,7 @@ init_attachment_config(NanoAttachment *attachment, const char *conf_path)
         "static resources path: %s, "
         "num of nginx ipc elements: %u, "
         "keep alive interval msec: %u msec, "
-        "paired affinity enabled: %u",
+        "paired affinity enabled: %u, "
         "async mode: %u",
         attachment->inspection_mode,
         attachment->dbg_level,
